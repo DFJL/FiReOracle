@@ -600,7 +600,154 @@ CREATE POLICY sheets_sync_log_user_only ON sheets_sync_log
 
 
 -- =============================================================================
--- SECTION 9: SEED DATA
+-- SECTION 9: ACCOUNT BALANCE SNAPSHOTS  (Control multimoney)
+-- Manual real-balance recordings per account at each period cut.
+-- These sit alongside the main transaction table as lateral annotations.
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- financial_accounts  (named pools of money the user owns or tracks)
+-- Represents both real bank accounts and virtual savings envelopes.
+-- ---------------------------------------------------------------------------
+CREATE TABLE financial_accounts (
+    id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id       UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name          TEXT        NOT NULL,                    -- e.g. "BAC Débito", "FU Money", "Ahorro Viaje"
+    account_type  TEXT        NOT NULL
+                      CHECK (account_type IN (
+                          'checking',    -- cuentas corrientes / débito (BAC, BNCR, Popular)
+                          'savings',     -- fondos de ahorro (FU Money, trips, hijas)
+                          'investment',  -- fondos de inversión (Multimoney, BNFONDOS, Dominion, Transcomer)
+                          'credit',      -- tarjetas de crédito
+                          'cash',        -- efectivo
+                          'other'
+                      )),
+    currency_code CHAR(3)     NOT NULL REFERENCES currencies(code),
+    bank_name     TEXT,                                    -- e.g. "BAC Credomatic", "BNCR"
+    is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
+    notes         TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  financial_accounts              IS 'Named money pools: real bank accounts + virtual savings envelopes tracked in "Control multimoney".';
+COMMENT ON COLUMN financial_accounts.account_type IS 'checking/savings/investment/credit/cash/other. Savings and investment types are virtual envelopes, not necessarily separate bank accounts.';
+
+CREATE INDEX idx_financial_accounts_user_id ON financial_accounts (user_id);
+
+ALTER TABLE financial_accounts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY financial_accounts_user_only ON financial_accounts
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- account_balance_snapshots  (the "Control multimoney" recordings)
+-- At each period cut (corte) the user manually records the real balance of
+-- each account so the system can compare against the running theoretical total.
+-- ---------------------------------------------------------------------------
+CREATE TABLE account_balance_snapshots (
+    id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    account_id      UUID          NOT NULL REFERENCES financial_accounts(id) ON DELETE CASCADE,
+    snapshot_date   DATE          NOT NULL,
+    real_balance    NUMERIC(15,2) NOT NULL,                -- manually confirmed real balance
+    system_balance  NUMERIC(15,2),                         -- what the running total shows
+    difference      NUMERIC(15,2)
+        GENERATED ALWAYS AS (real_balance - COALESCE(system_balance, real_balance)) STORED,
+    period_label    TEXT,                                  -- e.g. "Q1 Enero 2024", "Corte Feb-15-2022"
+    notes           TEXT,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  account_balance_snapshots               IS 'Periodic real-balance readings per account (Control multimoney). Compared against the system running balance to surface discrepancies.';
+COMMENT ON COLUMN account_balance_snapshots.real_balance  IS 'Balance confirmed from the actual bank statement or app.';
+COMMENT ON COLUMN account_balance_snapshots.system_balance IS 'Balance computed by summing transactions in FiReOracle — may differ from real_balance due to unlogged transactions.';
+COMMENT ON COLUMN account_balance_snapshots.difference    IS 'real_balance - system_balance. Non-zero means there are unrecorded transactions.';
+
+CREATE INDEX idx_balance_snapshots_account      ON account_balance_snapshots (account_id, snapshot_date DESC);
+CREATE INDEX idx_balance_snapshots_user_date    ON account_balance_snapshots (user_id, snapshot_date DESC);
+
+ALTER TABLE account_balance_snapshots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY balance_snapshots_user_only ON account_balance_snapshots
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+
+-- =============================================================================
+-- SECTION 10: SELF-LOANS  (Autopréstamos)
+-- Internal loans between the user's own savings buckets/accounts.
+-- e.g. "I took ₡300k from Ahorro Viaje to cover an emergency. I owe it back."
+-- =============================================================================
+
+CREATE TABLE self_loans (
+    id                  UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    source_account_id   UUID          NOT NULL REFERENCES financial_accounts(id),
+                                                              -- the account/fund that was borrowed FROM
+    description         TEXT          NOT NULL,               -- e.g. "Préstamo de ahorro viaje para reparación carro"
+    original_amount     NUMERIC(15,2) NOT NULL,
+    currency_code       CHAR(3)       NOT NULL REFERENCES currencies(code),
+    loan_date           DATE          NOT NULL,
+    due_date            DATE,                                 -- optional target repayment date
+    linked_transaction_id UUID        REFERENCES transactions(id),
+                                                              -- the expense transaction that triggered this loan
+    status              TEXT          NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','partial','paid','forgiven')),
+    amount_repaid       NUMERIC(15,2) NOT NULL DEFAULT 0,
+    balance_remaining   NUMERIC(15,2)
+        GENERATED ALWAYS AS (original_amount - amount_repaid) STORED,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  self_loans                       IS 'Autopréstamos: internal loans taken from a savings bucket to cover an expense, to be paid back to that same bucket.';
+COMMENT ON COLUMN self_loans.source_account_id     IS 'The savings fund that was temporarily raided (e.g. Ahorro Viaje, FU Money).';
+COMMENT ON COLUMN self_loans.balance_remaining     IS 'original_amount - amount_repaid. When 0 the loan is paid off.';
+COMMENT ON COLUMN self_loans.linked_transaction_id IS 'Optional FK to the transaction that caused this self-loan.';
+
+CREATE INDEX idx_self_loans_user_id       ON self_loans (user_id);
+CREATE INDEX idx_self_loans_source        ON self_loans (source_account_id);
+CREATE INDEX idx_self_loans_status        ON self_loans (user_id, status) WHERE status != 'paid';
+
+ALTER TABLE self_loans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY self_loans_user_only ON self_loans
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- self_loan_payments  (repayments to own savings bucket)
+-- ---------------------------------------------------------------------------
+CREATE TABLE self_loan_payments (
+    id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+    self_loan_id    UUID          NOT NULL REFERENCES self_loans(id) ON DELETE CASCADE,
+    payment_date    DATE          NOT NULL,
+    amount          NUMERIC(15,2) NOT NULL,
+    linked_transaction_id UUID    REFERENCES transactions(id),
+    notes           TEXT,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE self_loan_payments IS 'Individual repayment installments against a self_loan.';
+
+CREATE INDEX idx_self_loan_payments_loan ON self_loan_payments (self_loan_id);
+
+ALTER TABLE self_loan_payments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY self_loan_payments_user_only ON self_loan_payments
+    USING (
+        auth.uid() = (SELECT user_id FROM self_loans sl WHERE sl.id = self_loan_id)
+    )
+    WITH CHECK (
+        auth.uid() = (SELECT user_id FROM self_loans sl WHERE sl.id = self_loan_id)
+    );
+
+
+-- =============================================================================
+-- SECTION 11: SEED DATA
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -720,3 +867,17 @@ VALUES
     ('CASH_WITHDRAWAL',     'Retiro de efectivo',        'TRANSFER','transfer','na',                   FALSE, 2001)
 
 ON CONFLICT (code) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- financial_accounts  — seed known accounts from spreadsheet lateral columns
+-- NOTE: These are inserted for the system user only; real user rows are
+-- created via the app after sign-up. This seed block is a reference template.
+-- ---------------------------------------------------------------------------
+-- Account names observed in the "Control multimoney" lateral columns:
+--   BAC (checking), BNCR (savings/checking), Multimoney (BAC investment fund),
+--   BNFONDOS (BNCR mutual fund), BCR, Popular, Scotiabank,
+--   trips / ahorro viaje, fu money, transitorio bncr, ahorros transito,
+--   deposito garantia
+--
+-- These will be created per-user at onboarding via the app UI.
+-- No seed INSERT here — user_id is required and unknown at migration time.

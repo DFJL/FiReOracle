@@ -144,6 +144,41 @@ Budget tabs (quincenal, aguinaldo, bono) are mapped to `budget_periods` +
 | `liquidacionSindy` | `network_entries` + `network_payments` |
 | `Hoja1` (budget workbook) | `investment_snapshots` (Mariam fund) |
 
+### Control multimoney — lateral balance columns
+
+The `movimientos` sheet appends key-value pairs after column 22 on `Corte`
+rows to record the actual real balance of each account at that cut point.
+These are **not** a separate tab — they're extra columns on the same row.
+
+Account names seen in the history:
+`BAC`, `BNCR`, `Multimoney`, `BNFONDOS`, `BCR`, `Popular`, `Scotiabank`,
+`trips`, `fu money`, `transitorio bncr`, `ahorros transito`, `deposito garantia`
+
+The sync parser detects these pairs starting at column index 23+ on any row
+where `period_cut = 'Corte'` and upserts them into `account_balance_snapshots`,
+using the row's date as `snapshot_date`.
+
+This allows FiReOracle to surface discrepancies between the running theoretical
+balance (from transaction sum) and the real balance (what the bank shows).
+
+### Autopréstamos — self-loans between own funds
+
+When a `Detalle` or `Concepto` value matches patterns like:
+- `"[fondo] debe [fondo]"`
+- `"prestamo de [fondo]"`
+- `"tomar de [fondo]"`
+
+…the parser auto-creates a `self_loans` record with `status = 'pending'`
+linking the expense transaction to the source `financial_account` (savings bucket).
+
+Examples found in the spreadsheet data:
+- `"liquido debe a baño"` → baño fund borrowed from liquido fund
+- `"trips(en dolares) debe a liquido"` → trips fund borrowed from liquido
+- `"aguinaldo debe liquido(muñeca emma)"` → aguinaldo owes back to liquido
+
+Repayments are recorded via the app UI and tracked in `self_loan_payments`,
+automatically updating `self_loans.amount_repaid` and `status`.
+
 ---
 
 ## Sync flow detail
