@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { completeSetup, AccountInput } from '@/app/actions/setup'
+import { useState, useTransition, useEffect } from 'react'
+import { completeSetup, detectAccountsFromTransactions, AccountInput } from '@/app/actions/setup'
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -187,11 +187,13 @@ function StepCuentas({
   onChange,
   onBack,
   onNext,
+  detectedAccounts,
 }: {
   accounts: AccountInput[]
   onChange: (a: AccountInput[]) => void
   onBack: () => void
   onNext: () => void
+  detectedAccounts: AccountInput[] | null
 }) {
   function update(i: number, field: keyof AccountInput, value: string) {
     const next = [...accounts]
@@ -220,6 +222,41 @@ function StepCuentas({
       <p className="text-sm text-zinc-500 mb-5">
         Agregá tus cuentas bancarias y el saldo actual de cada una. Podés completar esto después.
       </p>
+
+      {/* Auto-detected from transaction history */}
+      {detectedAccounts && detectedAccounts.length > 0 && (
+        <div className="mb-5 rounded-xl bg-blue-500/[0.06] border border-blue-500/20 p-4">
+          <p className="text-xs font-semibold text-blue-400 mb-1">Detectado desde tu historial</p>
+          <p className="text-xs text-zinc-500 mb-3">
+            Saldos estimados de la primera transacción registrada. Podés editarlos.
+          </p>
+          <div className="space-y-1.5 mb-3">
+            {detectedAccounts.map((d) => (
+              <div key={d.name} className="flex items-center justify-between text-xs">
+                <span className="text-zinc-300">{d.name}</span>
+                <span className="text-zinc-400 tabular-nums">
+                  {new Intl.NumberFormat('es-CR', { style: 'currency', currency: d.currency_code, maximumFractionDigits: 0 }).format(parseFloat(d.initial_balance))}
+                </span>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              const merged = [...accounts]
+              for (const d of detectedAccounts) {
+                const idx = merged.findIndex((a) => a.name === d.name)
+                if (idx >= 0) merged[idx] = { ...merged[idx], initial_balance: d.initial_balance }
+                else merged.push(d)
+              }
+              // remove blank placeholder if present
+              onChange(merged.filter((a) => a.name.trim() !== '' || detectedAccounts.some((d) => d.name === a.name)))
+            }}
+            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+          >
+            Usar estos saldos
+          </button>
+        </div>
+      )}
 
       {/* Suggestions */}
       <div className="mb-5">
@@ -479,6 +516,7 @@ interface ExistingProfile {
 export function SetupWizard({ userEmail, existing }: { userEmail: string; existing?: ExistingProfile }) {
   const [step, setStep] = useState(0)
   const [isPending, startTransition] = useTransition()
+  const [detectedAccounts, setDetectedAccounts] = useState<AccountInput[] | null>(null)
 
   const [profile, setProfile] = useState<ProfileData>({
     display_name: existing?.display_name ?? '',
@@ -488,6 +526,12 @@ export function SetupWizard({ userEmail, existing }: { userEmail: string; existi
   })
 
   const [accounts, setAccounts] = useState<AccountInput[]>([blank()])
+
+  useEffect(() => {
+    detectAccountsFromTransactions().then((detected) => {
+      if (detected.length > 0) setDetectedAccounts(detected)
+    })
+  }, [])
 
   function handleSubmit() {
     startTransition(async () => {
@@ -531,6 +575,7 @@ export function SetupWizard({ userEmail, existing }: { userEmail: string; existi
               onChange={setAccounts}
               onBack={() => setStep(0)}
               onNext={() => setStep(2)}
+              detectedAccounts={detectedAccounts}
             />
           )}
           {step === 2 && (
