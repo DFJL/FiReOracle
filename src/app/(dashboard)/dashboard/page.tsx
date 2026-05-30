@@ -25,8 +25,11 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [statsRes, recentRes, categoryRes] = await Promise.all([
-    supabase.rpc('get_dashboard_stats'),
+  const [rawRes, recentRes, categoryRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('movement_type, amount, date')
+      .not('amount', 'is', null),
     supabase
       .from('transactions')
       .select('date, vendor, concept, category_code, movement_type, amount, currency_code')
@@ -41,29 +44,16 @@ export default async function DashboardPage() {
       .not('category_code', 'is', null),
   ])
 
-  // Fallback: compute stats client-side if RPC doesn't exist
-  type StatsRow = { total_income: number; total_expenses: number; net: number; tx_count: number; earliest: string; latest: string }
-  let stats: StatsRow | null = (statsRes.data?.[0] as unknown as StatsRow) ?? null
-
-  if (!stats) {
-    const { data: raw } = await supabase
-      .from('transactions')
-      .select('movement_type, amount, date')
-      .not('amount', 'is', null)
-
-    if (raw) {
-      const income = raw.filter((r) => r.movement_type === 'income').reduce((s, r) => s + Number(r.amount), 0)
-      const expenses = raw.filter((r) => r.movement_type === 'expense').reduce((s, r) => s + Number(r.amount), 0)
-      const dates = raw.map((r) => r.date).filter(Boolean).sort()
-      stats = {
-        total_income: income,
-        total_expenses: expenses,
-        net: income - expenses,
-        tx_count: raw.length,
-        earliest: dates[0] ?? '',
-        latest: dates[dates.length - 1] ?? '',
-      }
-    }
+  const raw = rawRes.data ?? []
+  const income = raw.filter((r) => r.movement_type === 'income').reduce((s, r) => s + Number(r.amount), 0)
+  const expenses = raw.filter((r) => r.movement_type === 'expense').reduce((s, r) => s + Number(r.amount), 0)
+  const dates = raw.map((r) => r.date).filter(Boolean).sort() as string[]
+  const stats = {
+    total_income: income,
+    total_expenses: expenses,
+    tx_count: raw.length,
+    earliest: dates[0] ?? '',
+    latest: dates[dates.length - 1] ?? '',
   }
 
   // Top expense categories
