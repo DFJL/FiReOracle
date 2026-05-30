@@ -96,6 +96,42 @@ export async function completeSetup(data: SetupInput) {
   redirect('/resumen')
 }
 
+/** Loads existing accounts + their most recent balance snapshot from the DB. */
+export async function loadExistingAccounts(): Promise<AccountInput[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const { data: accounts } = await supabase
+    .from('financial_accounts')
+    .select('id, name, account_type, bank_name, currency_code')
+    .eq('user_id', user.id)
+    .order('name')
+
+  if (!accounts || accounts.length === 0) return []
+
+  const result: AccountInput[] = []
+  for (const acc of accounts) {
+    const { data: snapshot } = await supabase
+      .from('account_balance_snapshots')
+      .select('real_balance')
+      .eq('account_id', acc.id)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    result.push({
+      name: acc.name,
+      account_type: acc.account_type ?? 'checking',
+      bank_name: acc.bank_name ?? '',
+      currency_code: acc.currency_code ?? 'CRC',
+      initial_balance: snapshot?.real_balance != null ? String(Math.round(Number(snapshot.real_balance))) : '',
+    })
+  }
+
+  return result
+}
+
 /** Detects opening balances from existing transaction data (balance columns). */
 export async function detectAccountsFromTransactions(): Promise<AccountInput[]> {
   const supabase = await createClient()

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { completeSetup, detectAccountsFromTransactions, AccountInput } from '@/app/actions/setup'
+import { completeSetup, detectAccountsFromTransactions, loadExistingAccounts, AccountInput } from '@/app/actions/setup'
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -528,8 +528,15 @@ export function SetupWizard({ userEmail, existing }: { userEmail: string; existi
   const [accounts, setAccounts] = useState<AccountInput[]>([blank()])
 
   useEffect(() => {
-    detectAccountsFromTransactions().then((detected) => {
-      if (detected.length > 0) setDetectedAccounts(detected)
+    // Load saved accounts first; fall back to transaction-detected accounts
+    loadExistingAccounts().then((existing) => {
+      if (existing.length > 0) {
+        setAccounts(existing)
+      } else {
+        detectAccountsFromTransactions().then((detected) => {
+          if (detected.length > 0) setDetectedAccounts(detected)
+        })
+      }
     })
   }, [])
 
