@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 
 export interface MonthPoint {
   month: string
@@ -51,10 +51,13 @@ function smoothPath(xArr: number[], yArr: number[]) {
   return d
 }
 
-export function MetricChart({ data }: { data: MonthPoint[] }) {
-  const [metric, setMetric] = useState<MetricKey>('net')
+export function MetricChart({ data, defaultMetric = 'net' }: { data: MonthPoint[]; defaultMetric?: MetricKey }) {
+  const [metric, setMetric] = useState<MetricKey>(defaultMetric)
   const [hovered, setHovered] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+
+  // Reset selected metric when the default changes (tab switch)
+  useEffect(() => { setMetric(defaultMetric) }, [defaultMetric])
 
   const cfg = METRICS.find((m) => m.key === metric)!
 

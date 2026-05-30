@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import { MetricChart, MonthPoint } from './MetricChart'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -491,6 +492,47 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
     objetivos: 'Ahorros e Inversiones',
   }
 
+  // ── Monthly trend chart — recomputed whenever tab or selected category changes ──
+  // This is what makes the chart stay in sync with the drilldown selection.
+  const chartData: MonthPoint[] = useMemo(() => {
+    const filter = TAB_FILTER[tab]
+    const monthMap: Record<string, { amount: number }> = {}
+
+    for (const tx of transactions) {
+      if (!tx.date || !tx.movement_type) continue
+      if (!filter(tx)) continue
+      // If a category is selected, only include transactions for that category
+      if (selectedCat) {
+        let cat: string
+        if (tx.is_settlement) cat = 'Liquidaciones'
+        else if (!tx.movement_type) cat = 'Valorización crypto'
+        else cat = getCat(tx)
+        if (cat !== selectedCat) continue
+      }
+      const key = tx.date.slice(0, 7)
+      if (!monthMap[key]) monthMap[key] = { amount: 0 }
+      monthMap[key].amount += Number(tx.amount ?? 0)
+    }
+
+    const sorted = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b))
+    let cumulative = 0
+    return sorted.map(([month, { amount }]) => {
+      cumulative += amount
+      const income   = tab === 'ingresos' ? amount : 0
+      const expenses = tab === 'gastos'   ? amount : 0
+      const net = tab === 'objetivos' ? amount : income - expenses
+      return {
+        month,
+        income,
+        expenses,
+        net,
+        savings_rate: income > 0 ? ((income - expenses) / income) * 100 : 0,
+        cumulative,
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, tab, selectedCat, vendorMap, conceptMap])
+
   const tableTitle = selectedSub || selectedCat || TAB_LABELS[tab]
 
   return (
@@ -509,6 +551,9 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
           </button>
         ))}
       </div>
+
+      {/* Trend chart — synced with active tab and selected category */}
+      <MetricChart data={chartData} defaultMetric={tab === 'ingresos' ? 'income' : tab === 'gastos' ? 'expenses' : 'net'} />
 
       {/* L1 — category bar chart */}
       <CategoryBarChart

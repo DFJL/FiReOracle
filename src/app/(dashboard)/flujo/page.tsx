@@ -39,7 +39,8 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement, is_passive_income')
     .not('amount', 'is', null)
     .not('date', 'is', null)
-    .not('movement_type', 'is', null)  // exclude crypto valuations (unrealized gains/losses)
+    .not('movement_type', 'is', null)  // exclude crypto valuations
+    .order('date', { ascending: true })
 
   interface TxRow {
     movement_type: string | null
@@ -105,36 +106,36 @@ export default async function FlujoPage({ searchParams }: PageProps) {
   const totalNet = totalIncome - totalExpenses - totalWithdrawals
   const totalRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome) * 100 : null
 
-  // All-time monthly data for comparative views
-  const allMonthMap: Record<string, { income: number; expenses: number; withdrawals: number }> = {}
-  for (const r of allTx) {
-    if (!r.date) continue
-    const key = r.date.slice(0, 7)
-    if (!allMonthMap[key]) allMonthMap[key] = { income: 0, expenses: 0, withdrawals: 0 }
-    const amt = Number(r.amount ?? 0)
-    if (r.movement_type === 'income' && !r.is_settlement) {
-      allMonthMap[key].income += amt
-    } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
-      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
-        if (r.movement_type === 'cash_withdrawal') allMonthMap[key].withdrawals += amt
-        else allMonthMap[key].expenses += amt
-      }
-    }
-  }
-  let allCumulative = 0
-  const allMonthsData: MonthData[] = Object.entries(allMonthMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, { income, expenses, withdrawals }]) => {
-      const net = income - expenses - withdrawals
-      allCumulative += net
-      const rate = income > 0 ? ((income - expenses) / income) * 100 : null
-      return { month, income, expenses, withdrawals, net, cumulative: allCumulative, rate }
-    })
-
   const bestMonth = [...tableRows].filter((r) => r.hasData).sort((a, b) => b.net - a.net)[0]
   const worstMonth = [...tableRows].filter((r) => r.hasData).sort((a, b) => a.net - b.net)[0]
 
   const chartRows: MonthData[] = tableRows.map(({ hasData: _, ...r }) => r)
+
+  // All-years data for heatmap (heatmap shows savings rate across all time)
+  const heatmapMap: Record<string, { income: number; expenses: number; withdrawals: number }> = {}
+  for (const r of allTx) {
+    if (!r.date) continue
+    const key = r.date.slice(0, 7)
+    if (!heatmapMap[key]) heatmapMap[key] = { income: 0, expenses: 0, withdrawals: 0 }
+    const amt = Number(r.amount ?? 0)
+    if (r.movement_type === 'income' && !r.is_settlement) {
+      heatmapMap[key].income += amt
+    } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
+      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
+        if (r.movement_type === 'cash_withdrawal') heatmapMap[key].withdrawals += amt
+        else heatmapMap[key].expenses += amt
+      }
+    }
+  }
+  let heatCumulative = 0
+  const heatmapData: MonthData[] = Object.entries(heatmapMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, { income, expenses, withdrawals }]) => {
+      const net = income - expenses - withdrawals
+      heatCumulative += net
+      const rate = income > 0 ? ((income - expenses) / income) * 100 : null
+      return { month, income, expenses, withdrawals, net, cumulative: heatCumulative, rate }
+    })
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
@@ -232,21 +233,14 @@ export default async function FlujoPage({ searchParams }: PageProps) {
         </div>
       )}
 
-      {/* Interactive bar chart (year view) */}
+      {/* Interactive bar chart */}
       <div className="mb-6">
         <MonthlyBarsChart data={chartRows} />
       </div>
 
-      {/* All-time cumulative + overlay (longer view) */}
-      {allMonthsData.length > 12 && (
-        <div className="mb-6">
-          <MonthlyBarsChart data={allMonthsData} />
-        </div>
-      )}
-
-      {/* Savings rate heatmap */}
+      {/* Savings rate heatmap — shows all years for historical perspective */}
       <div className="mb-6">
-        <SavingsHeatmap data={chartRows} />
+        <SavingsHeatmap data={heatmapData} />
       </div>
 
       {/* Monthly table */}
