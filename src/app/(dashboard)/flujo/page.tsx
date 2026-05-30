@@ -36,9 +36,10 @@ export default async function FlujoPage({ searchParams }: PageProps) {
 
   const { data: rawTx } = await supabase
     .from('transactions')
-    .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement')
+    .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement, is_passive_income')
     .not('amount', 'is', null)
     .not('date', 'is', null)
+    .not('movement_type', 'is', null)  // exclude crypto valuations (unrealized gains/losses)
 
   interface TxRow {
     movement_type: string | null
@@ -49,6 +50,7 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     vendor: string | null
     concept: string | null
     is_settlement: boolean | null
+    is_passive_income: boolean | null
   }
   const allTx = (rawTx ?? []) as TxRow[]
 

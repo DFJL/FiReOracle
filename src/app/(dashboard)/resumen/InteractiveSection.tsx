@@ -14,6 +14,8 @@ export interface TxClient {
   amount: number | null
   expense_group: string | null
   is_settlement: boolean
+  is_passive_income?: boolean
+  is_survival_expense?: boolean
 }
 
 export interface InteractiveSectionProps {
@@ -33,12 +35,77 @@ function fmtDate(d: string) {
 }
 
 const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
-  income:           { label: 'Ingreso',  cls: 'bg-emerald-500/10 text-emerald-400' },
-  expense:          { label: 'Gasto',    cls: 'bg-rose-500/10 text-rose-400' },
-  cash_withdrawal:  { label: 'Efectivo', cls: 'bg-amber-500/10 text-amber-400' },
+  income:          { label: 'Ingreso',  cls: 'bg-emerald-500/10 text-emerald-400' },
+  expense:         { label: 'Gasto',    cls: 'bg-rose-500/10 text-rose-400' },
+  cash_withdrawal: { label: 'Efectivo', cls: 'bg-amber-500/10 text-amber-400' },
 }
 const AMT_COLOR: Record<string, string> = {
   income: 'text-emerald-400', expense: 'text-rose-400', cash_withdrawal: 'text-amber-400',
+}
+
+// ── vendor learning ───────────────────────────────────────────────────────────
+// Builds a map of normalized vendor → category from transactions that already
+// have a category_code. This lets the system learn per-user vendor patterns:
+// if "XYZ" is categorized 15 times as FOOD_SUPER, transactions from "XYZ"
+// with null category_code will inherit that classification automatically.
+
+type VendorCatMap = Record<string, string>  // vendor_normalized → category_code
+
+function buildVendorCatMap(transactions: TxClient[]): VendorCatMap {
+  // Count votes: vendor → { category_code → count }
+  const votes: Record<string, Record<string, number>> = {}
+  for (const tx of transactions) {
+    if (!tx.category_code || !tx.vendor) continue
+    const key = tx.vendor.toLowerCase().trim()
+    if (!key || key === 'na') continue
+    if (!votes[key]) votes[key] = {}
+    votes[key][tx.category_code] = (votes[key][tx.category_code] ?? 0) + 1
+  }
+  // Pick the most-voted category per vendor (majority wins)
+  const map: VendorCatMap = {}
+  for (const [vendor, counts] of Object.entries(votes)) {
+    const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+    if (winner) map[vendor] = winner[0]
+  }
+  return map
+}
+
+// Also learn concept → category from transactions where concept is the only
+// identifier (vendor is null/na). Less reliable, so only use when vendor unknown.
+function buildConceptCatMap(transactions: TxClient[]): VendorCatMap {
+  const votes: Record<string, Record<string, number>> = {}
+  for (const tx of transactions) {
+    if (!tx.category_code || !tx.concept) continue
+    const vendor = (tx.vendor ?? '').toLowerCase().trim()
+    if (vendor && vendor !== 'na') continue  // only for vendor-less rows
+    const key = tx.concept.toLowerCase().trim()
+    if (!key) continue
+    if (!votes[key]) votes[key] = {}
+    votes[key][tx.category_code] = (votes[key][tx.category_code] ?? 0) + 1
+  }
+  const map: VendorCatMap = {}
+  for (const [concept, counts] of Object.entries(votes)) {
+    const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+    if (winner && winner[1] >= 2) map[concept] = winner[0]  // min 2 occurrences
+  }
+  return map
+}
+
+// Resolve category using: explicit code → vendor map → concept map → regex inference
+function resolveCategory(
+  tx: TxClient,
+  vendorMap: VendorCatMap,
+  conceptMap: VendorCatMap,
+): string {
+  if (tx.category_code) return displayCategory(tx.category_code)
+
+  const vKey = (tx.vendor ?? '').toLowerCase().trim()
+  if (vKey && vKey !== 'na' && vendorMap[vKey]) return displayCategory(vendorMap[vKey])
+
+  const cKey = (tx.concept ?? '').toLowerCase().trim()
+  if (cKey && (!vKey || vKey === 'na') && conceptMap[cKey]) return displayCategory(conceptMap[cKey])
+
+  return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
 }
 
 // ── classifiers ───────────────────────────────────────────────────────────────
@@ -59,14 +126,20 @@ function isSavingsOrInvestment(tx: TxClient): boolean {
   return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
+function isCryptoValuation(tx: TxClient): boolean {
+  // movement_type=null entries are non-cash accounting entries (unrealized gains/losses)
+  if (tx.movement_type !== null) return false
+  const c = (tx.concept ?? '').toLowerCase()
+  return /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n|rendimiento\s*fondo/i.test(c)
+}
+
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:    isLiquidityOutflow,
   ingresos:  isLiquidityInflow,
-  objetivos: (tx) => isSavingsOrInvestment(tx) || (tx.movement_type === 'income' && tx.is_settlement),
-}
-
-function getTxCategory(tx: TxClient): string {
-  return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
+  // Objetivos: savings deposits, settlements, AND crypto valuations (they're bucket movements)
+  objetivos: (tx) => isSavingsOrInvestment(tx)
+    || (tx.movement_type === 'income' && tx.is_settlement)
+    || isCryptoValuation(tx),
 }
 
 function getTxSubcategory(tx: TxClient): string {
@@ -78,7 +151,17 @@ function getTxSubcategory(tx: TxClient): string {
 type SortKey = 'date' | 'vendor' | 'category' | 'amount'
 type SortDir = 'asc' | 'desc'
 
-function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string }) {
+function TransactionsTable({
+  rows,
+  title,
+  vendorMap,
+  conceptMap,
+}: {
+  rows: TxClient[]
+  title: string
+  vendorMap: VendorCatMap
+  conceptMap: VendorCatMap
+}) {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -88,23 +171,27 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
     else { setSortKey(key); setSortDir('desc') }
   }
 
+  const getCat = (tx: TxClient) => resolveCategory(tx, vendorMap, conceptMap)
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     if (!q) return rows
     return rows.filter(tx =>
       tx.vendor?.toLowerCase().includes(q) ||
       tx.concept?.toLowerCase().includes(q) ||
-      getTxCategory(tx).toLowerCase().includes(q)
+      getCat(tx).toLowerCase().includes(q)
     )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search])
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     let cmp = 0
     if (sortKey === 'date')     cmp = (a.date ?? '').localeCompare(b.date ?? '')
     if (sortKey === 'vendor')   cmp = getTxSubcategory(a).localeCompare(getTxSubcategory(b))
-    if (sortKey === 'category') cmp = getTxCategory(a).localeCompare(getTxCategory(b))
+    if (sortKey === 'category') cmp = getCat(a).localeCompare(getCat(b))
     if (sortKey === 'amount')   cmp = Number(a.amount) - Number(b.amount)
     return sortDir === 'asc' ? cmp : -cmp
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [filtered, sortKey, sortDir])
 
   const SortArrow = ({ col }: { col: SortKey }) => (
@@ -145,6 +232,7 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
               const badge = TYPE_BADGE[tx.movement_type ?? '']
               const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
               const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
+              const isPassive = tx.is_passive_income
               return (
                 <tr key={i} className="hover:bg-white/[0.015] transition-colors">
                   <td className="px-4 py-2.5 text-zinc-500 tabular-nums whitespace-nowrap">{tx.date ? fmtDate(tx.date) : '—'}</td>
@@ -154,9 +242,13 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
                       <p className="text-zinc-600 truncate">{tx.concept}</p>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">{getTxCategory(tx)}</td>
+                  <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">{getCat(tx)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
-                    {badge && <span className={`px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>{badge.label}</span>}
+                    <div className="flex flex-col gap-0.5">
+                      {badge && <span className={`px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>{badge.label}</span>}
+                      {isPassive && <span className="px-1.5 py-0.5 rounded font-medium bg-violet-500/10 text-violet-400 text-[10px]">Pasivo</span>}
+                      {tx.is_settlement && <span className="px-1.5 py-0.5 rounded font-medium bg-zinc-500/10 text-zinc-400 text-[10px]">Liquidación</span>}
+                    </div>
                   </td>
                   <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
                     {sign}{fmtCRC(Number(tx.amount))}
@@ -179,11 +271,7 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
 interface SubRow { name: string; amount: number; count: number }
 
 function SubcategoryPanel({
-  rows,
-  catName,
-  total,
-  selectedSub,
-  onSelect,
+  rows, catName, total, selectedSub, onSelect,
 }: {
   rows: SubRow[]
   catName: string
@@ -192,7 +280,6 @@ function SubcategoryPanel({
   onSelect: (s: string | null) => void
 }) {
   const maxAmt = rows[0]?.amount ?? 1
-
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
       <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
@@ -215,9 +302,7 @@ function SubcategoryPanel({
             <button
               key={name}
               onClick={() => onSelect(isActive ? null : name)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors mb-0.5 ${
-                isActive ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'
-              }`}
+              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors mb-0.5 ${isActive ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'}`}
             >
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className={`truncate max-w-[55%] ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
@@ -228,10 +313,7 @@ function SubcategoryPanel({
                 </div>
               </div>
               <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${isActive ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`}
-                  style={{ width: `${pct}%` }}
-                />
+                <div className={`h-full rounded-full transition-all ${isActive ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`} style={{ width: `${pct}%` }} />
               </div>
             </button>
           )
@@ -243,24 +325,22 @@ function SubcategoryPanel({
 
 // ── category bar chart (L1) ───────────────────────────────────────────────────
 
-interface CatRow { category: string; amount: number; count: number; txs: TxClient[] }
+interface CatRow { category: string; amount: number; count: number; txs: TxClient[]; learnedCount: number }
 
 const TAB_COLORS = {
-  gastos:    { bar: 'bg-rose-500/60',    activeBar: 'bg-rose-400',    activeBg: 'bg-rose-500/10', activeBorder: 'border-rose-500/30', text: 'text-rose-400' },
+  gastos:    { bar: 'bg-rose-500/60',    activeBar: 'bg-rose-400',    activeBg: 'bg-rose-500/10',    activeBorder: 'border-rose-500/30',    text: 'text-rose-400' },
   ingresos:  { bar: 'bg-emerald-500/60', activeBar: 'bg-emerald-400', activeBg: 'bg-emerald-500/10', activeBorder: 'border-emerald-500/30', text: 'text-emerald-400' },
-  objetivos: { bar: 'bg-violet-500/60',  activeBar: 'bg-violet-400',  activeBg: 'bg-violet-500/10', activeBorder: 'border-violet-500/30', text: 'text-violet-400' },
+  objetivos: { bar: 'bg-violet-500/60',  activeBar: 'bg-violet-400',  activeBg: 'bg-violet-500/10',  activeBorder: 'border-violet-500/30',  text: 'text-violet-400' },
 }
 
 function CategoryBarChart({
-  cats,
-  tab,
-  selectedCat,
-  onSelect,
+  cats, tab, selectedCat, onSelect, totalLearned,
 }: {
   cats: CatRow[]
   tab: TabKey
   selectedCat: string | null
   onSelect: (c: string | null) => void
+  totalLearned: number
 }) {
   const maxAmt = cats[0]?.amount ?? 1
   const totalAmt = cats.reduce((s, c) => s + c.amount, 0)
@@ -269,7 +349,14 @@ function CategoryBarChart({
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
       <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
+          {totalLearned > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">
+              {totalLearned} aprendidas
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs font-semibold tabular-nums ${colors.text}`}>{fmtCRC(totalAmt)}</span>
           {selectedCat && (
@@ -281,40 +368,33 @@ function CategoryBarChart({
       </div>
 
       <div className="p-2">
-        {cats.map(({ category, amount, count }) => {
+        {cats.map(({ category, amount, count, learnedCount }) => {
           const pct = Math.round((amount / maxAmt) * 100)
           const sharePct = totalAmt > 0 ? Math.round((amount / totalAmt) * 100) : 0
           const isActive = selectedCat === category
-
           return (
             <button
               key={category}
               onClick={() => onSelect(isActive ? null : category)}
               className={`w-full text-left px-3 py-2.5 rounded-lg transition-all mb-0.5 border ${
-                isActive
-                  ? `${colors.activeBg} ${colors.activeBorder}`
-                  : 'border-transparent hover:bg-white/[0.03]'
+                isActive ? `${colors.activeBg} ${colors.activeBorder}` : 'border-transparent hover:bg-white/[0.03]'
               }`}
             >
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className={`font-medium truncate max-w-[55%] ${isActive ? 'text-white' : 'text-zinc-300'}`}>
-                  {category}
-                </span>
+                <div className="flex items-center gap-1.5 truncate max-w-[55%]">
+                  <span className={`font-medium ${isActive ? 'text-white' : 'text-zinc-300'}`}>{category}</span>
+                  {learnedCount > 0 && (
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-500 shrink-0">aprendida</span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 shrink-0 ml-2">
                   <span className="text-zinc-600 tabular-nums">{count} tx</span>
-                  <span className={`font-medium tabular-nums ${isActive ? colors.text : 'text-zinc-400'}`}>
-                    {fmtCRC(amount)}
-                  </span>
-                  <span className={`w-8 text-right tabular-nums ${isActive ? colors.text : 'text-zinc-600'}`}>
-                    {sharePct}%
-                  </span>
+                  <span className={`font-medium tabular-nums ${isActive ? colors.text : 'text-zinc-400'}`}>{fmtCRC(amount)}</span>
+                  <span className={`w-8 text-right tabular-nums ${isActive ? colors.text : 'text-zinc-600'}`}>{sharePct}%</span>
                 </div>
               </div>
               <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${isActive ? colors.activeBar : colors.bar}`}
-                  style={{ width: `${pct}%` }}
-                />
+                <div className={`h-full rounded-full transition-all ${isActive ? colors.activeBar : colors.bar}`} style={{ width: `${pct}%` }} />
               </div>
             </button>
           )
@@ -337,19 +417,45 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
   function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
 
+  // Build vendor/concept → category maps from the user's own data
+  const vendorMap  = useMemo(() => buildVendorCatMap(transactions), [transactions])
+  const conceptMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
+
+  const getCat = (tx: TxClient) => resolveCategory(tx, vendorMap, conceptMap)
+
+  // Was this tx categorized via learning (not explicit code or regex)?
+  function wasLearned(tx: TxClient): boolean {
+    if (tx.category_code) return false
+    const vKey = (tx.vendor ?? '').toLowerCase().trim()
+    if (vKey && vKey !== 'na' && vendorMap[vKey]) return true
+    const cKey = (tx.concept ?? '').toLowerCase().trim()
+    if (cKey && (!vKey || vKey === 'na') && conceptMap[cKey]) return true
+    return false
+  }
+
   const cats: CatRow[] = useMemo(() => {
     const filter = TAB_FILTER[tab]
     const map: Record<string, CatRow> = {}
     for (const tx of transactions) {
       if (!filter(tx)) continue
-      const cat = tx.is_settlement ? 'Liquidaciones' : getTxCategory(tx)
-      if (!map[cat]) map[cat] = { category: cat, amount: 0, count: 0, txs: [] }
+      let cat: string
+      if (tx.is_settlement) cat = 'Liquidaciones'
+      else if (isCryptoValuation(tx)) cat = 'Valorización crypto'
+      else cat = getCat(tx)
+      if (!map[cat]) map[cat] = { category: cat, amount: 0, count: 0, txs: [], learnedCount: 0 }
       map[cat].amount += Number(tx.amount)
       map[cat].count++
       map[cat].txs.push(tx)
+      if (wasLearned(tx)) map[cat].learnedCount++
     }
     return Object.values(map).sort((a, b) => b.amount - a.amount)
-  }, [transactions, tab])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, tab, vendorMap, conceptMap])
+
+  const totalLearned = useMemo(
+    () => cats.reduce((s, c) => s + c.learnedCount, 0),
+    [cats]
+  )
 
   const catTxs: TxClient[] = useMemo(() => {
     if (!selectedCat) return cats.flatMap(c => c.txs)
@@ -404,15 +510,16 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
         ))}
       </div>
 
-      {/* L1 — category bar chart (full width) */}
+      {/* L1 — category bar chart */}
       <CategoryBarChart
         cats={cats}
         tab={tab}
         selectedCat={selectedCat}
         onSelect={selectCat}
+        totalLearned={totalLearned}
       />
 
-      {/* L2 — subcategory breakdown (shows when a cat is selected) */}
+      {/* L2 — subcategory breakdown */}
       {selectedCat && (
         <SubcategoryPanel
           rows={subcats}
@@ -424,7 +531,7 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
       )}
 
       {/* L3 — transaction detail */}
-      <TransactionsTable rows={tableTxs} title={tableTitle} />
+      <TransactionsTable rows={tableTxs} title={tableTitle} vendorMap={vendorMap} conceptMap={conceptMap} />
     </div>
   )
 }

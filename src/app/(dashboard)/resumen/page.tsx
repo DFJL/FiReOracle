@@ -58,10 +58,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // Single comprehensive query — includes expense_group + is_settlement for proper liquidity accounting
+  // Single comprehensive query — all fields needed for correct accounting model
   const base = supabase
     .from('transactions')
-    .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement')
+    .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense')
     .not('amount', 'is', null)
     .not('date', 'is', null)
     .order('date', { ascending: false })
@@ -71,14 +71,20 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const transactions = (rawTx ?? []) as TxClient[]
 
   // ── KPI stats — liquidity only ─────────────────────────────────────────────
-  // income: movement_type=income AND NOT is_settlement (settlements are bucket→liquidity transfers, not real income)
-  // expenses: movement_type=expense/cash_withdrawal AND NOT objetivos_financieros (unless loan payment)
-  // invested: objetivos_financieros non-loan-payment outflows (moved to savings/investment buckets)
-  let income = 0, expenses = 0, invested = 0
+  // Rules:
+  //   income   = movement_type=income, NOT is_settlement, NOT crypto valuation
+  //   expenses = expense/cash_withdrawal NOT in objetivos (except loan payments)
+  //   invested = objetivos non-loan outflows (bucket moves, not spending)
+  //   crypto_valuation (movement_type=null) = excluded entirely (unrealized)
+  let income = 0, passiveIncome = 0, expenses = 0, invested = 0
   for (const t of transactions) {
+    if (!t.movement_type) continue  // skip crypto valuations (unrealized gains/losses)
     const amt = Number(t.amount ?? 0)
     if (t.movement_type === 'income') {
-      if (!t.is_settlement) income += amt
+      if (!t.is_settlement) {
+        income += amt
+        if (t.is_passive_income) passiveIncome += amt
+      }
     } else if (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') {
       if (t.expense_group !== SAVINGS_EXPENSE_GROUP) {
         expenses += amt
@@ -98,6 +104,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     if (!t.date) continue
     const key = t.date.slice(0, 7)
     if (!monthMap[key]) monthMap[key] = { month: key, income: 0, expenses: 0, net: 0, savings_rate: 0, cumulative: 0 }
+    if (!t.movement_type) continue  // skip crypto valuations
     const amt = Number(t.amount ?? 0)
     if (t.movement_type === 'income' && !t.is_settlement) {
       monthMap[key].income += amt
@@ -159,6 +166,9 @@ export default async function ResumenPage({ searchParams }: PageProps) {
             Ingresos
           </p>
           <p className="text-xl font-semibold text-emerald-400 tabular-nums">{fmt(income)}</p>
+          {passiveIncome > 0 && (
+            <p className="text-xs text-zinc-600">{fmt(passiveIncome)} pasivo</p>
+          )}
           <p className="text-xs text-zinc-700 group-hover:text-zinc-600 transition-colors">
             Ver detalle →
           </p>
