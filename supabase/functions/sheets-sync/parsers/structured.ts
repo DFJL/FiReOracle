@@ -75,10 +75,10 @@ function parseDate(val: unknown): string | null {
   const s = String(val).trim()
   if (!s) return null
 
-  // DD/MM/YYYY or D/M/YYYY
+  // MM/DD/YYYY or M/D/YYYY (Google Sheets default en-US format)
   const parts = s.split('/')
   if (parts.length === 3) {
-    const [d, m, y] = parts
+    const [m, d, y] = parts
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
   }
 
