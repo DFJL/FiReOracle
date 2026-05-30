@@ -183,8 +183,8 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
 }) {
   const max = rows[0]?.amount ?? 1
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-300">{catName} <span className="text-zinc-600 font-normal ml-1">{fmtCRC(total)}</span></p>
         {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">✕ limpiar</button>}
       </div>
@@ -218,9 +218,9 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
 // ── category bar chart (L1) ───────────────────────────────────────────────────
 
 const TAB_COLORS = {
-  gastos:    { bar: 'bg-rose-500/60',    active: 'bg-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    text: 'text-rose-400' },
-  ingresos:  { bar: 'bg-emerald-500/60', active: 'bg-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400' },
-  objetivos: { bar: 'bg-violet-500/60',  active: 'bg-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/30',  text: 'text-violet-400' },
+  gastos:    { bar: 'bg-rose-500/50',        active: 'bg-rose-400',        bg: 'bg-rose-500/10',        border: 'border-rose-500/30',        text: 'text-rose-400' },
+  ingresos:  { bar: 'bg-[#a3e635]/40',       active: 'bg-[#a3e635]',       bg: 'bg-[#a3e635]/10',       border: 'border-[#a3e635]/30',       text: 'text-[#a3e635]' },
+  objetivos: { bar: 'bg-amber-400/40',        active: 'bg-amber-400',       bg: 'bg-amber-400/10',       border: 'border-amber-400/30',       text: 'text-amber-400' },
 }
 
 function CategoryBar({ cats, tab, selected, onSelect }: {
@@ -231,8 +231,8 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
   const total = cats.reduce((s, c) => s + c.amount, 0)
   const col = TAB_COLORS[tab]
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
         <div className="flex items-center gap-3">
           <span className={`text-xs font-semibold tabular-nums ${col.text}`}>{fmtCRC(total)}</span>
@@ -286,8 +286,8 @@ function TxTable({ rows, title, vMap, cMap }: {
   }, [rows, search])
 
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between gap-3 flex-wrap">
+    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-xs font-semibold text-zinc-300">{title} <span className="text-zinc-600 font-normal">({filtered.length})</span></h3>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
           className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
@@ -338,9 +338,9 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
 ]
 
 const TABS: { key: TabKey; label: string; color: string }[] = [
-  { key: 'gastos',    label: 'Gastos',             color: 'rgb(251 113 133)' },
-  { key: 'ingresos',  label: 'Ingresos',            color: 'rgb(52 211 153)'  },
-  { key: 'objetivos', label: 'Ahorros e Inversiones', color: 'rgb(167 139 250)' },
+  { key: 'gastos',    label: 'Gastos',    color: 'rgb(251 113 133)' },
+  { key: 'ingresos',  label: 'Ingresos',  color: '#a3e635'           },
+  { key: 'objetivos', label: 'Ahorros',   color: 'rgb(251 191 36)'  },
 ]
 
 export function InteractiveSection({ transactions }: { transactions: TxClient[] }) {
@@ -441,19 +441,19 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
       {/* Period + Tab in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Period filter — client-side, no reload */}
-        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1">
+        <div className="flex gap-1 bg-[#0f130f] border border-[#a3e635]/[0.08] rounded-lg p-1">
           {PERIODS.map(p => (
             <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${period === p.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              className={`px-3 py-1.5 rounded-md text-[10px] font-bold tracking-widest uppercase transition-colors ${period === p.key ? 'bg-[#a3e635]/10 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
               {p.label}
             </button>
           ))}
         </div>
         {/* Tab filter */}
-        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1">
+        <div className="flex gap-1 bg-[#0f130f] border border-[#a3e635]/[0.08] rounded-lg p-1">
           {TABS.map(t => (
             <button key={t.key} onClick={() => selectTab(t.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${tab === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-widest uppercase transition-colors ${tab === t.key ? 'bg-[#a3e635]/10 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
               {t.label}
             </button>
           ))}
@@ -463,13 +463,13 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Ingresos',    value: kpis.income,     color: 'text-emerald-400' },
+          { label: 'Ingresos',    value: kpis.income,     color: 'text-[#a3e635]' },
           { label: 'Gastos',      value: kpis.expenses,   color: 'text-rose-400' },
-          { label: 'Balance',     value: kpis.net,        color: kpis.net >= 0 ? 'text-blue-400' : 'text-amber-400' },
-          { label: 'Ahorros',     value: kpis.invested,   color: 'text-violet-400' },
+          { label: 'Balance',     value: kpis.net,        color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
+          { label: 'Ahorros',     value: kpis.invested,   color: 'text-amber-400' },
         ].map(k => (
-          <div key={k.label} className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">{k.label}</p>
+          <div key={k.label} className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] p-4">
+            <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">{k.label}</p>
             <p className={`text-base font-semibold tabular-nums ${k.color}`}>{fmtCRC(k.value)}</p>
           </div>
         ))}
@@ -477,7 +477,7 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
 
       {/* Trend chart — one line, matches current tab, no extra metric selector */}
       {trendPoints.length > 1 && (
-        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4">
+        <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] p-4">
           <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
             Tendencia — {TABS.find(t => t.key === tab)!.label}
             <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
