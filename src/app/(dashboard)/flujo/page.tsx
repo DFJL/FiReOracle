@@ -17,6 +17,10 @@ function fmtPct(n: number) {
   return (n >= 0 ? '+' : '') + n.toFixed(1) + '%'
 }
 
+function isValuationEntry(concept: string | null): boolean {
+  return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
+}
+
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 // ── page ──────────────────────────────────────────────────────────────────────
@@ -83,7 +87,8 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     if (r.movement_type === 'income' && !r.is_settlement) {
       monthMap[key].income += amt
     } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
-      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
+      const isSavingsOutflow = r.expense_group === SAVINGS_EXPENSE_GROUP && !isLoanPayment(r.vendor, r.concept, r.category_code)
+      if (!isSavingsOutflow && !isValuationEntry(r.concept)) {
         if (r.movement_type === 'cash_withdrawal') monthMap[key].withdrawals += amt
         else monthMap[key].expenses += amt
       }
@@ -123,7 +128,8 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     if (r.movement_type === 'income' && !r.is_settlement) {
       heatmapMap[key].income += amt
     } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
-      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
+      const isSavingsOutflow = r.expense_group === SAVINGS_EXPENSE_GROUP && !isLoanPayment(r.vendor, r.concept, r.category_code)
+      if (!isSavingsOutflow && !isValuationEntry(r.concept)) {
         if (r.movement_type === 'cash_withdrawal') heatmapMap[key].withdrawals += amt
         else heatmapMap[key].expenses += amt
       }
@@ -159,23 +165,6 @@ export default async function FlujoPage({ searchParams }: PageProps) {
               {y}
             </a>
           ))}
-        </div>
-      </div>
-
-      {/* Datos iniciales notice */}
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-4 mb-6 flex items-start gap-3">
-        <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-amber-400 text-xs font-bold">!</span>
-        </div>
-        <div>
-          <p className="text-sm font-medium text-amber-400">Saldo inicial no configurado</p>
-          <p className="text-xs text-zinc-500 mt-1">
-            El saldo acumulado y el patrimonio real requieren que registres tus saldos de cuentas al inicio del período.
-            Hasta entonces, el acumulado muestra flujo relativo desde cero.{' '}
-            <span className="text-amber-400/70">
-              La sección &quot;Datos Iniciales&quot; está pendiente de implementación.
-            </span>
-          </p>
         </div>
       </div>
 
@@ -357,7 +346,7 @@ export default async function FlujoPage({ searchParams }: PageProps) {
       </div>
 
       <p className="text-xs text-zinc-700">
-        * Acumulado relativo — pendiente saldo inicial de cuentas
+        * Acumulado desde primer movimiento registrado. Excluye depósitos a inversiones y variaciones de valor no realizadas.
       </p>
     </div>
   )
