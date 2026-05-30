@@ -52,7 +52,8 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const start = periodStart(period)
 
   // Use RPC to bypass PostgREST max_rows (RPC calls are not row-capped)
-  const { data: rawTx } = await supabase.rpc('get_user_transactions', {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rawTx } = await (supabase as any).rpc('get_user_transactions', {
     p_start_date: start ?? null,
   })
   const transactions = (rawTx ?? []) as TxClient[]
