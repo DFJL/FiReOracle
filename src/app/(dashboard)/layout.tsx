@@ -26,11 +26,11 @@ const NAV_ITEMS = [
 
 // Subset shown in mobile bottom bar (most used)
 const BOTTOM_NAV = [
-  { href: '/resumen',     label: 'Resumen',  icon: <LayoutDashboard size={20} /> },
-  { href: '/movimientos', label: 'Movim.',   icon: <ArrowLeftRight size={20} /> },
-  { href: '/flujo',       label: 'Flujo',    icon: <BarChart2 size={20} /> },
-  { href: '/oracle',      label: 'Oracle',   icon: <Sparkles size={20} /> },
-  { href: '/configuracion', label: 'Config', icon: <Settings size={20} /> },
+  { href: '/resumen',     label: 'Resumen',   icon: <LayoutDashboard size={20} /> },
+  { href: '/movimientos', label: 'Movim.',    icon: <ArrowLeftRight size={20} /> },
+  { href: '/inversiones', label: 'Portafolio',icon: <TrendingUp size={20} /> },
+  { href: '/oracle',      label: 'Oracle',    icon: <Sparkles size={20} /> },
+  { href: '/configuracion', label: 'Config',  icon: <Settings size={20} /> },
 ]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
