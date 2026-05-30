@@ -587,14 +587,17 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
       else if (isSavings(tx))       invested += amt
     }
     const net = income - expenses
-    // Savings rate sobre ingresos activos únicamente
-    const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0
-    return { income, rendimientos, expenses, invested, net, savingsRate }
+    // Tasa de ahorro FIRE: lo que realmente fue a ahorros/inversión vs ingresos activos
+    const savingsRate = income > 0 ? (invested / income) * 100 : 0
+    // Margen neto: lo que sobra después de gastos (puede ser negativo)
+    const netMargin   = income > 0 ? (net / income) * 100 : 0
+    return { income, rendimientos, expenses, invested, net, savingsRate, netMargin }
   }, [periodTxs])
 
   const now = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
-  const savingsRate = kpis.income > 0 ? Math.round(((kpis.income - kpis.expenses) / kpis.income) * 100) : 0
+  const savingsRate = Math.round(kpis.savingsRate)
+  const netMargin   = Math.round(kpis.netMargin)
 
   return (
     <div className="space-y-0">
@@ -609,10 +612,12 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
         {/* KPI row — like the health metrics strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',      value: kpis.income,              fmt: 'K', color: 'text-[#a3e635]' },
-            { label: 'Gastos',        value: kpis.expenses,            fmt: 'K', color: 'text-rose-400' },
-            { label: 'Ahorro %',      value: savingsRate,              fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
-            { label: 'Rendimientos',  value: kpis.rendimientos,        fmt: 'K', color: 'text-blue-400' },
+            { label: 'Ingresos',     value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]',  sub: null },
+            { label: 'Gastos',       value: kpis.expenses,     fmt: 'K', color: 'text-rose-400',   sub: null },
+            { label: 'Rendimientos', value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400',   sub: null },
+            { label: 'Tasa ahorro',  value: savingsRate,       fmt: '%',
+              color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
+              sub: `margen ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
           ].map(k => {
             const display = k.fmt === '%'
               ? `${k.value}%`
@@ -625,6 +630,7 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
               <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
                 <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{display}</p>
                 <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em]">{k.label}</p>
+                {k.sub && <p className="text-[9px] text-zinc-600 tabular-nums">{k.sub}</p>}
               </div>
             )
           })}
