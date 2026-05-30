@@ -34,6 +34,16 @@ export default async function DashboardLayout({
             {label}
           </a>
         ))}
+        <div className="mt-auto pt-4 border-t border-gray-800">
+          <form action="/auth/signout" method="POST">
+            <button
+              type="submit"
+              className="w-full px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-800 hover:text-red-400 transition-colors text-left"
+            >
+              Cerrar sesión
+            </button>
+          </form>
+        </div>
       </aside>
 
       <main className="flex-1 overflow-auto">{children}</main>
