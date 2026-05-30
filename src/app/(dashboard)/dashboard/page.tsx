@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { TrendingUp, TrendingDown, ArrowLeftRight, CalendarRange } from 'lucide-react'
 
@@ -25,18 +26,20 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const db = createAdminClient()
+
   const [rawRes, recentRes, categoryRes] = await Promise.all([
-    supabase
+    db
       .from('transactions')
       .select('movement_type, amount, date')
       .not('amount', 'is', null),
-    supabase
+    db
       .from('transactions')
       .select('date, vendor, concept, category_code, movement_type, amount, currency_code')
       .not('amount', 'is', null)
       .order('date', { ascending: false })
       .limit(8),
-    supabase
+    db
       .from('transactions')
       .select('category_code, amount')
       .eq('movement_type', 'expense')
