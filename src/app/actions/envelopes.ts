@@ -9,6 +9,7 @@ type EnvelopeData = {
   custodio: string
   color: string
   annual_rate: number | null
+  initial_balance?: number | null
 }
 
 export async function createEnvelope(data: EnvelopeData) {
@@ -42,6 +43,30 @@ export async function createEnvelope(data: EnvelopeData) {
     })
 
   if (error) return { error: error.message }
+
+  if (data.initial_balance && data.initial_balance > 0) {
+    const { data: inserted } = await admin
+      .from('savings_envelopes')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('name', data.name.trim())
+      .eq('custodio', data.custodio.trim())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (inserted?.id) {
+      await admin.from('envelope_movements').insert({
+        user_id: user.id,
+        envelope_id: inserted.id,
+        movement_type: 'deposito',
+        amount: data.initial_balance,
+        date: new Date().toISOString().slice(0, 10),
+        notes: 'Saldo inicial',
+      })
+    }
+  }
+
   revalidatePath('/liquidez')
   revalidatePath('/configuracion')
 }
