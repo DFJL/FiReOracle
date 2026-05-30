@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { MetricChart, MonthPoint } from './MetricChart'
-import { InteractiveSection, CatSummary, TxClient } from './InteractiveSection'
+import { InteractiveSection, TxClient } from './InteractiveSection'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,10 +57,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // Single comprehensive query — limit 3000 rows for the period
+  // Single comprehensive query — includes expense_group for savings/investment separation
   const base = supabase
     .from('transactions')
-    .select('movement_type, amount, date, vendor, concept, category_code')
+    .select('movement_type, amount, date, vendor, concept, category_code, expense_group')
     .not('amount', 'is', null)
     .not('date', 'is', null)
     .order('date', { ascending: false })
@@ -69,15 +69,18 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const { data: rawTx } = await (start ? base.gte('date', start) : base)
   const transactions = (rawTx ?? []) as TxClient[]
 
-  // ── KPI stats ──────────────────────────────────────────────────────────────
-  let income = 0, expenses = 0, withdrawals = 0
+  // ── KPI stats — exclude objetivos_financieros from "gastos" ───────────────
+  let income = 0, expenses = 0, savings = 0
   for (const t of transactions) {
     const amt = Number(t.amount)
-    if (t.movement_type === 'income') income += amt
-    else if (t.movement_type === 'expense') expenses += amt
-    else if (t.movement_type === 'cash_withdrawal') withdrawals += amt
+    if (t.movement_type === 'income') {
+      income += amt
+    } else if (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') {
+      if (t.expense_group === 'objetivos_financieros') savings += amt
+      else expenses += amt
+    }
   }
-  const net = income - expenses - withdrawals
+  const net = income - expenses - savings
   const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0
 
   // ── Monthly chart data ─────────────────────────────────────────────────────
@@ -88,7 +91,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     if (!monthMap[key]) monthMap[key] = { month: key, income: 0, expenses: 0, net: 0, savings_rate: 0, cumulative: 0 }
     const amt = Number(t.amount)
     if (t.movement_type === 'income') monthMap[key].income += amt
-    else if (t.movement_type === 'expense') monthMap[key].expenses += amt
+    else if ((t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') && t.expense_group !== 'objetivos_financieros') monthMap[key].expenses += amt
   }
   let cumulative = 0
   const chartData: MonthPoint[] = Object.values(monthMap)
@@ -103,34 +106,6 @@ export default async function ResumenPage({ searchParams }: PageProps) {
         cumulative,
       }
     })
-
-  // ── Category breakdown ─────────────────────────────────────────────────────
-  const incCatMap: Record<string, { amount: number; count: number }> = {}
-  const expCatMap: Record<string, { amount: number; count: number }> = {}
-
-  for (const t of transactions) {
-    const cat = t.category_code ?? 'Sin categoría'
-    const amt = Number(t.amount)
-    if (t.movement_type === 'income') {
-      if (!incCatMap[cat]) incCatMap[cat] = { amount: 0, count: 0 }
-      incCatMap[cat].amount += amt
-      incCatMap[cat].count++
-    } else if (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') {
-      if (!expCatMap[cat]) expCatMap[cat] = { amount: 0, count: 0 }
-      expCatMap[cat].amount += amt
-      expCatMap[cat].count++
-    }
-  }
-
-  const incomeCategories: CatSummary[] = Object.entries(incCatMap)
-    .map(([category, { amount, count }]) => ({ category, amount, count }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 20)
-
-  const expenseCategories: CatSummary[] = Object.entries(expCatMap)
-    .map(([category, { amount, count }]) => ({ category, amount, count }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 20)
 
   // ── Period pills ───────────────────────────────────────────────────────────
   const periods = [
@@ -217,6 +192,11 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           <p className="text-xl font-semibold text-violet-400 tabular-nums">
             {savingsRate.toFixed(1)}%
           </p>
+          {savings > 0 && (
+            <p className="text-xs text-zinc-600">
+              +{fmt(savings)} objetivos financieros
+            </p>
+          )}
           <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
             <div
               className="h-full bg-violet-500/50 rounded-full transition-all"
@@ -231,12 +211,8 @@ export default async function ResumenPage({ searchParams }: PageProps) {
         <MetricChart data={chartData} />
       </div>
 
-      {/* Category breakdown + transactions table */}
-      <InteractiveSection
-        incomeCategories={incomeCategories}
-        expenseCategories={expenseCategories}
-        transactions={transactions}
-      />
+      {/* 3-level interactive breakdown */}
+      <InteractiveSection transactions={transactions} />
     </div>
   )
 }

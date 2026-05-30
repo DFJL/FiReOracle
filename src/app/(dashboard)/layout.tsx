@@ -10,17 +10,18 @@ import {
   Landmark,
   Sparkles,
   BarChart2,
+  Settings,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { href: '/resumen', label: 'Resumen', icon: <LayoutDashboard size={16} /> },
-  { href: '/movimientos', label: 'Movimientos', icon: <ArrowLeftRight size={16} /> },
-  { href: '/flujo', label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
-  { href: '/presupuesto', label: 'Presupuesto', icon: <PiggyBank size={16} /> },
-  { href: '/inversiones', label: 'Inversiones', icon: <TrendingUp size={16} /> },
-  { href: '/prestamos', label: 'Préstamos', icon: <Users size={16} /> },
-  { href: '/patrimonio', label: 'Patrimonio', icon: <Landmark size={16} /> },
-  { href: '/oracle', label: 'Oracle', icon: <Sparkles size={16} /> },
+  { href: '/resumen',      label: 'Resumen',       icon: <LayoutDashboard size={16} /> },
+  { href: '/movimientos',  label: 'Movimientos',   icon: <ArrowLeftRight size={16} /> },
+  { href: '/flujo',        label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
+  { href: '/presupuesto',  label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
+  { href: '/inversiones',  label: 'Inversiones',   icon: <TrendingUp size={16} /> },
+  { href: '/prestamos',    label: 'Préstamos',     icon: <Users size={16} /> },
+  { href: '/patrimonio',   label: 'Patrimonio',    icon: <Landmark size={16} /> },
+  { href: '/oracle',       label: 'Oracle',        icon: <Sparkles size={16} /> },
 ]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -31,9 +32,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
+  // Check onboarding status
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('onboarding_done')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const needsSetup = !profile?.onboarding_done
+
   return (
     <div className="min-h-screen bg-[#09090b] text-white flex">
-      <aside className="w-52 shrink-0 border-r border-white/[0.06] p-4 flex flex-col gap-1 fixed h-full">
+      {/* Sidebar */}
+      <aside className="w-52 shrink-0 border-r border-white/[0.06] p-4 flex flex-col gap-1 fixed h-full z-20">
         <div className="mb-6 px-2 flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-blue-500 flex items-center justify-center text-xs font-bold shrink-0">
             F
@@ -50,8 +61,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           ))}
         </nav>
 
-        <div className="mt-auto pt-4 border-t border-white/[0.06]">
-          <p className="px-3 text-xs text-zinc-600 mb-2 truncate">{user.email}</p>
+        <div className="mt-auto pt-4 border-t border-white/[0.06] flex flex-col gap-0.5">
+          <NavLink href="/configuracion" label="Configuración" icon={<Settings size={16} />} />
+          <p className="px-3 text-xs text-zinc-600 mt-2 truncate">{user.email}</p>
           <form action="/auth/signout" method="POST">
             <button
               type="submit"
@@ -63,7 +75,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      <main className="flex-1 ml-52 overflow-auto">{children}</main>
+      {/* Main content */}
+      <div className="flex-1 ml-52 flex flex-col min-h-screen">
+        {/* Onboarding banner */}
+        {needsSetup && (
+          <div className="bg-blue-600/10 border-b border-blue-500/20 px-6 py-2.5 flex items-center justify-between gap-4">
+            <p className="text-xs text-blue-300">
+              <span className="font-semibold">Configuración pendiente</span>
+              {' '}— Registrá tus cuentas y saldos iniciales para ver tu patrimonio real y métricas precisas.
+            </p>
+            <a
+              href="/configuracion"
+              className="shrink-0 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              Configurar ahora
+            </a>
+          </div>
+        )}
+
+        <main className="flex-1 overflow-auto">{children}</main>
+      </div>
     </div>
   )
 }
