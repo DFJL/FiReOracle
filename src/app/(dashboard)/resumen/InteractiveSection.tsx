@@ -351,9 +351,17 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
   cats: { category: string; amount: number; count: number }[]
   tab: TabKey; selected: string | null; onSelect: (c: string | null) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const max = cats[0]?.amount ?? 1
   const total = cats.reduce((s, c) => s + c.amount, 0)
   const col = TAB_COLORS[tab]
+
+  // Show categories that are ≥2% of total; collapse the rest unless expanded
+  const THRESHOLD = 2
+  const visible = cats.filter(c => total > 0 && (c.amount / total) * 100 >= THRESHOLD)
+  const hidden  = cats.filter(c => total > 0 && (c.amount / total) * 100 < THRESHOLD)
+  const displayed = expanded ? cats : visible
+
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between">
@@ -364,7 +372,7 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
         </div>
       </div>
       <div className="p-2">
-        {cats.map(({ category, amount, count }) => {
+        {displayed.map(({ category, amount, count }) => {
           const pct = Math.round((amount / max) * 100)
           const sharePct = total > 0 ? Math.round((amount / total) * 100) : 0
           const active = selected === category
@@ -386,6 +394,14 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
           )
         })}
         {cats.length === 0 && <p className="text-center text-xs text-zinc-600 py-6">Sin movimientos</p>}
+        {hidden.length > 0 && (
+          <button onClick={() => setExpanded(e => !e)}
+            className="w-full mt-1 py-2 text-[10px] font-semibold text-zinc-600 hover:text-zinc-400 transition-colors">
+            {expanded
+              ? '▲ Mostrar menos'
+              : `▼ ${hidden.length} categoría${hidden.length > 1 ? 's' : ''} con <${THRESHOLD}% — ver más`}
+          </button>
+        )}
       </div>
     </div>
   )
