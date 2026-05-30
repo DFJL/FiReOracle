@@ -25,7 +25,6 @@ export interface AccountSummary {
 
 type TabKey     = 'gastos' | 'ingresos' | 'objetivos'
 type PeriodKey  = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
-type ChartMetric = 'gastos' | 'ingresos' | 'balance'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -167,83 +166,127 @@ function getTxConcept(tx: TxClient): string {
   return tx.vendor?.trim() || '—'
 }
 
-// ── SVG trend chart with hover tooltip ───────────────────────────────────────
+// ── SVG trend chart — 3 series with hover tooltip ────────────────────────────
 
-function TrendChart({ points, color, id = 'tg' }: { points: { month: string; amount: number }[]; color: string; id?: string }) {
-  const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null)
+interface SeriesPoint { month: string; income: number; expenses: number; balance: number }
+
+function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
 
   if (points.length < 2) return null
-  const W = 800, H = 130, px = 4, pt = 8, pb = 24
-  const vals = points.map(p => p.amount)
-  const minV = Math.min(...vals, 0)
-  const maxV = Math.max(...vals, 1)
-  const range = maxV - minV || 1
+  const W = 800, H = 160, px = 4, pt = 8, pb = 24
   const chartH = H - pt - pb
   const chartW = W - px * 2
-  const xs = points.map((_, i) => px + (i / Math.max(points.length - 1, 1)) * chartW)
-  const ys = vals.map(v => pt + chartH - ((v - minV) / range) * chartH)
 
-  let d = `M${xs[0].toFixed(1)},${ys[0].toFixed(1)}`
-  for (let i = 1; i < xs.length; i++) {
-    const cpX = ((xs[i-1] + xs[i]) / 2).toFixed(1)
-    d += ` C${cpX},${ys[i-1].toFixed(1)} ${cpX},${ys[i].toFixed(1)} ${xs[i].toFixed(1)},${ys[i].toFixed(1)}`
+  // Shared scale across all series so they're visually comparable
+  const allVals = points.flatMap(p => [p.income, p.expenses, p.balance])
+  const minV = Math.min(...allVals, 0)
+  const maxV = Math.max(...allVals, 1)
+  const range = maxV - minV || 1
+
+  const toY = (v: number) => pt + chartH - ((v - minV) / range) * chartH
+  const toX = (i: number) => px + (i / Math.max(points.length - 1, 1)) * chartW
+
+  function makePath(vals: number[]) {
+    const xs = vals.map((_, i) => toX(i))
+    const ys = vals.map(v => toY(v))
+    let d = `M${xs[0].toFixed(1)},${ys[0].toFixed(1)}`
+    for (let i = 1; i < xs.length; i++) {
+      const cpX = ((xs[i-1] + xs[i]) / 2).toFixed(1)
+      d += ` C${cpX},${ys[i-1].toFixed(1)} ${cpX},${ys[i].toFixed(1)} ${xs[i].toFixed(1)},${ys[i].toFixed(1)}`
+    }
+    return { d, xs, ys }
   }
-  const area = d + ` L${xs[xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`
-  const zeroY = minV < 0 ? pt + chartH - ((0 - minV) / range) * chartH : null
+
+  const inc  = makePath(points.map(p => p.income))
+  const exp  = makePath(points.map(p => p.expenses))
+  const bal  = makePath(points.map(p => p.balance))
+  const zeroY = minV < 0 ? toY(0) : null
   const step = points.length > 36 ? 6 : points.length > 24 ? 3 : points.length > 12 ? 2 : 1
 
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
     const svgX = ((e.clientX - rect.left) / rect.width) * W
-    let closest = 0
-    let minDist = Infinity
-    xs.forEach((x, i) => { const d = Math.abs(x - svgX); if (d < minDist) { minDist = d; closest = i } })
-    setHover({ i: closest, x: xs[closest], y: ys[closest] })
+    let closest = 0, minDist = Infinity
+    points.forEach((_, i) => { const dist = Math.abs(toX(i) - svgX); if (dist < minDist) { minDist = dist; closest = i } })
+    setHoverIdx(closest)
   }
 
-  const h = hover
-  const gradId = `tg-${id}`
+  const hi = hoverIdx
+  const fmt = (n: number) => new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(n)
+  const hx = hi !== null ? toX(hi) : null
 
   return (
     <div className="relative">
-      {h && (
+      {hi !== null && hx !== null && (
         <div className="absolute z-10 pointer-events-none"
-          style={{ left: `${(h.x / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
-          <div className="bg-[#1a221a] border border-[#a3e635]/20 rounded-lg px-3 py-2 text-center shadow-xl whitespace-nowrap">
-            <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-0.5">
-              {MONTH_LABELS[parseInt(points[h.i].month.slice(5,7))-1]} {points[h.i].month.slice(0,4)}
+          style={{ left: `${(hx / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
+          <div className="bg-[#111811] border border-[#a3e635]/20 rounded-xl px-3 py-2.5 shadow-xl whitespace-nowrap text-[11px]">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 text-center">
+              {MONTH_LABELS[parseInt(points[hi].month.slice(5,7))-1]} {points[hi].month.slice(0,4)}
             </p>
-            <p className="text-sm font-black tabular-nums" style={{ color }}>
-              {new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(points[h.i].amount)}
-            </p>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[#a3e635]/70">Ingresos</span>
+                <span className="font-black text-[#a3e635] tabular-nums">{fmt(points[hi].income)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-rose-400/70">Gastos</span>
+                <span className="font-black text-rose-400 tabular-nums">{fmt(points[hi].expenses)}</span>
+              </div>
+              <div className="border-t border-white/[0.06] mt-1 pt-1 flex items-center justify-between gap-4">
+                <span className="text-blue-400/70">Balance</span>
+                <span className={`font-black tabular-nums ${points[hi].balance >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{fmt(points[hi].balance)}</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="cursor-crosshair"
-        onMouseMove={handleMouseMove} onMouseLeave={() => setHover(null)}>
+        onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          <linearGradient id="grad-inc" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a3e635" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#a3e635" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.3)" strokeDasharray="4 3" strokeWidth="1" />}
-        <path d={area} fill={`url(#${gradId})`} />
-        <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        {h && <>
-          <line x1={h.x} y1={pt} x2={h.x} y2={pt + chartH} stroke={color} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
-          <circle cx={h.x} cy={h.y} r="4" fill={color} stroke="#0d120d" strokeWidth="2" />
+        {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.25)" strokeDasharray="4 3" strokeWidth="1" />}
+        {/* Income fill */}
+        <path d={inc.d + ` L${inc.xs[inc.xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${inc.xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`}
+          fill="url(#grad-inc)" />
+        {/* Lines */}
+        <path d={exp.d} fill="none" stroke="rgb(251 113 133)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+        <path d={bal.d} fill="none" stroke="rgb(96 165 250)"  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" strokeDasharray="5 3" />
+        <path d={inc.d} fill="none" stroke="#a3e635"           strokeWidth="2"   strokeLinecap="round" strokeLinejoin="round" />
+        {/* Hover crosshair + dots */}
+        {hi !== null && hx !== null && <>
+          <line x1={hx} y1={pt} x2={hx} y2={pt + chartH} stroke="white" strokeWidth="1" strokeDasharray="3 2" opacity="0.15" />
+          <circle cx={hx} cy={inc.ys[hi]} r="3.5" fill="#a3e635"          stroke="#0d120d" strokeWidth="2" />
+          <circle cx={hx} cy={exp.ys[hi]} r="3.5" fill="rgb(251 113 133)" stroke="#0d120d" strokeWidth="2" />
+          <circle cx={hx} cy={bal.ys[hi]} r="3.5" fill="rgb(96 165 250)"  stroke="#0d120d" strokeWidth="2" />
         </>}
         {points.map((p, i) => {
           if (i % step !== 0) return null
-          const mi = parseInt(p.month.slice(5, 7)) - 1
           return (
-            <text key={p.month} x={xs[i]} y={H - 3} textAnchor="middle" fontSize="8" fill="rgb(82 82 91)">
-              {MONTH_LABELS[mi]}{p.month.slice(2, 4)}
+            <text key={p.month} x={toX(i)} y={H - 3} textAnchor="middle" fontSize="8" fill="rgb(82 82 91)">
+              {MONTH_LABELS[parseInt(p.month.slice(5,7))-1]}{p.month.slice(2,4)}
             </text>
           )
         })}
       </svg>
+      {/* Legend */}
+      <div className="flex gap-4 mt-1 px-1">
+        {[
+          { color: '#a3e635',          label: 'Ingresos' },
+          { color: 'rgb(251 113 133)', label: 'Gastos' },
+          { color: 'rgb(96 165 250)',  label: 'Balance', dashed: true },
+        ].map(s => (
+          <div key={s.label} className="flex items-center gap-1.5">
+            <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={s.dashed ? '4 2' : undefined} /></svg>
+            <span className="text-[9px] text-zinc-500">{s.label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -423,11 +466,10 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
 ]
 
 export function InteractiveSection({ transactions, accounts }: { transactions: TxClient[]; accounts?: AccountSummary }) {
-  const [period, setPeriod]       = useState<PeriodKey>('all')
-  const [tab, setTab]             = useState<TabKey>('gastos')
-  const [chartMetric, setChartMetric] = useState<ChartMetric>('gastos')
-  const [selCat, setSelCat]       = useState<string | null>(null)
-  const [selSub, setSelSub]       = useState<string | null>(null)
+  const [period, setPeriod] = useState<PeriodKey>('all')
+  const [tab, setTab]       = useState<TabKey>('gastos')
+  const [selCat, setSelCat] = useState<string | null>(null)
+  const [selSub, setSelSub] = useState<string | null>(null)
 
   function selectTab(t: TabKey)       { setTab(t); setSelCat(null); setSelSub(null) }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
@@ -447,22 +489,24 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
   const tabFilter = TAB_FILTER[tab]
   const tabTxs = useMemo(() => periodTxs.filter(tabFilter), [periodTxs, tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Monthly trend — independent metric selector, uses full periodTxs
-  const trendPoints = useMemo(() => {
-    const map: Record<string, number> = {}
+  // Monthly trend — all 3 series from periodTxs, independent of tab
+  const trendPoints = useMemo((): SeriesPoint[] => {
+    const inc: Record<string, number> = {}
+    const exp: Record<string, number> = {}
     for (const tx of periodTxs) {
       if (!tx.date) continue
       const k = tx.date.slice(0, 7)
       const amt = Number(tx.amount ?? 0)
-      if (chartMetric === 'ingresos' && isLiquidIncome(tx))  map[k] = (map[k] ?? 0) + amt
-      if (chartMetric === 'gastos'   && isOutflow(tx))        map[k] = (map[k] ?? 0) + amt
-      if (chartMetric === 'balance') {
-        if (isLiquidIncome(tx)) map[k] = (map[k] ?? 0) + amt
-        if (isOutflow(tx))      map[k] = (map[k] ?? 0) - amt
-      }
+      if (isLiquidIncome(tx)) inc[k] = (inc[k] ?? 0) + amt
+      if (isOutflow(tx))      exp[k] = (exp[k] ?? 0) + amt
     }
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month, amount }))
-  }, [periodTxs, chartMetric])
+    const months = Array.from(new Set([...Object.keys(inc), ...Object.keys(exp)])).sort()
+    return months.map(month => {
+      const income   = inc[month] ?? 0
+      const expenses = exp[month] ?? 0
+      return { month, income, expenses, balance: income - expenses }
+    })
+  }, [periodTxs])
 
   // Resolves display category with overrides for edge cases
   const getDisplayCat = (tx: TxClient) => {
@@ -522,7 +566,6 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
     ? (cats.find(c => c.category === selCat)?.amount ?? 0)
     : cats.reduce((s, c) => s + c.amount, 0)
 
-  const tabColor = TABS.find(t => t.key === tab)!.color
   const tableTitle = selSub || selCat || TABS.find(t => t.key === tab)!.label
 
   // KPIs for current period
@@ -614,30 +657,12 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">
-            Tendencia
-            <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
-          </p>
-          <div className="flex gap-1">
-            {([
-              { key: 'gastos',   label: 'Gastos',    color: 'text-rose-400',    active: 'bg-rose-500/10 border-rose-500/30 text-rose-400' },
-              { key: 'ingresos', label: 'Ingresos',  color: 'text-[#a3e635]',   active: 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]' },
-              { key: 'balance',  label: 'Balance',   color: 'text-blue-400',    active: 'bg-blue-500/10 border-blue-500/30 text-blue-400' },
-            ] as const).map(m => (
-              <button key={m.key} onClick={() => setChartMetric(m.key as ChartMetric)}
-                className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-[0.14em] uppercase border transition-all ${
-                  chartMetric === m.key ? m.active : 'border-transparent text-zinc-600 hover:text-zinc-400'
-                }`}>
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-3">
+          Tendencia
+          <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
+        </p>
         {trendPoints.length > 1
-          ? <TrendChart points={trendPoints}
-              color={chartMetric === 'ingresos' ? '#a3e635' : chartMetric === 'balance' ? 'rgb(96 165 250)' : 'rgb(251 113 133)'}
-              id={chartMetric} />
+          ? <MultiTrendChart points={trendPoints} />
           : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
         }
       </div>
