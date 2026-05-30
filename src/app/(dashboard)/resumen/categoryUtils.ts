@@ -39,9 +39,11 @@ export function inferCategory(
   if (/aguinaldo/i.test(c)) return 'AGUINALDO'
   if (/alquiler\s*ingreso|ingreso\s*alquiler|renta\s*mensual/i.test(c)) return 'RENTAL_INCOME'
 
-  // ── Supermercado ─────────────────────────────────────────────────────────────
-  if (/automercado|auto\s*mercado|pricesmart|price\s*smart|walmart|pali\b|palí|mas\s*x\s*menos|masxmenos|maxi\s*pali|buen\s*precio|perimercado|fresh\s*market|passyflory|am\s*pm|vila\s*market|carnicer[ií]a\s*la\s*tica|super\s*mas|hipermercado|jumbo/i.test(v)
-    || /abarrotes/i.test(c)) return 'FOOD_SUPER'
+  // ── Abarrotes (tiendas locales, mercado) — prioridad antes del vendor map ─────
+  if (/^abarrotes/i.test(c)) return 'FOOD_ABARROTES'
+
+  // ── Supermercado (cadenas grandes) ────────────────────────────────────────────
+  if (/automercado|auto\s*mercado|pricesmart|price\s*smart|walmart|pali\b|palí|mas\s*x\s*menos|masxmenos|maxi\s*pali|buen\s*precio|perimercado|fresh\s*market|passyflory|am\s*pm|vila\s*market|carnicer[ií]a\s*la\s*tica|super\s*mas|hipermercado|jumbo/i.test(v)) return 'FOOD_SUPER'
 
   // ── Restaurantes ─────────────────────────────────────────────────────────────
   if (/restaurante|soda\b|pizza|burger|kfc|mcdonalds|subway|wendys|pollo\s*camp|taco|denny|cafeter[ií]a|almuerzo|cena\b|desayuno|fritanga|comida\s*fuera|domicilio|delivery\s*comida|rappi|pedidos\s*ya/i.test(t)) return 'FOOD_OUT'
@@ -156,6 +158,7 @@ export function displayCategory(raw: string): string {
     INTEREST:             'Intereses',
     // Food
     FOOD_SUPER:           'Supermercado',
+    FOOD_ABARROTES:       'Abarrotes',
     FOOD_OUT:             'Restaurantes',
     ENTERTAINMENT_DINING: 'Café / social',
     // Transport

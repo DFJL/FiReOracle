@@ -23,8 +23,9 @@ export interface AccountSummary {
   savingsBalance: number  // savings + investment accounts
 }
 
-type TabKey    = 'gastos' | 'ingresos' | 'objetivos'
-type PeriodKey = 'all' | 'ytd' | '1y' | '3m'
+type TabKey     = 'gastos' | 'ingresos' | 'objetivos'
+type PeriodKey  = 'all' | 'ytd' | '1y' | '6m' | '3m' | '2y' | '5y'
+type ChartMetric = 'gastos' | 'ingresos' | 'balance'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,9 +39,12 @@ function fmtDate(d: string) {
 
 function periodCutoff(p: PeriodKey): string | null {
   const now = new Date()
-  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);     return d.toISOString().slice(0, 10) }
+  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);       return d.toISOString().slice(0, 10) }
+  if (p === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);       return d.toISOString().slice(0, 10) }
   if (p === 'ytd') return `${now.getFullYear()}-01-01`
   if (p === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10) }
+  if (p === '2y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 2); return d.toISOString().slice(0, 10) }
+  if (p === '5y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 5); return d.toISOString().slice(0, 10) }
   return null
 }
 
@@ -96,10 +100,14 @@ function buildConceptCatMap(txs: TxClient[]): CatMap {
 }
 
 function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
+  // Concept-level hard overrides — beat category_code and vendor map
+  const ck = (tx.concept ?? '').toLowerCase().trim()
+  if (/^abarrotes/i.test(ck)) return 'Abarrotes'
+  if (/^impresion/i.test(ck)) return 'Hogar'
+
   if (tx.category_code) return displayCategory(tx.category_code)
   const vk = (tx.vendor ?? '').toLowerCase().trim()
   if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
-  const ck = (tx.concept ?? '').toLowerCase().trim()
   if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
   return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
 }
@@ -152,11 +160,13 @@ function getTxConcept(tx: TxClient): string {
   return tx.vendor?.trim() || '—'
 }
 
-// ── simple SVG trend chart ────────────────────────────────────────────────────
+// ── SVG trend chart with hover tooltip ───────────────────────────────────────
 
-function TrendChart({ points, color }: { points: { month: string; amount: number }[]; color: string }) {
+function TrendChart({ points, color, id = 'tg' }: { points: { month: string; amount: number }[]; color: string; id?: string }) {
+  const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null)
+
   if (points.length < 2) return null
-  const W = 800, H = 120, px = 4, pt = 8, pb = 20
+  const W = 800, H = 130, px = 4, pt = 8, pb = 24
   const vals = points.map(p => p.amount)
   const minV = Math.min(...vals, 0)
   const maxV = Math.max(...vals, 1)
@@ -172,32 +182,62 @@ function TrendChart({ points, color }: { points: { month: string; amount: number
     d += ` C${cpX},${ys[i-1].toFixed(1)} ${cpX},${ys[i].toFixed(1)} ${xs[i].toFixed(1)},${ys[i].toFixed(1)}`
   }
   const area = d + ` L${xs[xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`
-
   const zeroY = minV < 0 ? pt + chartH - ((0 - minV) / range) * chartH : null
+  const step = points.length > 36 ? 6 : points.length > 24 ? 3 : points.length > 12 ? 2 : 1
 
-  const step = points.length > 24 ? 3 : points.length > 12 ? 2 : 1
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const svgX = ((e.clientX - rect.left) / rect.width) * W
+    let closest = 0
+    let minDist = Infinity
+    xs.forEach((x, i) => { const d = Math.abs(x - svgX); if (d < minDist) { minDist = d; closest = i } })
+    setHover({ i: closest, x: xs[closest], y: ys[closest] })
+  }
+
+  const h = hover
+  const gradId = `tg-${id}`
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="cursor-crosshair">
-      <defs>
-        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.3)" strokeDasharray="4 3" strokeWidth="1" />}
-      <path d={area} fill="url(#tg)" />
-      <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      {points.map((p, i) => {
-        if (i % step !== 0) return null
-        const mi = parseInt(p.month.slice(5, 7)) - 1
-        return (
-          <text key={p.month} x={xs[i]} y={H - 3} textAnchor="middle" fontSize="8" fill="rgb(82 82 91)">
-            {MONTH_LABELS[mi]}{p.month.slice(2, 4)}
-          </text>
-        )
-      })}
-    </svg>
+    <div className="relative">
+      {h && (
+        <div className="absolute z-10 pointer-events-none"
+          style={{ left: `${(h.x / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
+          <div className="bg-[#1a221a] border border-[#a3e635]/20 rounded-lg px-3 py-2 text-center shadow-xl whitespace-nowrap">
+            <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-0.5">
+              {MONTH_LABELS[parseInt(points[h.i].month.slice(5,7))-1]} {points[h.i].month.slice(0,4)}
+            </p>
+            <p className="text-sm font-black tabular-nums" style={{ color }}>
+              {new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(points[h.i].amount)}
+            </p>
+          </div>
+        </div>
+      )}
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="cursor-crosshair"
+        onMouseMove={handleMouseMove} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.3)" strokeDasharray="4 3" strokeWidth="1" />}
+        <path d={area} fill={`url(#${gradId})`} />
+        <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        {h && <>
+          <line x1={h.x} y1={pt} x2={h.x} y2={pt + chartH} stroke={color} strokeWidth="1" strokeDasharray="3 2" opacity="0.5" />
+          <circle cx={h.x} cy={h.y} r="4" fill={color} stroke="#0d120d" strokeWidth="2" />
+        </>}
+        {points.map((p, i) => {
+          if (i % step !== 0) return null
+          const mi = parseInt(p.month.slice(5, 7)) - 1
+          return (
+            <text key={p.month} x={xs[i]} y={H - 3} textAnchor="middle" fontSize="8" fill="rgb(82 82 91)">
+              {MONTH_LABELS[mi]}{p.month.slice(2, 4)}
+            </text>
+          )
+        })}
+      </svg>
+    </div>
   )
 }
 
@@ -359,9 +399,12 @@ function TxTable({ rows, title, vMap, cMap }: {
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'all', label: 'Todo' },
+  { key: '5y',  label: '5 años' },
+  { key: '2y',  label: '2 años' },
   { key: 'ytd', label: 'Este año' },
-  { key: '1y',  label: '12 meses' },
-  { key: '3m',  label: '3 meses' },
+  { key: '1y',  label: '12M' },
+  { key: '6m',  label: '6M' },
+  { key: '3m',  label: '3M' },
 ]
 
 const TABS: { key: TabKey; label: string; color: string }[] = [
@@ -371,10 +414,11 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
 ]
 
 export function InteractiveSection({ transactions, accounts }: { transactions: TxClient[]; accounts?: AccountSummary }) {
-  const [period, setPeriod] = useState<PeriodKey>('all')
-  const [tab, setTab]       = useState<TabKey>('gastos')
-  const [selCat, setSelCat] = useState<string | null>(null)
-  const [selSub, setSelSub] = useState<string | null>(null)
+  const [period, setPeriod]       = useState<PeriodKey>('all')
+  const [tab, setTab]             = useState<TabKey>('gastos')
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('gastos')
+  const [selCat, setSelCat]       = useState<string | null>(null)
+  const [selSub, setSelSub]       = useState<string | null>(null)
 
   function selectTab(t: TabKey)       { setTab(t); setSelCat(null); setSelSub(null) }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
@@ -394,16 +438,22 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
   const tabFilter = TAB_FILTER[tab]
   const tabTxs = useMemo(() => periodTxs.filter(tabFilter), [periodTxs, tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Monthly trend for current tab+period (no separate metric selector)
+  // Monthly trend — independent metric selector, uses full periodTxs
   const trendPoints = useMemo(() => {
     const map: Record<string, number> = {}
-    for (const tx of tabTxs) {
+    for (const tx of periodTxs) {
       if (!tx.date) continue
       const k = tx.date.slice(0, 7)
-      map[k] = (map[k] ?? 0) + Number(tx.amount ?? 0)
+      const amt = Number(tx.amount ?? 0)
+      if (chartMetric === 'ingresos' && isLiquidIncome(tx))  map[k] = (map[k] ?? 0) + amt
+      if (chartMetric === 'gastos'   && isOutflow(tx))        map[k] = (map[k] ?? 0) + amt
+      if (chartMetric === 'balance') {
+        if (isLiquidIncome(tx)) map[k] = (map[k] ?? 0) + amt
+        if (isOutflow(tx))      map[k] = (map[k] ?? 0) - amt
+      }
     }
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month, amount }))
-  }, [tabTxs])
+  }, [periodTxs, chartMetric])
 
   // Resolves display category with overrides for edge cases
   const getDisplayCat = (tx: TxClient) => {
@@ -520,33 +570,6 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
           })}
         </div>
 
-        {/* Account balances — liquid vs savings */}
-        {accounts && (
-          <div className="mt-3 flex gap-3">
-            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
-              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Liquidez inicial</p>
-              <p className="text-lg font-black text-[#a3e635] tabular-nums">
-                {accounts.liquidBalance >= 1_000_000
-                  ? `₡${(accounts.liquidBalance / 1_000_000).toFixed(2)}M`
-                  : `₡${Math.round(accounts.liquidBalance).toLocaleString('es-CR')}`}
-              </p>
-            </div>
-            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
-              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Ahorro e inversión</p>
-              <p className="text-lg font-black text-blue-400 tabular-nums">
-                {accounts.savingsBalance >= 1_000_000
-                  ? `₡${(accounts.savingsBalance / 1_000_000).toFixed(2)}M`
-                  : `₡${Math.round(accounts.savingsBalance).toLocaleString('es-CR')}`}
-              </p>
-            </div>
-            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
-              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Patrimonio inicial</p>
-              <p className="text-lg font-black text-amber-400 tabular-nums">
-                {((accounts.liquidBalance + accounts.savingsBalance) / 1_000_000).toFixed(2)}M
-              </p>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Period tabs — underline style ─────────────────────────────────── */}
@@ -581,15 +604,34 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
       </div>
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
-      {trendPoints.length > 1 && (
-        <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
-          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-3">
-            Tendencia · {TABS.find(t => t.key === tab)!.label}
+      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">
+            Tendencia
             <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
           </p>
-          <TrendChart points={trendPoints} color={tabColor} />
+          <div className="flex gap-1">
+            {([
+              { key: 'gastos',   label: 'Gastos',    color: 'text-rose-400',    active: 'bg-rose-500/10 border-rose-500/30 text-rose-400' },
+              { key: 'ingresos', label: 'Ingresos',  color: 'text-[#a3e635]',   active: 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]' },
+              { key: 'balance',  label: 'Balance',   color: 'text-blue-400',    active: 'bg-blue-500/10 border-blue-500/30 text-blue-400' },
+            ] as const).map(m => (
+              <button key={m.key} onClick={() => setChartMetric(m.key as ChartMetric)}
+                className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-[0.14em] uppercase border transition-all ${
+                  chartMetric === m.key ? m.active : 'border-transparent text-zinc-600 hover:text-zinc-400'
+                }`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+        {trendPoints.length > 1
+          ? <TrendChart points={trendPoints}
+              color={chartMetric === 'ingresos' ? '#a3e635' : chartMetric === 'balance' ? 'rgb(96 165 250)' : 'rgb(251 113 133)'}
+              id={chartMetric} />
+          : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
+        }
+      </div>
 
       {/* L1 + L2 side by side on desktop */}
       <div className="flex gap-4 items-start">
