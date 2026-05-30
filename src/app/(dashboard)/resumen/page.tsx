@@ -25,6 +25,7 @@ export default async function ResumenPage() {
     .from('financial_accounts')
     .select('id, account_type')
     .eq('user_id', user.id)
+    .eq('is_active', true)
 
   let liquidBalance = 0
   let savingsBalance = 0

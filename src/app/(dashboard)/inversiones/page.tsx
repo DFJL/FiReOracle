@@ -35,6 +35,7 @@ export default async function InversionesPage() {
     .from('financial_accounts')
     .select('id, account_type')
     .eq('user_id', user.id)
+    .eq('is_active', true)
 
   let liquidBalance = 0
   if (accountRows) {
