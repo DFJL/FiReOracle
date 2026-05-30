@@ -436,49 +436,79 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
     return { income, expenses, invested, net, savingsRate }
   }, [periodTxs])
 
+  const now = new Date()
+  const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
+  const savingsRate = kpis.income > 0 ? Math.round(((kpis.income - kpis.expenses) / kpis.income) * 100) : 0
+
   return (
-    <div className="space-y-4">
-      {/* Period + Tab in one row */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 bg-[#0d120d] border border-[#a3e635]/[0.10] rounded-xl p-1">
-          {PERIODS.map(p => (
-            <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.15em] uppercase transition-colors ${period === p.key ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-1 bg-[#0d120d] border border-[#a3e635]/[0.10] rounded-xl p-1">
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => selectTab(t.key)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.15em] uppercase transition-colors ${tab === t.key ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
-              {t.label}
-            </button>
-          ))}
+    <div className="space-y-0">
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <div className="pb-5">
+        <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">
+          Fire Oracle · {monthLabel}
+        </p>
+        <p className="text-3xl font-black text-white tracking-tight leading-none mb-5">Felipe</p>
+
+        {/* KPI row — like the health metrics strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
+          {[
+            { label: 'Ingresos',   value: kpis.income,   fmt: 'K', color: 'text-[#a3e635]' },
+            { label: 'Gastos',     value: kpis.expenses, fmt: 'K', color: 'text-rose-400' },
+            { label: 'Balance',    value: kpis.net,      fmt: 'K', color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
+            { label: 'Ahorro',     value: savingsRate,   fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
+          ].map(k => {
+            const display = k.fmt === '%'
+              ? `${k.value}%`
+              : k.value >= 1_000_000
+                ? `${(k.value / 1_000_000).toFixed(1)}M`
+                : k.value >= 1_000
+                  ? `${Math.round(k.value / 1_000)}K`
+                  : String(Math.round(k.value))
+            return (
+              <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
+                <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{display}</p>
+                <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em]">{k.label}</p>
+              </div>
+            )
+          })}
         </div>
       </div>
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {[
-          { label: 'Ingresos',  value: kpis.income,   color: 'text-[#a3e635]' },
-          { label: 'Gastos',    value: kpis.expenses, color: 'text-rose-400' },
-          { label: 'Balance',   value: kpis.net,      color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
-          { label: 'Ahorros',   value: kpis.invested, color: 'text-amber-400' },
-        ].map(k => (
-          <div key={k.label} className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 flex flex-col gap-1">
-            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">{k.label}</p>
-            <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>
-              {new Intl.NumberFormat('es-CR', { maximumFractionDigits: 0 }).format(k.value)}
-            </p>
-            <p className="text-[10px] text-zinc-600">CRC</p>
-          </div>
+      {/* ── Period tabs — underline style ─────────────────────────────────── */}
+      <div className="flex border-b border-[#a3e635]/[0.08] mb-5">
+        {PERIODS.map(p => (
+          <button key={p.key} onClick={() => setPeriod(p.key)}
+            className={`px-4 py-2.5 text-[10px] font-black tracking-[0.16em] uppercase transition-colors relative ${
+              period === p.key ? 'text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'
+            }`}>
+            {p.label}
+            {period === p.key && (
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#a3e635] rounded-full" />
+            )}
+          </button>
         ))}
       </div>
 
-      {/* Trend chart */}
+      {/* ── Content tabs ──────────────────────────────────────────────────── */}
+      <div className="flex gap-1 mb-5">
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => selectTab(t.key)}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
+              tab === t.key
+                ? t.key === 'gastos'    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                : t.key === 'ingresos'  ? 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
+                :                         'bg-amber-400/10 border-amber-400/30 text-amber-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Trend chart ───────────────────────────────────────────────────── */}
       {trendPoints.length > 1 && (
-        <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4">
+        <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
           <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-3">
             Tendencia · {TABS.find(t => t.key === tab)!.label}
             <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
@@ -486,6 +516,8 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
           <TrendChart points={trendPoints} color={tabColor} />
         </div>
       )}
+
+      <div className="space-y-4">
 
       {/* L1 — category bars */}
       <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} />
@@ -497,6 +529,7 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
 
       {/* L3 — transactions */}
       <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} />
+      </div>
     </div>
   )
 }

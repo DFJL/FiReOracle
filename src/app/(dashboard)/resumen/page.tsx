@@ -19,7 +19,6 @@ export default async function ResumenPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
-      <h1 className="text-xl font-semibold tracking-tight text-white mb-6">Resumen</h1>
       <InteractiveSection transactions={(rawTx ?? []) as TxClient[]} />
     </div>
   )
