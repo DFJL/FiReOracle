@@ -41,6 +41,7 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     .not('date', 'is', null)
     .not('movement_type', 'is', null)  // exclude crypto valuations
     .order('date', { ascending: true })
+    .limit(20000)
 
   interface TxRow {
     movement_type: string | null

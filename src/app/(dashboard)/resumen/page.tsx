@@ -51,13 +51,14 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // Fetch all transactions for the period — no limit (user has ~8k rows, all needed for full history)
+  // PostgREST default cap is 1000 rows — must set explicit limit to get full history
   const base = supabase
     .from('transactions')
     .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense')
     .not('amount', 'is', null)
     .not('date', 'is', null)
-    .order('date', { ascending: true })  // ascending for chart rendering
+    .order('date', { ascending: true })
+    .limit(20000)
 
   const { data: rawTx } = await (start ? base.gte('date', start) : base)
   const transactions = (rawTx ?? []) as TxClient[]
