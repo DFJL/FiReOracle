@@ -106,7 +106,21 @@ function isOutflow(tx: TxClient) {
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
-function isInflow(tx: TxClient) { return tx.movement_type === 'income' && !tx.is_settlement }
+
+// Ingresos que tocan liquidez (saldo débito): salario, alquiler, misc activo
+function isLiquidIncome(tx: TxClient) {
+  return tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement
+}
+
+// Rendimientos que viven en cuentas de ahorro/inversión — no tocan liquidez
+function isPatrimonialIncome(tx: TxClient) {
+  return (tx.movement_type === 'income' && !!tx.is_passive_income) ||
+         (!tx.movement_type && tx.amount != null && Number(tx.amount) > 0)
+}
+
+// Mantener isInflow como alias de isLiquidIncome para compatibilidad interna
+const isInflow = isLiquidIncome
+
 function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
@@ -115,7 +129,7 @@ function isSavings(tx: TxClient) {
 
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:    isOutflow,
-  ingresos:  isInflow,
+  ingresos:  (tx) => isLiquidIncome(tx) || isPatrimonialIncome(tx),
   objetivos: (tx) => isSavings(tx) || (tx.movement_type === 'income' && !!tx.is_settlement),
 }
 
@@ -378,11 +392,18 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month, amount }))
   }, [tabTxs])
 
+  // Resolves display category, prefixing patrimonial income with ★ to distinguish
+  const getDisplayCat = (tx: TxClient) => {
+    if (tx.is_settlement) return 'Liquidaciones'
+    if (isPatrimonialIncome(tx)) return `★ ${getCat(tx)}`
+    return getCat(tx)
+  }
+
   // Category breakdown (L1)
   const cats = useMemo(() => {
     const map: Record<string, { amount: number; count: number }> = {}
     for (const tx of tabTxs) {
-      const cat = tx.is_settlement ? 'Liquidaciones' : getCat(tx)
+      const cat = getDisplayCat(tx)
       if (!map[cat]) map[cat] = { amount: 0, count: 0 }
       map[cat].amount += Number(tx.amount ?? 0)
       map[cat].count++
@@ -393,7 +414,7 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
 
   // Filtered by selected category
   const catTxs = useMemo(() =>
-    selCat ? tabTxs.filter(tx => (tx.is_settlement ? 'Liquidaciones' : getCat(tx)) === selCat) : tabTxs,
+    selCat ? tabTxs.filter(tx => getDisplayCat(tx) === selCat) : tabTxs,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [tabTxs, selCat])
 
@@ -423,17 +444,18 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
 
   // KPIs for current period
   const kpis = useMemo(() => {
-    let income = 0, expenses = 0, invested = 0
+    let income = 0, rendimientos = 0, expenses = 0, invested = 0
     for (const tx of periodTxs) {
-      if (!tx.movement_type) continue
       const amt = Number(tx.amount ?? 0)
-      if (isInflow(tx)) income += amt
-      else if (isOutflow(tx)) expenses += amt
-      else if (isSavings(tx)) invested += amt
+      if (isLiquidIncome(tx))       income += amt
+      else if (isPatrimonialIncome(tx)) rendimientos += amt
+      else if (isOutflow(tx))       expenses += amt
+      else if (isSavings(tx))       invested += amt
     }
     const net = income - expenses
+    // Savings rate sobre ingresos activos únicamente
     const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0
-    return { income, expenses, invested, net, savingsRate }
+    return { income, rendimientos, expenses, invested, net, savingsRate }
   }, [periodTxs])
 
   const now = new Date()
@@ -453,10 +475,10 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
         {/* KPI row — like the health metrics strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',   value: kpis.income,   fmt: 'K', color: 'text-[#a3e635]' },
-            { label: 'Gastos',     value: kpis.expenses, fmt: 'K', color: 'text-rose-400' },
-            { label: 'Balance',    value: kpis.net,      fmt: 'K', color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
-            { label: 'Ahorro',     value: savingsRate,   fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
+            { label: 'Ingresos',      value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]' },
+            { label: 'Gastos',        value: kpis.expenses,     fmt: 'K', color: 'text-rose-400' },
+            { label: 'Ahorro %',      value: savingsRate,       fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
+            { label: 'Rendimientos',  value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400' },
           ].map(k => {
             const display = k.fmt === '%'
               ? `${k.value}%`
