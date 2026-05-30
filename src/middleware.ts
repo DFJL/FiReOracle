@@ -28,21 +28,20 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth')
-  const isProtected = pathname.startsWith('/dashboard') ||
-    pathname.startsWith('/expenses') ||
-    pathname.startsWith('/budget') ||
-    pathname.startsWith('/investments') ||
-    pathname.startsWith('/network') ||
-    pathname.startsWith('/wealth') ||
-    pathname.startsWith('/oracle')
+  const isAppRoute = pathname.startsWith('/resumen') || pathname.startsWith('/movimientos') ||
+    pathname.startsWith('/flujo') || pathname.startsWith('/configuracion') ||
+    pathname.startsWith('/oracle') || pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/expenses')
 
-  if (!user && isProtected) {
+  // Redirect unauthenticated users away from app routes
+  if (!user && isAppRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  if (user && isAuthRoute) {
+  // Redirect authenticated users: from auth pages or root → resumen
+  if (user && (isAuthRoute || pathname === '/')) {
     const url = request.nextUrl.clone()
     url.pathname = '/resumen'
     return NextResponse.redirect(url)
