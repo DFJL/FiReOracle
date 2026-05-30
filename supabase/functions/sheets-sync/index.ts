@@ -109,6 +109,7 @@ async function processConfig(
   let rows_inserted = 0
   let rows_skipped = 0
   let highestRow = startRow - 1
+  const sampleErrors: string[] = []
 
   if (format_type === 'structured') {
     const { transactions, balanceSnapshots, selfLoanHints } = parseStructuredRows(
@@ -147,6 +148,7 @@ async function processConfig(
         )
         if (error) {
           console.error(`[${sheet_name}] upsert error row ${tx.row_number}:`, error.message)
+          if (sampleErrors.length < 3) sampleErrors.push(`row ${tx.row_number}: ${error.message}`)
           rows_skipped++
         } else {
           rows_inserted++
@@ -254,7 +256,7 @@ async function processConfig(
 
   await logSync(supabase, id, highestRow, rows_inserted, rows_skipped, 'success', null)
 
-  return { config_id: id, sheet: sheet_name, status: 'success', rows_inserted, rows_skipped }
+  return { config_id: id, sheet: sheet_name, status: 'success', rows_inserted, rows_skipped, sample_errors: sampleErrors.length ? sampleErrors : undefined }
 }
 
 async function logSync(
