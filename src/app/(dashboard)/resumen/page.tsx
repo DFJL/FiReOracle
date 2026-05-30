@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { InteractiveSection, TxClient } from './InteractiveSection'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
@@ -51,14 +52,15 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // PostgREST default cap is 1000 rows — must set explicit limit to get full history
-  const base = supabase
+  // Use admin client to bypass PostgREST max_rows cap; filter by user_id explicitly
+  const admin = createAdminClient()
+  const base = admin
     .from('transactions')
     .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense')
+    .eq('user_id', user.id)
     .not('amount', 'is', null)
     .not('date', 'is', null)
     .order('date', { ascending: true })
-    .limit(20000)
 
   const { data: rawTx } = await (start ? base.gte('date', start) : base)
   const transactions = (rawTx ?? []) as TxClient[]

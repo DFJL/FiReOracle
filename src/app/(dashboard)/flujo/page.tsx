@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
@@ -34,14 +35,15 @@ export default async function FlujoPage({ searchParams }: PageProps) {
 
   const params = await searchParams
 
-  const { data: rawTx } = await supabase
+  const admin = createAdminClient()
+  const { data: rawTx } = await admin
     .from('transactions')
     .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement, is_passive_income')
+    .eq('user_id', user.id)
     .not('amount', 'is', null)
     .not('date', 'is', null)
-    .not('movement_type', 'is', null)  // exclude crypto valuations
+    .not('movement_type', 'is', null)
     .order('date', { ascending: true })
-    .limit(20000)
 
   interface TxRow {
     movement_type: string | null
