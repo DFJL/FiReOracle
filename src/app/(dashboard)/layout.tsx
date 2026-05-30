@@ -24,6 +24,15 @@ const NAV_ITEMS = [
   { href: '/oracle',       label: 'Oracle',        icon: <Sparkles size={16} /> },
 ]
 
+// Subset shown in mobile bottom bar (most used)
+const BOTTOM_NAV = [
+  { href: '/resumen',     label: 'Resumen',  icon: <LayoutDashboard size={20} /> },
+  { href: '/movimientos', label: 'Movim.',   icon: <ArrowLeftRight size={20} /> },
+  { href: '/flujo',       label: 'Flujo',    icon: <BarChart2 size={20} /> },
+  { href: '/oracle',      label: 'Oracle',   icon: <Sparkles size={20} /> },
+  { href: '/configuracion', label: 'Config', icon: <Settings size={20} /> },
+]
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const {
@@ -32,7 +41,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
-  // Check onboarding status
   const { data: profile } = await supabase
     .from('user_profiles')
     .select('onboarding_done')
@@ -43,8 +51,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen bg-[#09090b] text-white flex">
-      {/* Sidebar */}
-      <aside className="w-52 shrink-0 border-r border-white/[0.06] p-4 flex flex-col gap-1 fixed h-full z-20">
+      {/* Sidebar — hidden on mobile, visible md+ */}
+      <aside className="hidden md:flex w-52 shrink-0 border-r border-white/[0.06] p-4 flex-col gap-1 fixed h-full z-20">
         <div className="mb-6 px-2 flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-blue-500 flex items-center justify-center text-xs font-bold shrink-0">
             F
@@ -76,25 +84,32 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 ml-52 flex flex-col min-h-screen">
+      <div className="flex-1 md:ml-52 flex flex-col min-h-screen pb-16 md:pb-0">
         {/* Onboarding banner */}
         {needsSetup && (
-          <div className="bg-blue-600/10 border-b border-blue-500/20 px-6 py-2.5 flex items-center justify-between gap-4">
+          <div className="bg-blue-600/10 border-b border-blue-500/20 px-4 py-2.5 flex items-center justify-between gap-4">
             <p className="text-xs text-blue-300">
               <span className="font-semibold">Configuración pendiente</span>
-              {' '}— Registrá tus cuentas y saldos iniciales para ver tu patrimonio real y métricas precisas.
+              {' '}— Registrá tus cuentas y saldos iniciales.
             </p>
             <a
               href="/configuracion"
               className="shrink-0 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg transition-colors"
             >
-              Configurar ahora
+              Configurar
             </a>
           </div>
         )}
 
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0d0d0f]/95 backdrop-blur-sm border-t border-white/[0.06] flex items-stretch">
+        {BOTTOM_NAV.map((item) => (
+          <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} mobile />
+        ))}
+      </nav>
     </div>
   )
 }

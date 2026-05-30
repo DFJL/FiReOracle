@@ -468,15 +468,23 @@ function StepConfirm({
 
 // ── wizard root ───────────────────────────────────────────────────────────────
 
-export function SetupWizard({ userEmail }: { userEmail: string }) {
+interface ExistingProfile {
+  display_name: string
+  monthly_income: string
+  savings_goal_pct: string
+  main_currency: string
+  onboarding_done: boolean
+}
+
+export function SetupWizard({ userEmail, existing }: { userEmail: string; existing?: ExistingProfile }) {
   const [step, setStep] = useState(0)
   const [isPending, startTransition] = useTransition()
 
   const [profile, setProfile] = useState<ProfileData>({
-    display_name: '',
-    monthly_income: '',
-    savings_goal_pct: '20',
-    main_currency: 'CRC',
+    display_name: existing?.display_name ?? '',
+    monthly_income: existing?.monthly_income ?? '',
+    savings_goal_pct: existing?.savings_goal_pct ?? '20',
+    main_currency: existing?.main_currency ?? 'CRC',
   })
 
   const [accounts, setAccounts] = useState<AccountInput[]>([blank()])
@@ -502,7 +510,9 @@ export function SetupWizard({ userEmail }: { userEmail: string }) {
         </div>
 
         <div className="mb-2">
-          <p className="text-xs text-zinc-600">Configuración inicial · {userEmail}</p>
+          <p className="text-xs text-zinc-600">
+            {existing?.onboarding_done ? 'Editar configuración' : 'Configuración inicial'} · {userEmail}
+          </p>
         </div>
 
         <StepIndicator current={step} total={3} />

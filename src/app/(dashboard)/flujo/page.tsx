@@ -135,7 +135,7 @@ export default async function FlujoPage({ searchParams }: PageProps) {
   const chartRows: MonthData[] = tableRows.map(({ hasData: _, ...r }) => r)
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-6 flex items-start justify-between">
         <div>

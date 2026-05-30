@@ -33,55 +33,36 @@ function fmtDate(d: string) {
 }
 
 const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
-  income:           { label: 'Ingreso',    cls: 'bg-emerald-500/10 text-emerald-400' },
-  expense:          { label: 'Gasto',      cls: 'bg-rose-500/10 text-rose-400' },
-  cash_withdrawal:  { label: 'Efectivo',   cls: 'bg-amber-500/10 text-amber-400' },
+  income:           { label: 'Ingreso',  cls: 'bg-emerald-500/10 text-emerald-400' },
+  expense:          { label: 'Gasto',    cls: 'bg-rose-500/10 text-rose-400' },
+  cash_withdrawal:  { label: 'Efectivo', cls: 'bg-amber-500/10 text-amber-400' },
 }
 const AMT_COLOR: Record<string, string> = {
   income: 'text-emerald-400', expense: 'text-rose-400', cash_withdrawal: 'text-amber-400',
 }
 
-// ── transaction classifiers ───────────────────────────────────────────────────
-// Liquidity model:
-//   - isExpense  = real outflow from liquid accounts
-//                  (regular expenses + loan payments, but NOT savings/investment deposits)
-//   - isIncome   = real inflow to liquid accounts
-//                  (salary, rental, etc. — NOT liquidaciones/settlements which are bucket→liquidity transfers)
-//   - isSavings  = money that left liquidity and entered a savings/investment bucket
-//                  (objetivos_financieros MINUS loan payments)
-//   - Settlements (is_settlement=true): bucket→liquidity transfers, shown in Objetivos tab as outflows
+// ── classifiers ───────────────────────────────────────────────────────────────
 
 function isLiquidityOutflow(tx: TxClient): boolean {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true  // personal / necesario
-  // Within objetivos_financieros: only loan payments are real liquidity outflows
+  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
 function isLiquidityInflow(tx: TxClient): boolean {
-  // Real income: money that arrived from outside (salary, rental)
-  // Settlements are liquidity inflows BUT they come from the investment bucket —
-  // counting them as income would double-count with the original savings deposit
   return tx.movement_type === 'income' && !tx.is_settlement
 }
 
 function isSavingsOrInvestment(tx: TxClient): boolean {
-  // Money that left liquidity and entered a savings/investment bucket
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
   return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
-function isSettlement(tx: TxClient): boolean {
-  // Bucket → liquidity transfer (not real income)
-  return tx.movement_type === 'income' && tx.is_settlement
-}
-
-// Map tab key to classifier
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:    isLiquidityOutflow,
   ingresos:  isLiquidityInflow,
-  objetivos: (tx) => isSavingsOrInvestment(tx) || isSettlement(tx),
+  objetivos: (tx) => isSavingsOrInvestment(tx) || (tx.movement_type === 'income' && tx.is_settlement),
 }
 
 function getTxCategory(tx: TxClient): string {
@@ -89,7 +70,6 @@ function getTxCategory(tx: TxClient): string {
 }
 
 function getTxSubcategory(tx: TxClient): string {
-  // Vendor is the "subcategory" — normalize it
   return tx.vendor?.trim() || tx.concept?.trim() || '—'
 }
 
@@ -104,7 +84,8 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   function toggleSort(key: SortKey) {
-    sortKey === key ? setSortDir(d => d === 'asc' ? 'desc' : 'asc') : (setSortKey(key), setSortDir('desc'))
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
   }
 
   const filtered = useMemo(() => {
@@ -120,16 +101,17 @@ function TransactionsTable({ rows, title }: { rows: TxClient[]; title: string })
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     let cmp = 0
     if (sortKey === 'date')     cmp = (a.date ?? '').localeCompare(b.date ?? '')
-    else if (sortKey === 'vendor')   cmp = getTxSubcategory(a).localeCompare(getTxSubcategory(b))
-    else if (sortKey === 'category') cmp = getTxCategory(a).localeCompare(getTxCategory(b))
-    else if (sortKey === 'amount')   cmp = Number(a.amount) - Number(b.amount)
+    if (sortKey === 'vendor')   cmp = getTxSubcategory(a).localeCompare(getTxSubcategory(b))
+    if (sortKey === 'category') cmp = getTxCategory(a).localeCompare(getTxCategory(b))
+    if (sortKey === 'amount')   cmp = Number(a.amount) - Number(b.amount)
     return sortDir === 'asc' ? cmp : -cmp
   }), [filtered, sortKey, sortDir])
 
-  const SortArrow = ({ col }: { col: SortKey }) =>
+  const SortArrow = ({ col }: { col: SortKey }) => (
     <span className={`ml-1 ${sortKey === col ? 'opacity-100' : 'opacity-25'}`}>
       {sortKey === col ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
     </span>
+  )
 
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
@@ -212,8 +194,8 @@ function SubcategoryPanel({
   const maxAmt = rows[0]?.amount ?? 1
 
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4 h-full">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-300 tracking-tight">
           {catName}
           <span className="text-zinc-600 font-normal ml-2">{fmtCRC(total)}</span>
@@ -224,8 +206,7 @@ function SubcategoryPanel({
           </button>
         )}
       </div>
-
-      <div className="space-y-2 overflow-auto max-h-64">
+      <div className="p-2">
         {rows.map(({ name, amount, count }) => {
           const pct = Math.round((amount / maxAmt) * 100)
           const totalPct = total > 0 ? Math.round((amount / total) * 100) : 0
@@ -234,21 +215,21 @@ function SubcategoryPanel({
             <button
               key={name}
               onClick={() => onSelect(isActive ? null : name)}
-              className={`w-full text-left p-2 rounded-lg transition-colors ${
-                isActive ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
+              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors mb-0.5 ${
+                isActive ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'
               }`}
             >
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className={`truncate max-w-[140px] ${isActive ? 'text-zinc-100' : 'text-zinc-400'}`}>{name}</span>
-                <div className="flex items-center gap-2 shrink-0 ml-2">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className={`truncate max-w-[55%] ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
+                <div className="flex items-center gap-3 shrink-0 ml-2">
                   <span className="text-zinc-600">{count} tx</span>
-                  <span className="text-zinc-300 tabular-nums">{fmtCRC(amount)}</span>
-                  <span className="text-zinc-600 w-8 text-right">{totalPct}%</span>
+                  <span className="text-zinc-400 tabular-nums">{fmtCRC(amount)}</span>
+                  <span className={`text-xs font-medium w-8 text-right tabular-nums ${isActive ? 'text-blue-400' : 'text-zinc-500'}`}>{totalPct}%</span>
                 </div>
               </div>
-              <div className="h-1 bg-white/[0.04] rounded-full overflow-hidden">
+              <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${isActive ? 'bg-blue-400/70' : 'bg-zinc-500/40'}`}
+                  className={`h-full rounded-full transition-all ${isActive ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -260,17 +241,17 @@ function SubcategoryPanel({
   )
 }
 
-// ── category list ─────────────────────────────────────────────────────────────
+// ── category bar chart (L1) ───────────────────────────────────────────────────
 
 interface CatRow { category: string; amount: number; count: number; txs: TxClient[] }
 
 const TAB_COLORS = {
-  gastos:   { bar: 'bg-rose-500/50',    active: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
-  ingresos: { bar: 'bg-emerald-500/50', active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  objetivos:{ bar: 'bg-violet-500/50',  active: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+  gastos:    { bar: 'bg-rose-500/60',    activeBar: 'bg-rose-400',    activeBg: 'bg-rose-500/10', activeBorder: 'border-rose-500/30', text: 'text-rose-400' },
+  ingresos:  { bar: 'bg-emerald-500/60', activeBar: 'bg-emerald-400', activeBg: 'bg-emerald-500/10', activeBorder: 'border-emerald-500/30', text: 'text-emerald-400' },
+  objetivos: { bar: 'bg-violet-500/60',  activeBar: 'bg-violet-400',  activeBg: 'bg-violet-500/10', activeBorder: 'border-violet-500/30', text: 'text-violet-400' },
 }
 
-function CategoryList({
+function CategoryBarChart({
   cats,
   tab,
   selectedCat,
@@ -282,76 +263,65 @@ function CategoryList({
   onSelect: (c: string | null) => void
 }) {
   const maxAmt = cats[0]?.amount ?? 1
+  const totalAmt = cats.reduce((s, c) => s + c.amount, 0)
   const colors = TAB_COLORS[tab]
 
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4 flex flex-col h-full">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
-        {selectedCat && (
-          <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
-            Ver todas
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <span className={`text-xs font-semibold tabular-nums ${colors.text}`}>{fmtCRC(totalAmt)}</span>
+          {selectedCat && (
+            <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+              Ver todas
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Mobile: horizontal chips */}
-      <div className="flex gap-2 overflow-x-auto pb-2 md:hidden">
-        <button
-          onClick={() => onSelect(null)}
-          className={`shrink-0 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-            !selectedCat ? colors.active : 'border-white/[0.06] text-zinc-500'
-          }`}
-        >
-          Todas
-        </button>
-        {cats.map(({ category, amount }) => (
-          <button
-            key={category}
-            onClick={() => onSelect(selectedCat === category ? null : category)}
-            className={`shrink-0 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-              selectedCat === category ? colors.active : 'border-white/[0.06] text-zinc-500'
-            }`}
-          >
-            {category} · {fmtCRC(amount)}
-          </button>
-        ))}
-      </div>
-
-      {/* Desktop: vertical list */}
-      <div className="hidden md:flex flex-col gap-1.5 overflow-auto">
-        <button
-          onClick={() => onSelect(null)}
-          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
-            !selectedCat ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
-          }`}
-        >
-          Todas las categorías
-        </button>
+      <div className="p-2">
         {cats.map(({ category, amount, count }) => {
           const pct = Math.round((amount / maxAmt) * 100)
+          const sharePct = totalAmt > 0 ? Math.round((amount / totalAmt) * 100) : 0
           const isActive = selectedCat === category
+
           return (
             <button
               key={category}
               onClick={() => onSelect(isActive ? null : category)}
-              className={`w-full text-left rounded-lg p-2.5 transition-colors ${
-                isActive ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
+              className={`w-full text-left px-3 py-2.5 rounded-lg transition-all mb-0.5 border ${
+                isActive
+                  ? `${colors.activeBg} ${colors.activeBorder}`
+                  : 'border-transparent hover:bg-white/[0.03]'
               }`}
             >
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className={`truncate max-w-[120px] ${isActive ? 'text-zinc-100' : 'text-zinc-400'}`}>{category}</span>
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="text-zinc-600">{count}</span>
-                  <span className="text-zinc-300 tabular-nums">{fmtCRC(amount)}</span>
+                <span className={`font-medium truncate max-w-[55%] ${isActive ? 'text-white' : 'text-zinc-300'}`}>
+                  {category}
+                </span>
+                <div className="flex items-center gap-3 shrink-0 ml-2">
+                  <span className="text-zinc-600 tabular-nums">{count} tx</span>
+                  <span className={`font-medium tabular-nums ${isActive ? colors.text : 'text-zinc-400'}`}>
+                    {fmtCRC(amount)}
+                  </span>
+                  <span className={`w-8 text-right tabular-nums ${isActive ? colors.text : 'text-zinc-600'}`}>
+                    {sharePct}%
+                  </span>
                 </div>
               </div>
-              <div className="h-1 bg-white/[0.04] rounded-full overflow-hidden">
-                <div className={`h-full rounded-full ${isActive ? 'bg-blue-400/60' : colors.bar} opacity-70`} style={{ width: `${pct}%` }} />
+              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${isActive ? colors.activeBar : colors.bar}`}
+                  style={{ width: `${pct}%` }}
+                />
               </div>
             </button>
           )
         })}
+        {cats.length === 0 && (
+          <p className="text-center text-xs text-zinc-600 py-6">Sin movimientos</p>
+        )}
       </div>
     </div>
   )
@@ -360,20 +330,18 @@ function CategoryList({
 // ── main export ───────────────────────────────────────────────────────────────
 
 export function InteractiveSection({ transactions }: InteractiveSectionProps) {
-  const [tab, setTab]           = useState<TabKey>('gastos')
+  const [tab, setTab]            = useState<TabKey>('gastos')
   const [selectedCat, setSelCat] = useState<string | null>(null)
   const [selectedSub, setSelSub] = useState<string | null>(null)
 
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
-  function selectTab(t: TabKey)       { setTab(t); setSelCat(null); setSelSub(null) }
+  function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
 
-  // ── compute categories for active tab ────────────────────────────────────
   const cats: CatRow[] = useMemo(() => {
     const filter = TAB_FILTER[tab]
     const map: Record<string, CatRow> = {}
     for (const tx of transactions) {
       if (!filter(tx)) continue
-      // Settlements shown under "Liquidaciones" category in the objetivos tab
       const cat = tx.is_settlement ? 'Liquidaciones' : getTxCategory(tx)
       if (!map[cat]) map[cat] = { category: cat, amount: 0, count: 0, txs: [] }
       map[cat].amount += Number(tx.amount)
@@ -383,13 +351,11 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
     return Object.values(map).sort((a, b) => b.amount - a.amount)
   }, [transactions, tab])
 
-  // ── transactions for the current category selection ───────────────────────
   const catTxs: TxClient[] = useMemo(() => {
     if (!selectedCat) return cats.flatMap(c => c.txs)
     return cats.find(c => c.category === selectedCat)?.txs ?? []
   }, [cats, selectedCat])
 
-  // ── subcategories (vendor grouping) ──────────────────────────────────────
   const subcats: SubRow[] = useMemo(() => {
     const map: Record<string, SubRow> = {}
     for (const tx of catTxs) {
@@ -401,14 +367,15 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
     return Object.values(map).sort((a, b) => b.amount - a.amount).slice(0, 25)
   }, [catTxs])
 
-  // ── final tx rows for detail table ────────────────────────────────────────
   const tableTxs: TxClient[] = useMemo(() => {
     if (!selectedSub) return catTxs
     return catTxs.filter(tx => getTxSubcategory(tx) === selectedSub)
   }, [catTxs, selectedSub])
 
   const catTotal = useMemo(
-    () => (cats.find(c => c.category === selectedCat)?.amount ?? cats.reduce((s, c) => s + c.amount, 0)),
+    () => selectedCat
+      ? (cats.find(c => c.category === selectedCat)?.amount ?? 0)
+      : cats.reduce((s, c) => s + c.amount, 0),
     [cats, selectedCat]
   )
 
@@ -418,11 +385,7 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
     objetivos: 'Ahorros e Inversiones',
   }
 
-  const tableTitle = selectedSub
-    ? selectedSub
-    : selectedCat
-      ? selectedCat
-      : TAB_LABELS[tab]
+  const tableTitle = selectedSub || selectedCat || TAB_LABELS[tab]
 
   return (
     <div className="space-y-4">
@@ -441,33 +404,26 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
         ))}
       </div>
 
-      {/* Level 1 + Level 2 */}
-      <div className="flex flex-col md:grid md:grid-cols-5 gap-4">
-        {/* Category list */}
-        <div className={`${selectedCat ? 'md:col-span-2' : 'md:col-span-5'}`}>
-          <CategoryList
-            cats={cats}
-            tab={tab}
-            selectedCat={selectedCat}
-            onSelect={selectCat}
-          />
-        </div>
+      {/* L1 — category bar chart (full width) */}
+      <CategoryBarChart
+        cats={cats}
+        tab={tab}
+        selectedCat={selectedCat}
+        onSelect={selectCat}
+      />
 
-        {/* Subcategory panel — only when a cat is selected */}
-        {selectedCat && (
-          <div className="md:col-span-3">
-            <SubcategoryPanel
-              rows={subcats}
-              catName={selectedCat}
-              total={catTotal}
-              selectedSub={selectedSub}
-              onSelect={setSelSub}
-            />
-          </div>
-        )}
-      </div>
+      {/* L2 — subcategory breakdown (shows when a cat is selected) */}
+      {selectedCat && (
+        <SubcategoryPanel
+          rows={subcats}
+          catName={selectedCat}
+          total={catTotal}
+          selectedSub={selectedSub}
+          onSelect={setSelSub}
+        />
+      )}
 
-      {/* Level 3 — transaction detail */}
+      {/* L3 — transaction detail */}
       <TransactionsTable rows={tableTxs} title={tableTitle} />
     </div>
   )
