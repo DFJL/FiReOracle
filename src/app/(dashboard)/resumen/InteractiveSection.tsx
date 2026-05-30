@@ -111,10 +111,12 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   const ck = (tx.concept ?? '').toLowerCase().trim()
   const vk = (tx.vendor ?? '').toLowerCase().trim()
 
-  // category_code is authoritative — except for passive income where it may describe
-  // the bucket destination (SAVINGS, INCOME), not the economic type.
-  // Exception: RENTAL_INCOME is meaningful even when is_passive_income=true.
-  if (tx.category_code && (!tx.is_passive_income || LIQUID_PASSIVE_INCOME_CATS.has(tx.category_code))) {
+  // category_code is authoritative except for passive income entries where it
+  // records the bucket destination (SAVINGS, INCOME) rather than the economic type.
+  // Specific passive income categories (RENTAL_INCOME, INVESTMENT_RETURN, etc.)
+  // are always meaningful and should be displayed directly.
+  const BUCKET_ONLY_CATS = new Set(['SAVINGS', 'INCOME', 'SAVINGS_INVESTMENT', 'PASSIVE_INCOME'])
+  if (tx.category_code && (!tx.is_passive_income || !BUCKET_ONLY_CATS.has(tx.category_code))) {
     return displayCategory(tx.category_code)
   }
 
@@ -130,17 +132,6 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
 
 // ── classifiers ───────────────────────────────────────────────────────────────
 
-// Passive income that is marked is_passive_income=true in the DB but still
-// flows through liquid accounts (checking/cash). Rental income is the canonical
-// example: it's passive economically but you receive it in your bank account.
-// Investment returns (funds, crypto staking) stay inside the investment vehicle.
-const LIQUID_PASSIVE_INCOME_CATS = new Set(['RENTAL_INCOME'])
-
-function isLiquidPassive(tx: TxClient): boolean {
-  return tx.movement_type === 'income' && !!tx.is_passive_income &&
-    LIQUID_PASSIVE_INCOME_CATS.has(tx.category_code ?? '')
-}
-
 // Pérdidas contables patrimoniales — espejo de rendimientos pasivos, no afectan liquidez
 function isPatrimonialLoss(tx: TxClient) {
   if (tx.movement_type !== 'expense') return false
@@ -155,16 +146,17 @@ function isOutflow(tx: TxClient) {
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
-// Ingresos que tocan liquidez: salario, alquiler (incluso si is_passive_income), freelance
+// movement_type es el árbitro de liquidez — si tiene 'income' tocó una cuenta real.
+// Los registros con movement_type=NULL (Mov=#N/A en el sheet) son solo valorización
+// contable (rendimientos reinvertidos, mark-to-market) y nunca tocan cuentas.
+// is_passive_income solo describe naturaleza económica (activo vs pasivo), no liquidez.
 function isLiquidIncome(tx: TxClient) {
-  return tx.movement_type === 'income' && !tx.is_settlement &&
-    (!tx.is_passive_income || isLiquidPassive(tx))
+  return tx.movement_type === 'income' && !tx.is_settlement
 }
 
-// Rendimientos que NO tocan liquidez — se quedan dentro del vehículo de inversión
+// Valorización pura: registros sin movement_type — ganancia/pérdida no realizada
 function isPatrimonialIncome(tx: TxClient) {
-  return (tx.movement_type === 'income' && !!tx.is_passive_income && !isLiquidPassive(tx)) ||
-         (!tx.movement_type && tx.amount != null && Number(tx.amount) > 0)
+  return !tx.movement_type && tx.amount != null && Number(tx.amount) > 0
 }
 
 // Mantener isInflow como alias de isLiquidIncome para compatibilidad interna
@@ -532,7 +524,7 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
     if (tab !== 'ingresos') return base
     return incomeSubtab === 'activo'
       ? base.filter(tx => isLiquidIncome(tx) && !tx.is_passive_income)
-      : base.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
+      : base.filter(tx => (tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement) || isPatrimonialIncome(tx))
   }, [periodTxs, tab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monthly trend — all 3 series from periodTxs, independent of tab
@@ -649,9 +641,9 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
         {/* KPI row — like the health metrics strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',     value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]',  sub: null },
-            { label: 'Gastos',       value: kpis.expenses,     fmt: 'K', color: 'text-rose-400',   sub: null },
-            { label: 'Rendimientos', value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400',   sub: null },
+            { label: 'Ingresos',       value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]',  sub: null },
+            { label: 'Gastos',         value: kpis.expenses,     fmt: 'K', color: 'text-rose-400',   sub: null },
+            { label: 'Valor. pasivo',  value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400',   sub: 'no realizado' },
             { label: 'Tasa ahorro',  value: savingsRate,       fmt: '%',
               color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
               sub: `margen ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
