@@ -102,21 +102,27 @@ function buildConceptCatMap(txs: TxClient[]): CatMap {
 }
 
 // Category hierarchy: GRUPO (expense_group) → CONCEPTO (category_code) → DETALLE (vendor/concept inference)
-// category_code is authoritative when present — only fall through to inference when null.
+//
+// Exception: passive income (is_passive_income=true) skips category_code.
+// For passive income, category_code reflects the savings bucket destination (SAVINGS, INCOME),
+// not the economic nature of the transaction. The concept/vendor is always more informative
+// ("Rendimientos Fondo X", "Farming Y", etc.) and is used instead.
 function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
-  if (tx.category_code) return displayCategory(tx.category_code)
-
-  // Inference layer (DETALLE): concept patterns → vendor map → concept map → inferCategory
   const ck = (tx.concept ?? '').toLowerCase().trim()
   const vk = (tx.vendor ?? '').toLowerCase().trim()
 
-  // Concept-level pattern overrides (only when no category_code)
+  // category_code is authoritative — except for passive income where it describes
+  // the bucket destination, not the economic type.
+  if (tx.category_code && !tx.is_passive_income) return displayCategory(tx.category_code)
+
+  // Concept-level pattern overrides
   if (/^abarrotes/i.test(ck)) return 'Abarrotes'
   if (/^impresion/i.test(ck)) return 'Hogar'
 
   if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
   if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
-  return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
+  // Pass null as categoryCode for passive income so inferCategory uses concept/vendor only
+  return displayCategory(inferCategory(tx.vendor, tx.concept, tx.is_passive_income ? null : tx.category_code))
 }
 
 // ── classifiers ───────────────────────────────────────────────────────────────

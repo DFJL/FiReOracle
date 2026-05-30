@@ -35,6 +35,9 @@ export function inferCategory(
   if (/rendimiento|dividend|inter[eé]s\s*(recibido|ganado|de\s*fondo)|farming|staking/i.test(c)
     || /rendimiento|farming|meteora|multimoney|dominion|transcomer/i.test(v)) return 'INVESTMENT_RETURN'
   if (/liquidaci[oó]n\s*(rendimiento|fondo|crypto|farming)/i.test(c)) return 'INVESTMENT_RETURN'
+  if (/excedente[s]?\s*(de\s*)?ahorr|pago\s*de\s*excedente/i.test(c)) return 'INVESTMENT_RETURN'
+  if (/retiro\s*(fcl|fondo\s*capitalizaci)/i.test(c)) return 'WORK_PAYMENTS'
+  if (/millas|puntos\s*(de\s*)?banco|cashback|bonificaci[oó]n\s*banco/i.test(c)) return 'BANK_FEE'
   if (/salario|sueldo/i.test(c)) return 'SALARY'
   if (/aguinaldo/i.test(c)) return 'AGUINALDO'
   if (/alquiler\s*ingreso|ingreso\s*alquiler|renta\s*mensual/i.test(c)) return 'RENTAL_INCOME'
