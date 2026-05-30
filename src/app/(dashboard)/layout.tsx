@@ -50,16 +50,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const needsSetup = !profile?.onboarding_done
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-white flex">
+    <div className="min-h-screen bg-[#080c08] text-[#f0f4ee] flex">
       {/* Sidebar — hidden on mobile, visible md+ */}
-      <aside className="hidden md:flex w-52 shrink-0 border-r border-white/[0.06] p-4 flex-col gap-1 fixed h-full z-20">
-        <div className="mb-6 px-2 flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-blue-500 flex items-center justify-center text-xs font-bold shrink-0">
+      <aside className="hidden md:flex w-52 shrink-0 border-r border-[#a3e635]/[0.08] p-4 flex-col gap-1 fixed h-full z-20 bg-[#080c08]">
+        <div className="mb-8 px-2 flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-[#a3e635] flex items-center justify-center text-xs font-black text-black shrink-0">
             F
           </div>
-          <span className="text-sm font-semibold tracking-tight">
-            <span className="text-blue-400">FiRe</span>
-            <span className="text-white">Oracle</span>
+          <span className="text-xs font-black tracking-widest uppercase text-[#a3e635]">
+            FiReOracle
           </span>
         </div>
 
@@ -105,7 +104,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0d0d0f]/95 backdrop-blur-sm border-t border-white/[0.06] flex items-stretch">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#080c08]/95 backdrop-blur-sm border-t border-[#a3e635]/[0.08] flex items-stretch">
         {BOTTOM_NAV.map((item) => (
           <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} mobile />
         ))}
