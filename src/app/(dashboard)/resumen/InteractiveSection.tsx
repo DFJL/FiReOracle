@@ -101,8 +101,16 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
 
 // ── classifiers ───────────────────────────────────────────────────────────────
 
+// Pérdidas contables patrimoniales — espejo de rendimientos pasivos, no afectan liquidez
+function isPatrimonialLoss(tx: TxClient) {
+  if (tx.movement_type !== 'expense') return false
+  // expense_group='na' con category_code null = ajuste de valoración (crypto, fondos)
+  return tx.expense_group === 'na' && !tx.category_code
+}
+
 function isOutflow(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+  if (isPatrimonialLoss(tx)) return false  // pérdidas contables no son gastos reales
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
@@ -130,7 +138,7 @@ function isSavings(tx: TxClient) {
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:    isOutflow,
   ingresos:  (tx) => isLiquidIncome(tx) || isPatrimonialIncome(tx),
-  objetivos: (tx) => isSavings(tx) || (tx.movement_type === 'income' && !!tx.is_settlement),
+  objetivos: (tx) => isSavings(tx) || isPatrimonialLoss(tx) || (tx.movement_type === 'income' && !!tx.is_settlement),
 }
 
 function getTxConcept(tx: TxClient): string {
