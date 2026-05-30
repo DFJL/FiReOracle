@@ -9,11 +9,13 @@ import {
   Users,
   Landmark,
   Sparkles,
+  BarChart2,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/resumen', label: 'Resumen', icon: <LayoutDashboard size={16} /> },
   { href: '/movimientos', label: 'Movimientos', icon: <ArrowLeftRight size={16} /> },
+  { href: '/flujo', label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
   { href: '/presupuesto', label: 'Presupuesto', icon: <PiggyBank size={16} /> },
   { href: '/inversiones', label: 'Inversiones', icon: <TrendingUp size={16} /> },
   { href: '/prestamos', label: 'Préstamos', icon: <Users size={16} /> },
