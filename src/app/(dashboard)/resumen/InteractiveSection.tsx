@@ -24,7 +24,7 @@ export interface AccountSummary {
 }
 
 type TabKey     = 'gastos' | 'ingresos' | 'objetivos'
-type PeriodKey  = 'all' | 'ytd' | '1y' | '6m' | '3m' | '2y' | '5y'
+type PeriodKey  = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
 type ChartMetric = 'gastos' | 'ingresos' | 'balance'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -39,6 +39,8 @@ function fmtDate(d: string) {
 
 function periodCutoff(p: PeriodKey): string | null {
   const now = new Date()
+  if (p === 'mtd') return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  if (p === '1m')  { const d = new Date(now); d.setMonth(d.getMonth() - 1);       return d.toISOString().slice(0, 10) }
   if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);       return d.toISOString().slice(0, 10) }
   if (p === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);       return d.toISOString().slice(0, 10) }
   if (p === 'ytd') return `${now.getFullYear()}-01-01`
@@ -99,14 +101,19 @@ function buildConceptCatMap(txs: TxClient[]): CatMap {
   return map
 }
 
+// Category hierarchy: GRUPO (expense_group) → CONCEPTO (category_code) → DETALLE (vendor/concept inference)
+// category_code is authoritative when present — only fall through to inference when null.
 function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
-  // Concept-level hard overrides — beat category_code and vendor map
+  if (tx.category_code) return displayCategory(tx.category_code)
+
+  // Inference layer (DETALLE): concept patterns → vendor map → concept map → inferCategory
   const ck = (tx.concept ?? '').toLowerCase().trim()
+  const vk = (tx.vendor ?? '').toLowerCase().trim()
+
+  // Concept-level pattern overrides (only when no category_code)
   if (/^abarrotes/i.test(ck)) return 'Abarrotes'
   if (/^impresion/i.test(ck)) return 'Hogar'
 
-  if (tx.category_code) return displayCategory(tx.category_code)
-  const vk = (tx.vendor ?? '').toLowerCase().trim()
   if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
   if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
   return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
@@ -399,12 +406,14 @@ function TxTable({ rows, title, vMap, cMap }: {
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'all', label: 'Todo' },
-  { key: '5y',  label: '5 años' },
-  { key: '2y',  label: '2 años' },
-  { key: 'ytd', label: 'Este año' },
+  { key: '5y',  label: '5A' },
+  { key: '2y',  label: '2A' },
+  { key: 'ytd', label: 'YTD' },
   { key: '1y',  label: '12M' },
   { key: '6m',  label: '6M' },
   { key: '3m',  label: '3M' },
+  { key: '1m',  label: '1M' },
+  { key: 'mtd', label: 'MTD' },
 ]
 
 const TABS: { key: TabKey; label: string; color: string }[] = [

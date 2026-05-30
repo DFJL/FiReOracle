@@ -39,7 +39,7 @@ export function inferCategory(
   if (/aguinaldo/i.test(c)) return 'AGUINALDO'
   if (/alquiler\s*ingreso|ingreso\s*alquiler|renta\s*mensual/i.test(c)) return 'RENTAL_INCOME'
 
-  // ── Abarrotes (tiendas locales, mercado) — prioridad antes del vendor map ─────
+  // ── Abarrotes (tiendas locales, mercado) — concepto-level, solo cuando category_code es null
   if (/^abarrotes/i.test(c)) return 'FOOD_ABARROTES'
 
   // ── Supermercado (cadenas grandes) ────────────────────────────────────────────
