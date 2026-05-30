@@ -86,7 +86,12 @@ export default async function InversionesPage() {
 
     const balance = deposits - liquidaciones + rendimientos
 
-    return { ...def, deposits, liquidaciones, rendimientos, balance, valorizationNet }
+    // Exclude conceptPatterns (RegExp) — not serializable for client components
+    return {
+      key: def.key, name: def.name, industry: def.industry,
+      color: def.color, vendors: def.vendors,
+      deposits, liquidaciones, rendimientos, balance, valorizationNet,
+    }
   })
 
   const totalInvested = buckets.reduce((s, b) => s + b.balance, 0)
