@@ -132,7 +132,6 @@ async function processConfig(
             movement_type: tx.movement_type,
             amount: tx.amount,
             currency_code: tx.currency_code,
-            source_code: tx.source_code,
             detail: tx.detail,
             balance_after_debit: tx.balance_after_debit,
             balance_after_cash: tx.balance_after_cash,
