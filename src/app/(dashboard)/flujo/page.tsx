@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
+import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,11 +36,20 @@ export default async function FlujoPage({ searchParams }: PageProps) {
 
   const { data: rawTx } = await supabase
     .from('transactions')
-    .select('movement_type, amount, date')
+    .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement')
     .not('amount', 'is', null)
     .not('date', 'is', null)
 
-  interface TxRow { movement_type: string | null; amount: number | null; date: string | null }
+  interface TxRow {
+    movement_type: string | null
+    amount: number | null
+    date: string | null
+    expense_group: string | null
+    category_code: string | null
+    vendor: string | null
+    concept: string | null
+    is_settlement: boolean | null
+  }
   const allTx = (rawTx ?? []) as TxRow[]
 
   // Available years
@@ -64,10 +74,15 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     if (parseInt(r.date.slice(0, 4)) !== selectedYear) continue
     const key = r.date.slice(0, 7)
     if (!monthMap[key]) continue
-    const amt = Number(r.amount)
-    if (r.movement_type === 'income') monthMap[key].income += amt
-    else if (r.movement_type === 'expense') monthMap[key].expenses += amt
-    else if (r.movement_type === 'cash_withdrawal') monthMap[key].withdrawals += amt
+    const amt = Number(r.amount ?? 0)
+    if (r.movement_type === 'income' && !r.is_settlement) {
+      monthMap[key].income += amt
+    } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
+      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
+        if (r.movement_type === 'cash_withdrawal') monthMap[key].withdrawals += amt
+        else monthMap[key].expenses += amt
+      }
+    }
   }
 
   let cumulative = 0
@@ -94,10 +109,15 @@ export default async function FlujoPage({ searchParams }: PageProps) {
     if (!r.date) continue
     const key = r.date.slice(0, 7)
     if (!allMonthMap[key]) allMonthMap[key] = { income: 0, expenses: 0, withdrawals: 0 }
-    const amt = Number(r.amount)
-    if (r.movement_type === 'income') allMonthMap[key].income += amt
-    else if (r.movement_type === 'expense') allMonthMap[key].expenses += amt
-    else if (r.movement_type === 'cash_withdrawal') allMonthMap[key].withdrawals += amt
+    const amt = Number(r.amount ?? 0)
+    if (r.movement_type === 'income' && !r.is_settlement) {
+      allMonthMap[key].income += amt
+    } else if (r.movement_type === 'expense' || r.movement_type === 'cash_withdrawal') {
+      if (r.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(r.vendor, r.concept, r.category_code)) {
+        if (r.movement_type === 'cash_withdrawal') allMonthMap[key].withdrawals += amt
+        else allMonthMap[key].expenses += amt
+      }
+    }
   }
   let allCumulative = 0
   const allMonthsData: MonthData[] = Object.entries(allMonthMap)

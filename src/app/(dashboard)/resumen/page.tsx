@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { MetricChart, MonthPoint } from './MetricChart'
 import { InteractiveSection, TxClient } from './InteractiveSection'
+import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,10 +58,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // Single comprehensive query — includes expense_group for savings/investment separation
+  // Single comprehensive query — includes expense_group + is_settlement for proper liquidity accounting
   const base = supabase
     .from('transactions')
-    .select('movement_type, amount, date, vendor, concept, category_code, expense_group')
+    .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement')
     .not('amount', 'is', null)
     .not('date', 'is', null)
     .order('date', { ascending: false })
@@ -69,29 +70,42 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const { data: rawTx } = await (start ? base.gte('date', start) : base)
   const transactions = (rawTx ?? []) as TxClient[]
 
-  // ── KPI stats — exclude objetivos_financieros from "gastos" ───────────────
-  let income = 0, expenses = 0, savings = 0
+  // ── KPI stats — liquidity only ─────────────────────────────────────────────
+  // income: movement_type=income AND NOT is_settlement (settlements are bucket→liquidity transfers, not real income)
+  // expenses: movement_type=expense/cash_withdrawal AND NOT objetivos_financieros (unless loan payment)
+  // invested: objetivos_financieros non-loan-payment outflows (moved to savings/investment buckets)
+  let income = 0, expenses = 0, invested = 0
   for (const t of transactions) {
-    const amt = Number(t.amount)
+    const amt = Number(t.amount ?? 0)
     if (t.movement_type === 'income') {
-      income += amt
+      if (!t.is_settlement) income += amt
     } else if (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') {
-      if (t.expense_group === 'objetivos_financieros') savings += amt
-      else expenses += amt
+      if (t.expense_group !== SAVINGS_EXPENSE_GROUP) {
+        expenses += amt
+      } else if (isLoanPayment(t.vendor, t.concept, t.category_code)) {
+        expenses += amt
+      } else {
+        invested += amt
+      }
     }
   }
-  const net = income - expenses - savings
+  const net = income - expenses
   const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0
 
-  // ── Monthly chart data ─────────────────────────────────────────────────────
+  // ── Monthly chart data — liquidity only (same rules as KPIs) ──────────────
   const monthMap: Record<string, MonthPoint> = {}
   for (const t of transactions) {
     if (!t.date) continue
     const key = t.date.slice(0, 7)
     if (!monthMap[key]) monthMap[key] = { month: key, income: 0, expenses: 0, net: 0, savings_rate: 0, cumulative: 0 }
-    const amt = Number(t.amount)
-    if (t.movement_type === 'income') monthMap[key].income += amt
-    else if ((t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') && t.expense_group !== 'objetivos_financieros') monthMap[key].expenses += amt
+    const amt = Number(t.amount ?? 0)
+    if (t.movement_type === 'income' && !t.is_settlement) {
+      monthMap[key].income += amt
+    } else if (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') {
+      if (t.expense_group !== SAVINGS_EXPENSE_GROUP || isLoanPayment(t.vendor, t.concept, t.category_code)) {
+        monthMap[key].expenses += amt
+      }
+    }
   }
   let cumulative = 0
   const chartData: MonthPoint[] = Object.values(monthMap)
@@ -99,12 +113,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     .map((m) => {
       const n = m.income - m.expenses
       cumulative += n
-      return {
-        ...m,
-        net: n,
-        savings_rate: m.income > 0 ? ((m.income - m.expenses) / m.income) * 100 : 0,
-        cumulative,
-      }
+      return { ...m, net: n, savings_rate: m.income > 0 ? ((m.income - m.expenses) / m.income) * 100 : 0, cumulative }
     })
 
   // ── Period pills ───────────────────────────────────────────────────────────
@@ -192,9 +201,9 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           <p className="text-xl font-semibold text-violet-400 tabular-nums">
             {savingsRate.toFixed(1)}%
           </p>
-          {savings > 0 && (
+          {invested > 0 && (
             <p className="text-xs text-zinc-600">
-              +{fmt(savings)} objetivos financieros
+              +{fmt(invested)} a objetivos
             </p>
           )}
           <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
