@@ -23,8 +23,9 @@ export interface AccountSummary {
   savingsBalance: number  // savings + investment accounts
 }
 
-type TabKey     = 'gastos' | 'ingresos' | 'objetivos'
-type PeriodKey  = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
+type TabKey        = 'gastos' | 'ingresos' | 'objetivos'
+type IncomeSubtab  = 'activo' | 'pasivo'
+type PeriodKey     = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -466,12 +467,14 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
 ]
 
 export function InteractiveSection({ transactions, accounts }: { transactions: TxClient[]; accounts?: AccountSummary }) {
-  const [period, setPeriod] = useState<PeriodKey>('all')
-  const [tab, setTab]       = useState<TabKey>('gastos')
-  const [selCat, setSelCat] = useState<string | null>(null)
-  const [selSub, setSelSub] = useState<string | null>(null)
+  const [period, setPeriod]         = useState<PeriodKey>('all')
+  const [tab, setTab]               = useState<TabKey>('gastos')
+  const [incomeSubtab, setIncomeSub] = useState<IncomeSubtab>('activo')
+  const [selCat, setSelCat]         = useState<string | null>(null)
+  const [selSub, setSelSub]         = useState<string | null>(null)
 
-  function selectTab(t: TabKey)       { setTab(t); setSelCat(null); setSelSub(null) }
+  function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
+  function selectIncomeSub(s: IncomeSubtab) { setIncomeSub(s); setSelCat(null); setSelSub(null) }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
 
   // Build learning maps from ALL transactions (full history, not period-filtered)
@@ -485,9 +488,15 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
     cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions,
   [transactions, cutoff])
 
-  // Tab filter
+  // Tab filter — ingresos further split by subtab
   const tabFilter = TAB_FILTER[tab]
-  const tabTxs = useMemo(() => periodTxs.filter(tabFilter), [periodTxs, tab]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tabTxs = useMemo(() => {
+    const base = periodTxs.filter(tabFilter)
+    if (tab !== 'ingresos') return base
+    return incomeSubtab === 'activo'
+      ? base.filter(tx => isLiquidIncome(tx))
+      : base.filter(tx => isPatrimonialIncome(tx))
+  }, [periodTxs, tab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monthly trend — all 3 series from periodTxs, independent of tab
   const trendPoints = useMemo((): SeriesPoint[] => {
@@ -513,7 +522,6 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
     if (tx.is_settlement) return 'Liquidaciones'
     // Loan payments always → Préstamos, regardless of bucket/category_code
     if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
-    if (isPatrimonialIncome(tx)) return `★ ${getCat(tx)}`
     return getCat(tx)
   }
 
@@ -654,6 +662,26 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
           </button>
         ))}
       </div>
+
+      {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
+      {tab === 'ingresos' && (
+        <div className="flex gap-1 mb-4 ml-1">
+          {([
+            { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · alquiler · freelance' },
+            { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Rendimientos · dividendos · crypto' },
+          ]).map(s => (
+            <button key={s.key} onClick={() => selectIncomeSub(s.key)}
+              className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
+                incomeSubtab === s.key
+                  ? 'bg-[#a3e635]/10 border-[#a3e635]/30'
+                  : 'border-transparent hover:bg-white/[0.03]'
+              }`}>
+              <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${incomeSubtab === s.key ? 'text-[#a3e635]' : 'text-zinc-500'}`}>{s.label}</span>
+              <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
