@@ -3,6 +3,21 @@
 
 export const SAVINGS_EXPENSE_GROUP = 'objetivos_financieros'
 
+/**
+ * Identifies loan/mortgage payments within objetivos_financieros.
+ * Loan payments ARE liquidity outflows (they reduce a debt balance),
+ * unlike savings deposits which just move money between buckets.
+ */
+export function isLoanPayment(
+  vendor: string | null,
+  concept: string | null,
+  categoryCode: string | null,
+): boolean {
+  if (categoryCode && /LOAN|PRESTAM/i.test(categoryCode)) return true
+  const t = `${vendor ?? ''} ${concept ?? ''}`.toLowerCase()
+  return /pago\s*(extraordinario\s*)?pr[eé]stamo|cuota\s*(de\s*)?pr[eé]stamo|pr[eé]stamo\s*hipotecari|abono\s*pr[eé]stamo|pago\s*hipotecari|amortizaci[oó]n/i.test(t)
+}
+
 /** Returns a display category for a transaction. */
 export function inferCategory(
   vendor: string | null,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
+import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,7 @@ export interface TxClient {
   movement_type: string | null
   amount: number | null
   expense_group: string | null
+  is_settlement: boolean
 }
 
 export interface InteractiveSectionProps {
@@ -32,24 +33,55 @@ function fmtDate(d: string) {
 }
 
 const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
-  income:           { label: 'Ingreso',  cls: 'bg-emerald-500/10 text-emerald-400' },
-  expense:          { label: 'Gasto',    cls: 'bg-rose-500/10 text-rose-400' },
-  cash_withdrawal:  { label: 'Efectivo', cls: 'bg-amber-500/10 text-amber-400' },
+  income:           { label: 'Ingreso',    cls: 'bg-emerald-500/10 text-emerald-400' },
+  expense:          { label: 'Gasto',      cls: 'bg-rose-500/10 text-rose-400' },
+  cash_withdrawal:  { label: 'Efectivo',   cls: 'bg-amber-500/10 text-amber-400' },
 }
 const AMT_COLOR: Record<string, string> = {
   income: 'text-emerald-400', expense: 'text-rose-400', cash_withdrawal: 'text-amber-400',
 }
 
-function isExpense(tx: TxClient) {
-  return (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
-    && tx.expense_group !== SAVINGS_EXPENSE_GROUP
+// ── transaction classifiers ───────────────────────────────────────────────────
+// Liquidity model:
+//   - isExpense  = real outflow from liquid accounts
+//                  (regular expenses + loan payments, but NOT savings/investment deposits)
+//   - isIncome   = real inflow to liquid accounts
+//                  (salary, rental, etc. — NOT liquidaciones/settlements which are bucket→liquidity transfers)
+//   - isSavings  = money that left liquidity and entered a savings/investment bucket
+//                  (objetivos_financieros MINUS loan payments)
+//   - Settlements (is_settlement=true): bucket→liquidity transfers, shown in Objetivos tab as outflows
+
+function isLiquidityOutflow(tx: TxClient): boolean {
+  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true  // personal / necesario
+  // Within objetivos_financieros: only loan payments are real liquidity outflows
+  return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
-function isSavings(tx: TxClient) {
-  return (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
-    && tx.expense_group === SAVINGS_EXPENSE_GROUP
+
+function isLiquidityInflow(tx: TxClient): boolean {
+  // Real income: money that arrived from outside (salary, rental)
+  // Settlements are liquidity inflows BUT they come from the investment bucket —
+  // counting them as income would double-count with the original savings deposit
+  return tx.movement_type === 'income' && !tx.is_settlement
 }
-function isIncome(tx: TxClient) {
-  return tx.movement_type === 'income'
+
+function isSavingsOrInvestment(tx: TxClient): boolean {
+  // Money that left liquidity and entered a savings/investment bucket
+  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
+  return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+}
+
+function isSettlement(tx: TxClient): boolean {
+  // Bucket → liquidity transfer (not real income)
+  return tx.movement_type === 'income' && tx.is_settlement
+}
+
+// Map tab key to classifier
+const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
+  gastos:    isLiquidityOutflow,
+  ingresos:  isLiquidityInflow,
+  objetivos: (tx) => isSavingsOrInvestment(tx) || isSettlement(tx),
 }
 
 function getTxCategory(tx: TxClient): string {
@@ -337,11 +369,12 @@ export function InteractiveSection({ transactions }: InteractiveSectionProps) {
 
   // ── compute categories for active tab ────────────────────────────────────
   const cats: CatRow[] = useMemo(() => {
-    const filter = tab === 'gastos' ? isExpense : tab === 'ingresos' ? isIncome : isSavings
+    const filter = TAB_FILTER[tab]
     const map: Record<string, CatRow> = {}
     for (const tx of transactions) {
       if (!filter(tx)) continue
-      const cat = getTxCategory(tx)
+      // Settlements shown under "Liquidaciones" category in the objetivos tab
+      const cat = tx.is_settlement ? 'Liquidaciones' : getTxCategory(tx)
       if (!map[cat]) map[cat] = { category: cat, amount: 0, count: 0, txs: [] }
       map[cat].amount += Number(tx.amount)
       map[cat].count++
