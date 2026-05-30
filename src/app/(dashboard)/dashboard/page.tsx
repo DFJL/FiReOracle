@@ -42,9 +42,8 @@ export default async function DashboardPage() {
   ])
 
   // Fallback: compute stats client-side if RPC doesn't exist
-  let stats = (statsRes.data?.[0] as unknown) as
-    | { total_income: number; total_expenses: number; net: number; tx_count: number; earliest: string; latest: string }
-    | null
+  type StatsRow = { total_income: number; total_expenses: number; net: number; tx_count: number; earliest: string; latest: string }
+  let stats: StatsRow | null = (statsRes.data?.[0] as unknown as StatsRow) ?? null
 
   if (!stats) {
     const { data: raw } = await supabase
