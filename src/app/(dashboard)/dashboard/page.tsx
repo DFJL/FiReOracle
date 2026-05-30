@@ -42,7 +42,7 @@ export default async function DashboardPage() {
   ])
 
   // Fallback: compute stats client-side if RPC doesn't exist
-  let stats = statsRes.data?.[0] as
+  let stats = (statsRes.data?.[0] as unknown) as
     | { total_income: number; total_expenses: number; net: number; tx_count: number; earliest: string; latest: string }
     | null
 
