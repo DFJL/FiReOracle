@@ -119,7 +119,7 @@ export async function detectAccountsFromTransactions(): Promise<AccountInput[]> 
     accounts.push({
       name: 'Cuenta débito',
       account_type: 'checking',
-      bank_name: '',
+      bank_name: 'BAC',
       currency_code: 'CRC',
       initial_balance: String(Math.round(Number(earliest.balance_after_debit))),
     })

@@ -143,8 +143,12 @@ const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
     || isCryptoValuation(tx),
 }
 
+// L2 groups by concept (user's semantic label: "Abarrotes", "Cena", "Salario"…)
+// Vendor is the merchant; concept is the meaningful sub-grouping within a category.
 function getTxSubcategory(tx: TxClient): string {
-  return tx.vendor?.trim() || tx.concept?.trim() || '—'
+  const c = tx.concept?.trim()
+  if (c && c.toLowerCase() !== 'na' && c !== '') return c
+  return tx.vendor?.trim() || '—'
 }
 
 // ── transaction table ─────────────────────────────────────────────────────────
