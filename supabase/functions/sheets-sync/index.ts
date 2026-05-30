@@ -124,6 +124,7 @@ async function processConfig(
         const { error } = await supabase.from('transactions').upsert(
           {
             external_id: tx.external_id,
+            source: 'sheets',
             date: tx.date,
             vendor: tx.vendor,
             concept: tx.concept,
