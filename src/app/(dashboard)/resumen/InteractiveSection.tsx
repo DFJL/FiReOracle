@@ -111,9 +111,12 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   const ck = (tx.concept ?? '').toLowerCase().trim()
   const vk = (tx.vendor ?? '').toLowerCase().trim()
 
-  // category_code is authoritative — except for passive income where it describes
-  // the bucket destination, not the economic type.
-  if (tx.category_code && !tx.is_passive_income) return displayCategory(tx.category_code)
+  // category_code is authoritative — except for passive income where it may describe
+  // the bucket destination (SAVINGS, INCOME), not the economic type.
+  // Exception: RENTAL_INCOME is meaningful even when is_passive_income=true.
+  if (tx.category_code && (!tx.is_passive_income || LIQUID_PASSIVE_INCOME_CATS.has(tx.category_code))) {
+    return displayCategory(tx.category_code)
+  }
 
   // Concept-level pattern overrides
   if (/^abarrotes/i.test(ck)) return 'Abarrotes'
@@ -126,6 +129,17 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
 }
 
 // ── classifiers ───────────────────────────────────────────────────────────────
+
+// Passive income that is marked is_passive_income=true in the DB but still
+// flows through liquid accounts (checking/cash). Rental income is the canonical
+// example: it's passive economically but you receive it in your bank account.
+// Investment returns (funds, crypto staking) stay inside the investment vehicle.
+const LIQUID_PASSIVE_INCOME_CATS = new Set(['RENTAL_INCOME'])
+
+function isLiquidPassive(tx: TxClient): boolean {
+  return tx.movement_type === 'income' && !!tx.is_passive_income &&
+    LIQUID_PASSIVE_INCOME_CATS.has(tx.category_code ?? '')
+}
 
 // Pérdidas contables patrimoniales — espejo de rendimientos pasivos, no afectan liquidez
 function isPatrimonialLoss(tx: TxClient) {
@@ -141,14 +155,15 @@ function isOutflow(tx: TxClient) {
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
-// Ingresos que tocan liquidez (saldo débito): salario, alquiler, misc activo
+// Ingresos que tocan liquidez: salario, alquiler (incluso si is_passive_income), freelance
 function isLiquidIncome(tx: TxClient) {
-  return tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement
+  return tx.movement_type === 'income' && !tx.is_settlement &&
+    (!tx.is_passive_income || isLiquidPassive(tx))
 }
 
-// Rendimientos que viven en cuentas de ahorro/inversión — no tocan liquidez
+// Rendimientos que NO tocan liquidez — se quedan dentro del vehículo de inversión
 function isPatrimonialIncome(tx: TxClient) {
-  return (tx.movement_type === 'income' && !!tx.is_passive_income) ||
+  return (tx.movement_type === 'income' && !!tx.is_passive_income && !isLiquidPassive(tx)) ||
          (!tx.movement_type && tx.amount != null && Number(tx.amount) > 0)
 }
 
@@ -516,8 +531,8 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
     const base = periodTxs.filter(tabFilter)
     if (tab !== 'ingresos') return base
     return incomeSubtab === 'activo'
-      ? base.filter(tx => isLiquidIncome(tx))
-      : base.filter(tx => isPatrimonialIncome(tx))
+      ? base.filter(tx => isLiquidIncome(tx) && !tx.is_passive_income)
+      : base.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
   }, [periodTxs, tab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monthly trend — all 3 series from periodTxs, independent of tab
@@ -695,8 +710,8 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
       {tab === 'ingresos' && (
         <div className="flex gap-1 mb-4 ml-1">
           {([
-            { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · alquiler · freelance' },
-            { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Rendimientos · dividendos · crypto' },
+            { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · freelance · trabajo' },
+            { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Alquiler · rendimientos · crypto' },
           ]).map(s => (
             <button key={s.key} onClick={() => selectIncomeSub(s.key)}
               className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
