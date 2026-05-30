@@ -18,6 +18,11 @@ export interface TxClient {
   is_survival_expense?: boolean
 }
 
+export interface AccountSummary {
+  liquidBalance: number   // checking + cash accounts
+  savingsBalance: number  // savings + investment accounts
+}
+
 type TabKey    = 'gastos' | 'ingresos' | 'objetivos'
 type PeriodKey = 'all' | 'ytd' | '1y' | '3m'
 
@@ -365,7 +370,7 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'objetivos', label: 'Ahorros',   color: 'rgb(251 191 36)'  },
 ]
 
-export function InteractiveSection({ transactions }: { transactions: TxClient[] }) {
+export function InteractiveSection({ transactions, accounts }: { transactions: TxClient[]; accounts?: AccountSummary }) {
   const [period, setPeriod] = useState<PeriodKey>('all')
   const [tab, setTab]       = useState<TabKey>('gastos')
   const [selCat, setSelCat] = useState<string | null>(null)
@@ -400,11 +405,20 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month, amount }))
   }, [tabTxs])
 
-  // Resolves display category, prefixing patrimonial income with ★ to distinguish
+  // Resolves display category with overrides for edge cases
   const getDisplayCat = (tx: TxClient) => {
     if (tx.is_settlement) return 'Liquidaciones'
+    // Loan payments always → Préstamos, regardless of bucket/category_code
+    if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
     if (isPatrimonialIncome(tx)) return `★ ${getCat(tx)}`
     return getCat(tx)
+  }
+
+  // Normalize concept label for grouping: trim + collapse spaces + title case
+  // Groups "préstamo hipotecario" and "Préstamo Hipotecario" together
+  function normalizeConcept(s: string): string {
+    return s.trim().replace(/\s+/g, ' ')
+      .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
   }
 
   // Category breakdown (L1)
@@ -426,21 +440,23 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [tabTxs, selCat])
 
-  // Subcategories (L2) — grouped by concept
+  // Subcategories (L2) — grouped by normalized concept (case-insensitive)
   const subcats = useMemo(() => {
-    const map: Record<string, { amount: number; count: number }> = {}
+    const map: Record<string, { amount: number; count: number; display: string }> = {}
     for (const tx of catTxs) {
-      const k = getTxConcept(tx)
-      if (!map[k]) map[k] = { amount: 0, count: 0 }
+      const raw = getTxConcept(tx)
+      const k = raw.toLowerCase().trim().replace(/\s+/g, ' ')
+      const display = normalizeConcept(raw)
+      if (!map[k]) map[k] = { amount: 0, count: 0, display }
       map[k].amount += Number(tx.amount ?? 0)
       map[k].count++
     }
-    return Object.entries(map).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount).slice(0, 30)
+    return Object.entries(map).map(([, v]) => ({ name: v.display, ...v })).sort((a, b) => b.amount - a.amount).slice(0, 30)
   }, [catTxs])
 
-  // Final transaction list (L3)
+  // Final transaction list (L3) — match by normalized concept
   const tableTxs = useMemo(() =>
-    selSub ? catTxs.filter(tx => getTxConcept(tx) === selSub) : catTxs,
+    selSub ? catTxs.filter(tx => normalizeConcept(getTxConcept(tx)) === selSub) : catTxs,
   [catTxs, selSub])
 
   const catTotal = selCat
@@ -483,10 +499,10 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
         {/* KPI row — like the health metrics strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',      value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]' },
-            { label: 'Gastos',        value: kpis.expenses,     fmt: 'K', color: 'text-rose-400' },
-            { label: 'Ahorro %',      value: savingsRate,       fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
-            { label: 'Rendimientos',  value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400' },
+            { label: 'Ingresos',      value: kpis.income,              fmt: 'K', color: 'text-[#a3e635]' },
+            { label: 'Gastos',        value: kpis.expenses,            fmt: 'K', color: 'text-rose-400' },
+            { label: 'Ahorro %',      value: savingsRate,              fmt: '%', color: savingsRate >= 20 ? 'text-[#a3e635]' : savingsRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
+            { label: 'Rendimientos',  value: kpis.rendimientos,        fmt: 'K', color: 'text-blue-400' },
           ].map(k => {
             const display = k.fmt === '%'
               ? `${k.value}%`
@@ -503,6 +519,34 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
             )
           })}
         </div>
+
+        {/* Account balances — liquid vs savings */}
+        {accounts && (
+          <div className="mt-3 flex gap-3">
+            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
+              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Liquidez inicial</p>
+              <p className="text-lg font-black text-[#a3e635] tabular-nums">
+                {accounts.liquidBalance >= 1_000_000
+                  ? `₡${(accounts.liquidBalance / 1_000_000).toFixed(2)}M`
+                  : `₡${Math.round(accounts.liquidBalance).toLocaleString('es-CR')}`}
+              </p>
+            </div>
+            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
+              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Ahorro e inversión</p>
+              <p className="text-lg font-black text-blue-400 tabular-nums">
+                {accounts.savingsBalance >= 1_000_000
+                  ? `₡${(accounts.savingsBalance / 1_000_000).toFixed(2)}M`
+                  : `₡${Math.round(accounts.savingsBalance).toLocaleString('es-CR')}`}
+              </p>
+            </div>
+            <div className="flex-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.08] px-4 py-3">
+              <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Patrimonio inicial</p>
+              <p className="text-lg font-black text-amber-400 tabular-nums">
+                {((accounts.liquidBalance + accounts.savingsBalance) / 1_000_000).toFixed(2)}M
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Period tabs — underline style ─────────────────────────────────── */}
