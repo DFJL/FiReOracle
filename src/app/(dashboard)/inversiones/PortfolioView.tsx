@@ -180,10 +180,10 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Balance',        crc: sel.balance,          color: 'text-white',      sub: 'valor actual' },
-              { label: 'Depósitos',      crc: sel.deposits,         color: 'text-zinc-200',   sub: 'cash in' },
-              { label: 'Liquidaciones',  crc: sel.liquidaciones,    color: 'text-rose-400',   sub: 'cash out' },
-              { label: 'Rendimientos',   crc: sel.rendimientos,     color: 'text-[#a3e635]',  sub: 'cash returns' },
+              { label: 'Balance',        crc: sel.balance,                              color: 'text-white',      sub: 'valor actual' },
+              { label: 'Depósitos',      crc: sel.deposits,                             color: 'text-zinc-200',   sub: 'cash in' },
+              { label: 'Liquidaciones',  crc: sel.liquidaciones,                        color: 'text-rose-400',   sub: 'cash out' },
+              { label: 'Rendimientos',   crc: sel.passiveValuation + sel.rendimientos,  color: 'text-[#a3e635]',  sub: 'NAV + efectivo' },
             ].map(k => (
               <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
                 <p className={`text-base font-black tabular-nums ${k.color}`}>{fmt(k.crc)}</p>
@@ -196,11 +196,11 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
             ))}
           </div>
 
-          {sel.valorizationNet !== 0 && (
+          {sel.markToMarketLoss > 0 && (
             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
-              <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Valorización neta</span>
-              <span className={`text-sm font-black tabular-nums ml-auto ${sel.valorizationNet >= 0 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
-                {fmt(sel.valorizationNet)}
+              <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pérdida valor</span>
+              <span className="text-sm font-black tabular-nums ml-auto text-rose-400">
+                -{fmt(sel.markToMarketLoss)}
               </span>
               <span className="text-[9px] text-zinc-700">mark-to-market · no cash</span>
             </div>
