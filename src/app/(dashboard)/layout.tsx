@@ -11,6 +11,7 @@ import {
   Sparkles,
   BarChart2,
   Settings,
+  Wallet,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -19,6 +20,7 @@ const NAV_ITEMS = [
   { href: '/flujo',        label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
   { href: '/presupuesto',  label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
   { href: '/inversiones',  label: 'Portafolio',    icon: <TrendingUp size={16} /> },
+  { href: '/liquidez',     label: 'Liquidez',      icon: <Wallet size={16} /> },
   { href: '/prestamos',    label: 'Préstamos',     icon: <Users size={16} /> },
   { href: '/patrimonio',   label: 'Patrimonio',    icon: <Landmark size={16} /> },
   { href: '/oracle',       label: 'Oracle',        icon: <Sparkles size={16} /> },
@@ -26,11 +28,11 @@ const NAV_ITEMS = [
 
 // Subset shown in mobile bottom bar (most used)
 const BOTTOM_NAV = [
-  { href: '/resumen',     label: 'Resumen',   icon: <LayoutDashboard size={20} /> },
-  { href: '/movimientos', label: 'Movim.',    icon: <ArrowLeftRight size={20} /> },
-  { href: '/inversiones', label: 'Portafolio',icon: <TrendingUp size={20} /> },
-  { href: '/oracle',      label: 'Oracle',    icon: <Sparkles size={20} /> },
-  { href: '/configuracion', label: 'Config',  icon: <Settings size={20} /> },
+  { href: '/resumen',     label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
+  { href: '/movimientos', label: 'Movim.',     icon: <ArrowLeftRight size={20} /> },
+  { href: '/inversiones', label: 'Portafolio', icon: <TrendingUp size={20} /> },
+  { href: '/liquidez',    label: 'Liquidez',   icon: <Wallet size={20} /> },
+  { href: '/oracle',      label: 'Oracle',     icon: <Sparkles size={20} /> },
 ]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
