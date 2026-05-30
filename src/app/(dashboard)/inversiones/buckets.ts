@@ -1,7 +1,8 @@
 // ── Investment bucket definitions ─────────────────────────────────────────────
 // Add new buckets or vendors here — no other code changes needed.
-// Formula per bucket (cash-based, excludes mark-to-market valuations):
-//   balance = deposits - liquidaciones + rendimientos_cash
+// Formula per bucket:
+//   balance = deposits + passiveValuation + rendimientos - liquidaciones
+//   valorizationNet = passiveValuation - markToMarketLoss  (display only, not in balance)
 
 export interface BucketDef {
   key: string
@@ -10,7 +11,7 @@ export interface BucketDef {
   color: string
   /** Exact vendor names (case-insensitive match) */
   vendors: string[]
-  /** Optional concept patterns for transactions with vendor='NA' or 'na' */
+  /** Optional concept patterns — matched regardless of vendor */
   conceptPatterns?: RegExp[]
 }
 
@@ -18,6 +19,8 @@ export interface BucketData extends Omit<BucketDef, 'conceptPatterns'> {
   deposits: number
   liquidaciones: number
   rendimientos: number
+  passiveValuation: number
+  markToMarketLoss: number
   balance: number
   valorizationNet: number
 }
@@ -47,13 +50,5 @@ export const INVESTMENT_BUCKETS: BucketDef[] = [
       'Celestia', 'Meteora', 'Debank',
     ],
     conceptPatterns: [/^(compra|hodl)\s*(bitcoin|cripto|btc|eth)/i],
-  },
-  {
-    key: 'bac_pension',
-    name: 'Pensión Voluntaria',
-    industry: 'Pensión',
-    color: '#10b981',
-    vendors: ['BAC'],
-    conceptPatterns: [/regimen de pensi[oó]n voluntaria/i],
   },
 ]

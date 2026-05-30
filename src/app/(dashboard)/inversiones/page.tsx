@@ -9,12 +9,8 @@ function matchesBucket(vendor: string, concept: string, def: BucketDef): boolean
   const v = vendor.toLowerCase().trim()
   const c = concept.toLowerCase().trim()
 
-  const vendorMatch = def.vendors.some(dv => dv.toLowerCase() === v)
-  if (vendorMatch) return true
-
-  if (def.conceptPatterns && (v === 'na' || v === '')) {
-    return def.conceptPatterns.some(re => re.test(c))
-  }
+  if (def.vendors.some(dv => dv.toLowerCase() === v)) return true
+  if (def.conceptPatterns?.some(re => re.test(c))) return true
   return false
 }
 
@@ -54,7 +50,7 @@ export default async function InversionesPage() {
 
   // Compute bucket balances from transaction history
   const buckets: BucketData[] = INVESTMENT_BUCKETS.map(def => {
-    let deposits = 0, liquidaciones = 0, rendimientos = 0, valorizationNet = 0
+    let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0, markToMarketLoss = 0
 
     for (const tx of txs ?? []) {
       const vendor = tx.vendor ?? ''
@@ -71,27 +67,28 @@ export default async function InversionesPage() {
       else if (tx.is_settlement) {
         liquidaciones += amt
       }
-      // Cash returns: passive income that has movement_type (income) — cash rendimientos
+      // Cash rendimientos: passive income with real movement_type (hit a bank account)
       else if (tx.is_passive_income && tx.movement_type === 'income') {
         rendimientos += amt
       }
-      // Mark-to-market: passive income with no movement_type = unrealized gain
+      // NAV appreciation: passive income with NULL movement_type (stays in vehicle)
       else if (tx.is_passive_income && !tx.movement_type) {
-        valorizationNet += amt
+        passiveValuation += amt
       }
-      // Mark-to-market: expense with expense_group='na' and no category = unrealized loss
+      // Unrealized loss: expense, expense_group='na', not passive income
       else if (tx.movement_type === 'expense' && tx.expense_group === 'na' && !tx.is_passive_income) {
-        valorizationNet -= amt
+        markToMarketLoss += amt
       }
     }
 
-    const balance = deposits - liquidaciones + rendimientos
+    const balance = deposits + passiveValuation + rendimientos - liquidaciones
+    const valorizationNet = passiveValuation - markToMarketLoss
 
     // Exclude conceptPatterns (RegExp) — not serializable for client components
     return {
       key: def.key, name: def.name, industry: def.industry,
       color: def.color, vendors: def.vendors,
-      deposits, liquidaciones, rendimientos, balance, valorizationNet,
+      deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, balance, valorizationNet,
     }
   })
 
