@@ -212,14 +212,15 @@ export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
         </div>
       </div>
 
-      {/* Custodio groups */}
-      {custodios.map(cust => {
+      {/* Custodio groups — side by side on md+ */}
+      <div className="grid md:grid-cols-2 gap-4">
+        {custodios.map(cust => {
         const group     = envelopes.filter(e => e.custodio === cust)
         const custTotal = group.reduce((s, e) => s + e.balance, 0)
         const pct       = total > 0 ? (custTotal / total) * 100 : 0
 
         return (
-          <div key={cust} className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+          <div key={cust} className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden self-start">
             {/* Custodio header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.05]">
               <div>
@@ -279,7 +280,8 @@ export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
             </div>
           </div>
         )
-      })}
+        })}
+      </div>
 
       {/* Interest modal */}
       {interestCustodio && (
