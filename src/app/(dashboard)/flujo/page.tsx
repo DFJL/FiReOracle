@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
@@ -35,15 +34,8 @@ export default async function FlujoPage({ searchParams }: PageProps) {
 
   const params = await searchParams
 
-  const admin = createAdminClient()
-  const { data: rawTx } = await admin
-    .from('transactions')
-    .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement, is_passive_income')
-    .eq('user_id', user.id)
-    .not('amount', 'is', null)
-    .not('date', 'is', null)
-    .not('movement_type', 'is', null)
-    .order('date', { ascending: true })
+  // RPC bypasses PostgREST max_rows; movement_type filter applied below
+  const { data: rawTx } = await supabase.rpc('get_user_transactions', { p_start_date: null })
 
   interface TxRow {
     movement_type: string | null
