@@ -183,8 +183,8 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
 }) {
   const max = rows[0]?.amount ?? 1
   return (
-    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between">
+    <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between">
         <p className="text-xs font-semibold text-zinc-300">{catName} <span className="text-zinc-600 font-normal ml-1">{fmtCRC(total)}</span></p>
         {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">✕ limpiar</button>}
       </div>
@@ -231,9 +231,9 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
   const total = cats.reduce((s, c) => s + c.amount, 0)
   const col = TAB_COLORS[tab]
   return (
-    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between">
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
+    <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between">
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Categorías</p>
         <div className="flex items-center gap-3">
           <span className={`text-xs font-semibold tabular-nums ${col.text}`}>{fmtCRC(total)}</span>
           {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">Ver todas</button>}
@@ -286,8 +286,8 @@ function TxTable({ rows, title, vMap, cMap }: {
   }, [rows, search])
 
   return (
-    <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between gap-3 flex-wrap">
+    <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-xs font-semibold text-zinc-300">{title} <span className="text-zinc-600 font-normal">({filtered.length})</span></h3>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
           className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
@@ -440,20 +440,18 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
     <div className="space-y-4">
       {/* Period + Tab in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Period filter — client-side, no reload */}
-        <div className="flex gap-1 bg-[#0f130f] border border-[#a3e635]/[0.08] rounded-lg p-1">
+        <div className="flex gap-1 bg-[#0d120d] border border-[#a3e635]/[0.10] rounded-xl p-1">
           {PERIODS.map(p => (
             <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 rounded-md text-[10px] font-bold tracking-widest uppercase transition-colors ${period === p.key ? 'bg-[#a3e635]/10 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.15em] uppercase transition-colors ${period === p.key ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
               {p.label}
             </button>
           ))}
         </div>
-        {/* Tab filter */}
-        <div className="flex gap-1 bg-[#0f130f] border border-[#a3e635]/[0.08] rounded-lg p-1">
+        <div className="flex gap-1 bg-[#0d120d] border border-[#a3e635]/[0.10] rounded-xl p-1">
           {TABS.map(t => (
             <button key={t.key} onClick={() => selectTab(t.key)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-widest uppercase transition-colors ${tab === t.key ? 'bg-[#a3e635]/10 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-[0.15em] uppercase transition-colors ${tab === t.key ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
               {t.label}
             </button>
           ))}
@@ -461,25 +459,28 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {[
-          { label: 'Ingresos',    value: kpis.income,     color: 'text-[#a3e635]' },
-          { label: 'Gastos',      value: kpis.expenses,   color: 'text-rose-400' },
-          { label: 'Balance',     value: kpis.net,        color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
-          { label: 'Ahorros',     value: kpis.invested,   color: 'text-amber-400' },
+          { label: 'Ingresos',  value: kpis.income,   color: 'text-[#a3e635]' },
+          { label: 'Gastos',    value: kpis.expenses, color: 'text-rose-400' },
+          { label: 'Balance',   value: kpis.net,      color: kpis.net >= 0 ? 'text-[#a3e635]' : 'text-amber-400' },
+          { label: 'Ahorros',   value: kpis.invested, color: 'text-amber-400' },
         ].map(k => (
-          <div key={k.label} className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] p-4">
-            <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">{k.label}</p>
-            <p className={`text-base font-semibold tabular-nums ${k.color}`}>{fmtCRC(k.value)}</p>
+          <div key={k.label} className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 flex flex-col gap-1">
+            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">{k.label}</p>
+            <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>
+              {new Intl.NumberFormat('es-CR', { maximumFractionDigits: 0 }).format(k.value)}
+            </p>
+            <p className="text-[10px] text-zinc-600">CRC</p>
           </div>
         ))}
       </div>
 
-      {/* Trend chart — one line, matches current tab, no extra metric selector */}
+      {/* Trend chart */}
       {trendPoints.length > 1 && (
-        <div className="rounded-xl bg-[#0f130f] border border-[#a3e635]/[0.08] p-4">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-            Tendencia — {TABS.find(t => t.key === tab)!.label}
+        <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-3">
+            Tendencia · {TABS.find(t => t.key === tab)!.label}
             <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
           </p>
           <TrendChart points={trendPoints} color={tabColor} />
