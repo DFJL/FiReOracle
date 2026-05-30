@@ -38,4 +38,8 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# Supabase Edge Functions — never commit files with embedded credentials
+# The deployed version lives in Supabase; local copies may contain keys
+supabase/functions/sheets-sync/lib/google-sheets.ts
 next-env.d.ts
