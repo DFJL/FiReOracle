@@ -517,19 +517,27 @@ export function InteractiveSection({ transactions }: { transactions: TxClient[] 
         </div>
       )}
 
-      <div className="space-y-4">
+      {/* L1 + L2 side by side on desktop */}
+      <div className="flex gap-4 items-start">
+        <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
+          <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} />
+        </div>
+        {selCat && (
+          <div className="hidden md:block flex-1 min-w-0">
+            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+          </div>
+        )}
+      </div>
 
-      {/* L1 — category bars */}
-      <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} />
-
-      {/* L2 — concept breakdown */}
+      {/* L2 mobile — below L1 */}
       {selCat && (
-        <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+        <div className="md:hidden">
+          <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+        </div>
       )}
 
-      {/* L3 — transactions */}
+      {/* L3 — full width */}
       <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} />
-      </div>
     </div>
   )
 }
