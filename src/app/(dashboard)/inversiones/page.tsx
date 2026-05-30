@@ -10,7 +10,10 @@ function matchesBucket(vendor: string, concept: string, def: BucketDef): boolean
   const c = concept.toLowerCase().trim()
 
   if (def.vendors.some(dv => dv.toLowerCase() === v)) return true
-  if (def.conceptPatterns?.some(re => re.test(c))) return true
+
+  if (def.conceptPatterns && (v === 'na' || v === '')) {
+    return def.conceptPatterns.some(re => re.test(c))
+  }
   return false
 }
 
@@ -53,38 +56,44 @@ export default async function InversionesPage() {
     let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0, markToMarketLoss = 0
 
     for (const tx of txs ?? []) {
-      const vendor = tx.vendor ?? ''
-      const concept = tx.concept ?? ''
-      if (!matchesBucket(vendor, concept, def)) continue
-
       const amt = Number(tx.amount ?? 0)
 
-      // Cash-in: expense to objetivos_financieros (not a settlement)
-      if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) {
-        deposits += amt
-      }
-      // Cash-out: settlement (liquidación)
-      else if (tx.is_settlement) {
-        liquidaciones += amt
-      }
-      // Cash rendimientos: passive income with real movement_type (hit a bank account)
-      else if (tx.is_passive_income && tx.movement_type === 'income') {
-        rendimientos += amt
-      }
-      // NAV appreciation: passive income with NULL movement_type (stays in vehicle)
-      else if (tx.is_passive_income && !tx.movement_type) {
-        passiveValuation += amt
-      }
-      // Unrealized loss: expense, expense_group='na', not passive income
-      else if (tx.movement_type === 'expense' && tx.expense_group === 'na' && !tx.is_passive_income) {
-        markToMarketLoss += amt
+      if (def.conceptAccounting) {
+        // Concept-based bucket (e.g. Crypto): mirrors exact Excel SUMIFS formula
+        const c = tx.concept ?? ''
+        if (def.conceptAccounting.depositConcepts.includes(c)) {
+          deposits += amt
+        } else if (def.conceptAccounting.rendimientosConcepts.includes(c)) {
+          rendimientos += amt
+        } else if (def.conceptAccounting.valorizacionConcepts.includes(c)) {
+          passiveValuation += amt
+        } else if (def.conceptAccounting.liquidacionConcepts.includes(c)) {
+          liquidaciones += amt
+        }
+      } else {
+        // Vendor-based bucket (TRANSCOMER, Dominion)
+        const vendor = tx.vendor ?? ''
+        const concept = tx.concept ?? ''
+        if (!matchesBucket(vendor, concept, def)) continue
+
+        if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) {
+          deposits += amt
+        } else if (tx.is_settlement) {
+          liquidaciones += amt
+        } else if (tx.is_passive_income && tx.movement_type === 'income') {
+          rendimientos += amt
+        } else if (tx.is_passive_income && !tx.movement_type) {
+          passiveValuation += amt
+        } else if (tx.movement_type === 'expense' && tx.expense_group === 'na' && !tx.is_passive_income) {
+          markToMarketLoss += amt
+        }
       }
     }
 
     const balance = deposits + passiveValuation + rendimientos - liquidaciones
     const valorizationNet = passiveValuation - markToMarketLoss
 
-    // Exclude conceptPatterns (RegExp) — not serializable for client components
+    // Exclude non-serializable fields (RegExp, ConceptAccounting) for client component
     return {
       key: def.key, name: def.name, industry: def.industry,
       color: def.color, vendors: def.vendors,
