@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import type { ExchangeRate } from '@/lib/exchange-rate'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -307,16 +308,17 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
 
 // ── subcategory panel (L2) ────────────────────────────────────────────────────
 
-function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
+function SubcategoryPanel({ rows, catName, total, selected, onSelect, fmt }: {
   rows: { name: string; amount: number; count: number }[]
   catName: string; total: number
   selected: string | null; onSelect: (s: string | null) => void
+  fmt: (crc: number) => string
 }) {
   const max = rows[0]?.amount ?? 1
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between">
-        <p className="text-xs font-semibold text-zinc-300">{catName} <span className="text-zinc-600 font-normal ml-1">{fmtCRC(total)}</span></p>
+        <p className="text-xs font-semibold text-zinc-300">{catName} <span className="text-zinc-600 font-normal ml-1">{fmt(total)}</span></p>
         {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">✕ limpiar</button>}
       </div>
       <div className="p-2">
@@ -331,7 +333,7 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
                 <span className={`truncate max-w-[55%] ${active ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600">{count} tx</span>
-                  <span className="text-zinc-400 tabular-nums">{fmtCRC(amount)}</span>
+                  <span className="text-zinc-400 tabular-nums">{fmt(amount)}</span>
                   <span className={`w-8 text-right tabular-nums ${active ? 'text-blue-400' : 'text-zinc-500'}`}>{sharePct}%</span>
                 </div>
               </div>
@@ -354,9 +356,10 @@ const TAB_COLORS = {
   objetivos: { bar: 'bg-amber-400/40',        active: 'bg-amber-400',       bg: 'bg-amber-400/10',       border: 'border-amber-400/30',       text: 'text-amber-400' },
 }
 
-function CategoryBar({ cats, tab, selected, onSelect }: {
+function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
   cats: { category: string; amount: number; count: number }[]
   tab: TabKey; selected: string | null; onSelect: (c: string | null) => void
+  fmt: (crc: number) => string
 }) {
   const [expanded, setExpanded] = useState(false)
   const max = cats[0]?.amount ?? 1
@@ -374,7 +377,7 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between">
         <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Categorías</p>
         <div className="flex items-center gap-3">
-          <span className={`text-xs font-semibold tabular-nums ${col.text}`}>{fmtCRC(total)}</span>
+          <span className={`text-xs font-semibold tabular-nums ${col.text}`}>{fmt(total)}</span>
           {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">Ver todas</button>}
         </div>
       </div>
@@ -390,7 +393,7 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
                 <span className={`font-medium truncate max-w-[55%] ${active ? 'text-white' : 'text-zinc-300'}`}>{category}</span>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600 tabular-nums">{count} tx</span>
-                  <span className={`font-medium tabular-nums ${active ? col.text : 'text-zinc-400'}`}>{fmtCRC(amount)}</span>
+                  <span className={`font-medium tabular-nums ${active ? col.text : 'text-zinc-400'}`}>{fmt(amount)}</span>
                   <span className={`w-8 text-right tabular-nums ${active ? col.text : 'text-zinc-600'}`}>{sharePct}%</span>
                 </div>
               </div>
@@ -416,8 +419,9 @@ function CategoryBar({ cats, tab, selected, onSelect }: {
 
 // ── transaction table (L3) ────────────────────────────────────────────────────
 
-function TxTable({ rows, title, vMap, cMap }: {
+function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
+  currency: 'CRC' | 'USD'; tcSell: number
 }) {
   const [search, setSearch] = useState('')
   const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
@@ -431,6 +435,14 @@ function TxTable({ rows, title, vMap, cMap }: {
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search])
+
+  function fmtTx(crc: number) {
+    if (currency === 'USD') {
+      const usd = crc / tcSell
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(usd)
+    }
+    return fmtCRC(crc)
+  }
 
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
@@ -462,7 +474,7 @@ function TxTable({ rows, title, vMap, cMap }: {
                     {badge && <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>}
                   </td>
                   <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
-                    {sign}{fmtCRC(Number(tx.amount))}
+                    {sign}{fmtTx(Number(tx.amount))}
                   </td>
                 </tr>
               )
@@ -495,12 +507,33 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'objetivos', label: 'Ahorros',   color: 'rgb(251 191 36)'  },
 ]
 
-export function InteractiveSection({ transactions, accounts }: { transactions: TxClient[]; accounts?: AccountSummary }) {
+export function InteractiveSection({ transactions, accounts, exchangeRate }: {
+  transactions: TxClient[]
+  accounts?: AccountSummary
+  exchangeRate?: ExchangeRate
+}) {
   const [period, setPeriod]         = useState<PeriodKey>('all')
   const [tab, setTab]               = useState<TabKey>('gastos')
   const [incomeSubtab, setIncomeSub] = useState<IncomeSubtab>('activo')
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
+  const [currency, setCurrency]     = useState<'CRC' | 'USD'>('CRC')
+
+  const tcSell = exchangeRate?.sell ?? 515
+  const toUSD  = (crc: number) => crc / tcSell
+  function fmtAmt(crc: number, compact = true) {
+    if (currency === 'USD') {
+      const usd = toUSD(crc)
+      if (!compact) return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(usd)
+      if (Math.abs(usd) >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`
+      if (Math.abs(usd) >= 1_000)     return `$${(usd / 1_000).toFixed(1)}K`
+      return `$${Math.round(usd)}`
+    }
+    if (!compact) return fmtCRC(crc)
+    if (Math.abs(crc) >= 1_000_000) return `₡${(crc / 1_000_000).toFixed(1)}M`
+    if (Math.abs(crc) >= 1_000)     return `₡${Math.round(crc / 1_000)}K`
+    return `₡${Math.round(crc)}`
+  }
 
   function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
   function selectIncomeSub(s: IncomeSubtab) { setIncomeSub(s); setSelCat(null); setSelSub(null) }
@@ -633,32 +666,53 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="pb-5">
-        <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">
-          Fire Oracle · {monthLabel}
-        </p>
-        <p className="text-3xl font-black text-white tracking-tight leading-none mb-5">Felipe</p>
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-5">
+          <div>
+            <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">
+              Fire Oracle · {monthLabel}
+            </p>
+            <p className="text-3xl font-black text-white tracking-tight leading-none">Felipe</p>
+          </div>
+          {/* Currency toggle */}
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+              {(['CRC', 'USD'] as const).map(c => (
+                <button key={c} onClick={() => setCurrency(c)}
+                  className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
+                    currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>
+                  {c === 'CRC' ? '₡ CRC' : '$ USD'}
+                </button>
+              ))}
+            </div>
+            {exchangeRate && (
+              <p className="text-[9px] text-zinc-600">
+                TC ₡{tcSell.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {' · '}{exchangeRate.source} · {exchangeRate.date}
+              </p>
+            )}
+          </div>
+        </div>
 
-        {/* KPI row — like the health metrics strip */}
+        {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',       value: kpis.income,       fmt: 'K', color: 'text-[#a3e635]',  sub: null },
-            { label: 'Gastos',         value: kpis.expenses,     fmt: 'K', color: 'text-rose-400',   sub: null },
-            { label: 'Valor. pasivo',  value: kpis.rendimientos, fmt: 'K', color: 'text-blue-400',   sub: 'no realizado' },
-            { label: 'Tasa ahorro',  value: savingsRate,       fmt: '%',
-              color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
+            { label: 'Ingresos',      crc: kpis.income,       color: 'text-[#a3e635]',  sub: null as string | null },
+            { label: 'Gastos',        crc: kpis.expenses,     color: 'text-rose-400',   sub: null },
+            { label: 'Valor. pasivo', crc: kpis.rendimientos, color: 'text-blue-400',   sub: 'no realizado' },
+            { label: 'Tasa ahorro',   crc: -1,               color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
               sub: `margen ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
           ].map(k => {
-            const display = k.fmt === '%'
-              ? `${k.value}%`
-              : k.value >= 1_000_000
-                ? `${(k.value / 1_000_000).toFixed(1)}M`
-                : k.value >= 1_000
-                  ? `${Math.round(k.value / 1_000)}K`
-                  : String(Math.round(k.value))
+            const isPct = k.crc === -1
+            const display = isPct ? `${savingsRate}%` : fmtAmt(k.crc)
+            const secondary = (!isPct && currency === 'CRC')
+              ? `$${Math.round(toUSD(k.crc)).toLocaleString('en-US')}`
+              : null
             return (
-              <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
+              <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1">
                 <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{display}</p>
-                <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em]">{k.label}</p>
+                {secondary && <p className="text-[10px] tabular-nums text-zinc-600">{secondary}</p>}
+                <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em] mt-0.5">{k.label}</p>
                 {k.sub && <p className="text-[9px] text-zinc-600 tabular-nums">{k.sub}</p>}
               </div>
             )
@@ -733,11 +787,11 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
       {/* L1 + L2 side by side on desktop */}
       <div className="flex gap-4 items-start">
         <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
-          <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} />
+          <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
         </div>
         {selCat && (
           <div className="hidden md:block flex-1 min-w-0">
-            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
           </div>
         )}
       </div>
@@ -745,12 +799,12 @@ export function InteractiveSection({ transactions, accounts }: { transactions: T
       {/* L2 mobile — below L1 */}
       {selCat && (
         <div className="md:hidden">
-          <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+          <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
         </div>
       )}
 
       {/* L3 — full width */}
-      <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} />
+      <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} />
     </div>
   )
 }
