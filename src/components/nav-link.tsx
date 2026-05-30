@@ -11,18 +11,18 @@ interface NavLinkProps {
 
 export function NavLink({ href, label, icon }: NavLinkProps) {
   const pathname = usePathname()
-  const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+  const active = pathname === href || (href !== '/resumen' && pathname.startsWith(href))
 
   return (
     <Link
       href={href}
       className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         active
-          ? 'bg-blue-500/10 text-blue-400 font-medium'
-          : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+          ? 'text-white bg-white/[0.06]'
+          : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]'
       }`}
     >
-      <span className={active ? 'text-blue-400' : 'text-gray-500'}>{icon}</span>
+      <span className={active ? 'text-white' : 'text-zinc-600'}>{icon}</span>
       {label}
     </Link>
   )
