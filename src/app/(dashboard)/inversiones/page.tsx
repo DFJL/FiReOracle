@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { INVESTMENT_BUCKETS, type BucketDef, type BucketData } from './buckets'
 import { PortfolioView } from './PortfolioView'
+import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 function matchesBucket(vendor: string, concept: string, def: BucketDef): boolean {
   const v = vendor.toLowerCase().trim()
@@ -96,6 +97,7 @@ export default async function InversionesPage() {
 
   const totalInvested = buckets.reduce((s, b) => s + b.balance, 0)
   const totalPatrimony = totalInvested + liquidBalance
+  const exchangeRate = await fetchExchangeRate()
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
@@ -104,6 +106,7 @@ export default async function InversionesPage() {
         liquidBalance={liquidBalance}
         totalInvested={totalInvested}
         totalPatrimony={totalPatrimony}
+        exchangeRate={exchangeRate}
       />
     </div>
   )

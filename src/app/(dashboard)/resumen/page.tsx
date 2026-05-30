@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { InteractiveSection, TxClient, AccountSummary } from './InteractiveSection'
+import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 export default async function ResumenPage() {
   const supabase = await createClient()
@@ -44,10 +45,15 @@ export default async function ResumenPage() {
   }
 
   const accounts: AccountSummary = { liquidBalance, savingsBalance }
+  const exchangeRate = await fetchExchangeRate()
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
-      <InteractiveSection transactions={(rawTx ?? []) as TxClient[]} accounts={accounts} />
+      <InteractiveSection
+        transactions={(rawTx ?? []) as TxClient[]}
+        accounts={accounts}
+        exchangeRate={exchangeRate}
+      />
     </div>
   )
 }
