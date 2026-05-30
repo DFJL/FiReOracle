@@ -66,6 +66,7 @@ async function processConfig(
     format_type,
     last_row_synced,
     data_start_row,
+    user_id,
   } = config as {
     id: number
     spreadsheet_id: string
@@ -73,6 +74,7 @@ async function processConfig(
     format_type: string
     last_row_synced: number
     data_start_row: number
+    user_id: string | null
   }
 
   const startRow = Math.max((last_row_synced ?? 0) + 1, data_start_row ?? 1)
@@ -126,6 +128,7 @@ async function processConfig(
           {
             external_id: tx.external_id,
             source: 'sheets',
+            user_id,
             date: tx.date,
             vendor: tx.vendor,
             concept: tx.concept,

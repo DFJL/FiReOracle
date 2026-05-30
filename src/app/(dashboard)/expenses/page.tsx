@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 
 function fmt(n: number) {
@@ -37,14 +36,13 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const db = createAdminClient()
   const params = await searchParams
   const page = Math.max(1, parseInt(params.page ?? '1'))
   const type = params.type ?? ''
   const from = (page - 1) * PAGE_SIZE
   const to = from + PAGE_SIZE - 1
 
-  let query = db
+  let query = supabase
     .from('transactions')
     .select('date, vendor, concept, category_code, movement_type, amount, expense_group, notes', {
       count: 'exact',
