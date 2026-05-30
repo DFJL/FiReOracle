@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from 'react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
-import { MetricChart, MonthPoint } from './MetricChart'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -19,11 +18,8 @@ export interface TxClient {
   is_survival_expense?: boolean
 }
 
-export interface InteractiveSectionProps {
-  transactions: TxClient[]
-}
-
-type TabKey = 'gastos' | 'ingresos' | 'objetivos'
+type TabKey    = 'gastos' | 'ingresos' | 'objetivos'
+type PeriodKey = 'all' | 'ytd' | '1y' | '3m'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +31,16 @@ function fmtDate(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
+function periodCutoff(p: PeriodKey): string | null {
+  const now = new Date()
+  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);     return d.toISOString().slice(0, 10) }
+  if (p === 'ytd') return `${now.getFullYear()}-01-01`
+  if (p === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10) }
+  return null
+}
+
+const MONTH_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
 const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
   income:          { label: 'Ingreso',  cls: 'bg-emerald-500/10 text-emerald-400' },
   expense:         { label: 'Gasto',    cls: 'bg-rose-500/10 text-rose-400' },
@@ -44,281 +50,162 @@ const AMT_COLOR: Record<string, string> = {
   income: 'text-emerald-400', expense: 'text-rose-400', cash_withdrawal: 'text-amber-400',
 }
 
-// ── vendor learning ───────────────────────────────────────────────────────────
-// Builds a map of normalized vendor → category from transactions that already
-// have a category_code. This lets the system learn per-user vendor patterns:
-// if "XYZ" is categorized 15 times as FOOD_SUPER, transactions from "XYZ"
-// with null category_code will inherit that classification automatically.
+// ── vendor / concept learning ─────────────────────────────────────────────────
 
-type VendorCatMap = Record<string, string>  // vendor_normalized → category_code
+type CatMap = Record<string, string>
 
-function buildVendorCatMap(transactions: TxClient[]): VendorCatMap {
-  // Count votes: vendor → { category_code → count }
+function buildVendorCatMap(txs: TxClient[]): CatMap {
   const votes: Record<string, Record<string, number>> = {}
-  for (const tx of transactions) {
+  for (const tx of txs) {
     if (!tx.category_code || !tx.vendor) continue
-    const key = tx.vendor.toLowerCase().trim()
-    if (!key || key === 'na') continue
-    if (!votes[key]) votes[key] = {}
-    votes[key][tx.category_code] = (votes[key][tx.category_code] ?? 0) + 1
+    const k = tx.vendor.toLowerCase().trim()
+    if (!k || k === 'na') continue
+    if (!votes[k]) votes[k] = {}
+    votes[k][tx.category_code] = (votes[k][tx.category_code] ?? 0) + 1
   }
-  // Pick the most-voted category per vendor (majority wins)
-  const map: VendorCatMap = {}
-  for (const [vendor, counts] of Object.entries(votes)) {
-    const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-    if (winner) map[vendor] = winner[0]
+  const map: CatMap = {}
+  for (const [v, counts] of Object.entries(votes)) {
+    const w = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+    if (w) map[v] = w[0]
   }
   return map
 }
 
-// Also learn concept → category from transactions where concept is the only
-// identifier (vendor is null/na). Less reliable, so only use when vendor unknown.
-function buildConceptCatMap(transactions: TxClient[]): VendorCatMap {
+function buildConceptCatMap(txs: TxClient[]): CatMap {
   const votes: Record<string, Record<string, number>> = {}
-  for (const tx of transactions) {
+  for (const tx of txs) {
     if (!tx.category_code || !tx.concept) continue
     const vendor = (tx.vendor ?? '').toLowerCase().trim()
-    if (vendor && vendor !== 'na') continue  // only for vendor-less rows
-    const key = tx.concept.toLowerCase().trim()
-    if (!key) continue
-    if (!votes[key]) votes[key] = {}
-    votes[key][tx.category_code] = (votes[key][tx.category_code] ?? 0) + 1
+    if (vendor && vendor !== 'na') continue
+    const k = tx.concept.toLowerCase().trim()
+    if (!k) continue
+    if (!votes[k]) votes[k] = {}
+    votes[k][tx.category_code] = (votes[k][tx.category_code] ?? 0) + 1
   }
-  const map: VendorCatMap = {}
-  for (const [concept, counts] of Object.entries(votes)) {
-    const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-    if (winner && winner[1] >= 2) map[concept] = winner[0]  // min 2 occurrences
+  const map: CatMap = {}
+  for (const [c, counts] of Object.entries(votes)) {
+    const w = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+    if (w && w[1] >= 2) map[c] = w[0]
   }
   return map
 }
 
-// Resolve category using: explicit code → vendor map → concept map → regex inference
-function resolveCategory(
-  tx: TxClient,
-  vendorMap: VendorCatMap,
-  conceptMap: VendorCatMap,
-): string {
+function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   if (tx.category_code) return displayCategory(tx.category_code)
-
-  const vKey = (tx.vendor ?? '').toLowerCase().trim()
-  if (vKey && vKey !== 'na' && vendorMap[vKey]) return displayCategory(vendorMap[vKey])
-
-  const cKey = (tx.concept ?? '').toLowerCase().trim()
-  if (cKey && (!vKey || vKey === 'na') && conceptMap[cKey]) return displayCategory(conceptMap[cKey])
-
+  const vk = (tx.vendor ?? '').toLowerCase().trim()
+  if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
+  const ck = (tx.concept ?? '').toLowerCase().trim()
+  if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
   return displayCategory(inferCategory(tx.vendor, tx.concept, tx.category_code))
 }
 
 // ── classifiers ───────────────────────────────────────────────────────────────
 
-function isLiquidityOutflow(tx: TxClient): boolean {
+function isOutflow(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true
   return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
-
-function isLiquidityInflow(tx: TxClient): boolean {
-  return tx.movement_type === 'income' && !tx.is_settlement
-}
-
-function isSavingsOrInvestment(tx: TxClient): boolean {
+function isInflow(tx: TxClient) { return tx.movement_type === 'income' && !tx.is_settlement }
+function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
   return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
 
-function isCryptoValuation(tx: TxClient): boolean {
-  // movement_type=null entries are non-cash accounting entries (unrealized gains/losses)
-  if (tx.movement_type !== null) return false
-  const c = (tx.concept ?? '').toLowerCase()
-  return /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n|rendimiento\s*fondo/i.test(c)
-}
-
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
-  gastos:    isLiquidityOutflow,
-  ingresos:  isLiquidityInflow,
-  // Objetivos: savings deposits, settlements, AND crypto valuations (they're bucket movements)
-  objetivos: (tx) => isSavingsOrInvestment(tx)
-    || (tx.movement_type === 'income' && tx.is_settlement)
-    || isCryptoValuation(tx),
+  gastos:    isOutflow,
+  ingresos:  isInflow,
+  objetivos: (tx) => isSavings(tx) || (tx.movement_type === 'income' && !!tx.is_settlement),
 }
 
-// L2 groups by concept (user's semantic label: "Abarrotes", "Cena", "Salario"…)
-// Vendor is the merchant; concept is the meaningful sub-grouping within a category.
-function getTxSubcategory(tx: TxClient): string {
+function getTxConcept(tx: TxClient): string {
   const c = tx.concept?.trim()
-  if (c && c.toLowerCase() !== 'na' && c !== '') return c
+  if (c && c.toLowerCase() !== 'na') return c
   return tx.vendor?.trim() || '—'
 }
 
-// ── transaction table ─────────────────────────────────────────────────────────
+// ── simple SVG trend chart ────────────────────────────────────────────────────
 
-type SortKey = 'date' | 'vendor' | 'category' | 'amount'
-type SortDir = 'asc' | 'desc'
+function TrendChart({ points, color }: { points: { month: string; amount: number }[]; color: string }) {
+  if (points.length < 2) return null
+  const W = 800, H = 120, px = 4, pt = 8, pb = 20
+  const vals = points.map(p => p.amount)
+  const minV = Math.min(...vals, 0)
+  const maxV = Math.max(...vals, 1)
+  const range = maxV - minV || 1
+  const chartH = H - pt - pb
+  const chartW = W - px * 2
+  const xs = points.map((_, i) => px + (i / Math.max(points.length - 1, 1)) * chartW)
+  const ys = vals.map(v => pt + chartH - ((v - minV) / range) * chartH)
 
-function TransactionsTable({
-  rows,
-  title,
-  vendorMap,
-  conceptMap,
-}: {
-  rows: TxClient[]
-  title: string
-  vendorMap: VendorCatMap
-  conceptMap: VendorCatMap
-}) {
-  const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('date')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDir('desc') }
+  let d = `M${xs[0].toFixed(1)},${ys[0].toFixed(1)}`
+  for (let i = 1; i < xs.length; i++) {
+    const cpX = ((xs[i-1] + xs[i]) / 2).toFixed(1)
+    d += ` C${cpX},${ys[i-1].toFixed(1)} ${cpX},${ys[i].toFixed(1)} ${xs[i].toFixed(1)},${ys[i].toFixed(1)}`
   }
+  const area = d + ` L${xs[xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`
 
-  const getCat = (tx: TxClient) => resolveCategory(tx, vendorMap, conceptMap)
+  const zeroY = minV < 0 ? pt + chartH - ((0 - minV) / range) * chartH : null
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase()
-    if (!q) return rows
-    return rows.filter(tx =>
-      tx.vendor?.toLowerCase().includes(q) ||
-      tx.concept?.toLowerCase().includes(q) ||
-      getCat(tx).toLowerCase().includes(q)
-    )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search])
-
-  const sorted = useMemo(() => [...filtered].sort((a, b) => {
-    let cmp = 0
-    if (sortKey === 'date')     cmp = (a.date ?? '').localeCompare(b.date ?? '')
-    if (sortKey === 'vendor')   cmp = getTxSubcategory(a).localeCompare(getTxSubcategory(b))
-    if (sortKey === 'category') cmp = getCat(a).localeCompare(getCat(b))
-    if (sortKey === 'amount')   cmp = Number(a.amount) - Number(b.amount)
-    return sortDir === 'asc' ? cmp : -cmp
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [filtered, sortKey, sortDir])
-
-  const SortArrow = ({ col }: { col: SortKey }) => (
-    <span className={`ml-1 ${sortKey === col ? 'opacity-100' : 'opacity-25'}`}>
-      {sortKey === col ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-    </span>
-  )
+  const step = points.length > 24 ? 3 : points.length > 12 ? 2 : 1
 
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-xs font-semibold text-zinc-300 tracking-tight">
-          {title} <span className="text-zinc-600 font-normal">({sorted.length})</span>
-        </h3>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar…"
-          className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-white/[0.14] w-full sm:w-40"
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-[480px]">
-          <thead>
-            <tr className="border-b border-white/[0.04]">
-              {([['date','Fecha'],['vendor','Descripción'],['category','Categoría'],['','Tipo'],['amount','Monto']] as [SortKey|'',string][]).map(([k, label]) => (
-                <th key={label}
-                  onClick={() => k && toggleSort(k as SortKey)}
-                  className={`px-4 py-2.5 text-left text-zinc-500 uppercase tracking-wider whitespace-nowrap font-semibold select-none ${k ? 'cursor-pointer hover:text-zinc-300 transition-colors' : ''}`}
-                >
-                  {label}{k && <SortArrow col={k as SortKey} />}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.03]">
-            {sorted.slice(0, 300).map((tx, i) => {
-              const badge = TYPE_BADGE[tx.movement_type ?? '']
-              const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
-              const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
-              const isPassive = tx.is_passive_income
-              return (
-                <tr key={i} className="hover:bg-white/[0.015] transition-colors">
-                  <td className="px-4 py-2.5 text-zinc-500 tabular-nums whitespace-nowrap">{tx.date ? fmtDate(tx.date) : '—'}</td>
-                  <td className="px-4 py-2.5 max-w-[180px]">
-                    <p className="text-zinc-200 truncate">{tx.vendor ?? tx.concept ?? '—'}</p>
-                    {tx.vendor && tx.concept && tx.concept !== tx.vendor && (
-                      <p className="text-zinc-600 truncate">{tx.concept}</p>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">{getCat(tx)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <div className="flex flex-col gap-0.5">
-                      {badge && <span className={`px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>{badge.label}</span>}
-                      {isPassive && <span className="px-1.5 py-0.5 rounded font-medium bg-violet-500/10 text-violet-400 text-[10px]">Pasivo</span>}
-                      {tx.is_settlement && <span className="px-1.5 py-0.5 rounded font-medium bg-zinc-500/10 text-zinc-400 text-[10px]">Liquidación</span>}
-                    </div>
-                  </td>
-                  <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
-                    {sign}{fmtCRC(Number(tx.amount))}
-                  </td>
-                </tr>
-              )
-            })}
-            {sorted.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="cursor-crosshair">
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.3)" strokeDasharray="4 3" strokeWidth="1" />}
+      <path d={area} fill="url(#tg)" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      {points.map((p, i) => {
+        if (i % step !== 0) return null
+        const mi = parseInt(p.month.slice(5, 7)) - 1
+        return (
+          <text key={p.month} x={xs[i]} y={H - 3} textAnchor="middle" fontSize="8" fill="rgb(82 82 91)">
+            {MONTH_LABELS[mi]}{p.month.slice(2, 4)}
+          </text>
+        )
+      })}
+    </svg>
   )
 }
 
-// ── subcategory panel ─────────────────────────────────────────────────────────
+// ── subcategory panel (L2) ────────────────────────────────────────────────────
 
-interface SubRow { name: string; amount: number; count: number }
-
-function SubcategoryPanel({
-  rows, catName, total, selectedSub, onSelect,
-}: {
-  rows: SubRow[]
-  catName: string
-  total: number
-  selectedSub: string | null
-  onSelect: (s: string | null) => void
+function SubcategoryPanel({ rows, catName, total, selected, onSelect }: {
+  rows: { name: string; amount: number; count: number }[]
+  catName: string; total: number
+  selected: string | null; onSelect: (s: string | null) => void
 }) {
-  const maxAmt = rows[0]?.amount ?? 1
+  const max = rows[0]?.amount ?? 1
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
       <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <p className="text-xs font-semibold text-zinc-300 tracking-tight">
-          {catName}
-          <span className="text-zinc-600 font-normal ml-2">{fmtCRC(total)}</span>
-        </p>
-        {selectedSub && (
-          <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
-            ✕ limpiar
-          </button>
-        )}
+        <p className="text-xs font-semibold text-zinc-300">{catName} <span className="text-zinc-600 font-normal ml-1">{fmtCRC(total)}</span></p>
+        {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">✕ limpiar</button>}
       </div>
       <div className="p-2">
         {rows.map(({ name, amount, count }) => {
-          const pct = Math.round((amount / maxAmt) * 100)
-          const totalPct = total > 0 ? Math.round((amount / total) * 100) : 0
-          const isActive = selectedSub === name
+          const pct = Math.round((amount / max) * 100)
+          const sharePct = total > 0 ? Math.round((amount / total) * 100) : 0
+          const active = selected === name
           return (
-            <button
-              key={name}
-              onClick={() => onSelect(isActive ? null : name)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors mb-0.5 ${isActive ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'}`}
-            >
+            <button key={name} onClick={() => onSelect(active ? null : name)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg mb-0.5 transition-colors ${active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'}`}>
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className={`truncate max-w-[55%] ${isActive ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
-                <div className="flex items-center gap-3 shrink-0 ml-2">
+                <span className={`truncate max-w-[55%] ${active ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
+                <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600">{count} tx</span>
                   <span className="text-zinc-400 tabular-nums">{fmtCRC(amount)}</span>
-                  <span className={`text-xs font-medium w-8 text-right tabular-nums ${isActive ? 'text-blue-400' : 'text-zinc-500'}`}>{totalPct}%</span>
+                  <span className={`w-8 text-right tabular-nums ${active ? 'text-blue-400' : 'text-zinc-500'}`}>{sharePct}%</span>
                 </div>
               </div>
               <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${isActive ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`} style={{ width: `${pct}%` }} />
+                <div className={`h-full rounded-full ${active ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`} style={{ width: `${pct}%` }} />
               </div>
             </button>
           )
@@ -330,257 +217,285 @@ function SubcategoryPanel({
 
 // ── category bar chart (L1) ───────────────────────────────────────────────────
 
-interface CatRow { category: string; amount: number; count: number; txs: TxClient[]; learnedCount: number }
-
 const TAB_COLORS = {
-  gastos:    { bar: 'bg-rose-500/60',    activeBar: 'bg-rose-400',    activeBg: 'bg-rose-500/10',    activeBorder: 'border-rose-500/30',    text: 'text-rose-400' },
-  ingresos:  { bar: 'bg-emerald-500/60', activeBar: 'bg-emerald-400', activeBg: 'bg-emerald-500/10', activeBorder: 'border-emerald-500/30', text: 'text-emerald-400' },
-  objetivos: { bar: 'bg-violet-500/60',  activeBar: 'bg-violet-400',  activeBg: 'bg-violet-500/10',  activeBorder: 'border-violet-500/30',  text: 'text-violet-400' },
+  gastos:    { bar: 'bg-rose-500/60',    active: 'bg-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    text: 'text-rose-400' },
+  ingresos:  { bar: 'bg-emerald-500/60', active: 'bg-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400' },
+  objetivos: { bar: 'bg-violet-500/60',  active: 'bg-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/30',  text: 'text-violet-400' },
 }
 
-function CategoryBarChart({
-  cats, tab, selectedCat, onSelect, totalLearned,
-}: {
-  cats: CatRow[]
-  tab: TabKey
-  selectedCat: string | null
-  onSelect: (c: string | null) => void
-  totalLearned: number
+function CategoryBar({ cats, tab, selected, onSelect }: {
+  cats: { category: string; amount: number; count: number }[]
+  tab: TabKey; selected: string | null; onSelect: (c: string | null) => void
 }) {
-  const maxAmt = cats[0]?.amount ?? 1
-  const totalAmt = cats.reduce((s, c) => s + c.amount, 0)
-  const colors = TAB_COLORS[tab]
-
+  const max = cats[0]?.amount ?? 1
+  const total = cats.reduce((s, c) => s + c.amount, 0)
+  const col = TAB_COLORS[tab]
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
       <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
-          {totalLearned > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">
-              {totalLearned} aprendidas
-            </span>
-          )}
-        </div>
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Categorías</p>
         <div className="flex items-center gap-3">
-          <span className={`text-xs font-semibold tabular-nums ${colors.text}`}>{fmtCRC(totalAmt)}</span>
-          {selectedCat && (
-            <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
-              Ver todas
-            </button>
-          )}
+          <span className={`text-xs font-semibold tabular-nums ${col.text}`}>{fmtCRC(total)}</span>
+          {selected && <button onClick={() => onSelect(null)} className="text-xs text-zinc-600 hover:text-zinc-400">Ver todas</button>}
         </div>
       </div>
-
       <div className="p-2">
-        {cats.map(({ category, amount, count, learnedCount }) => {
-          const pct = Math.round((amount / maxAmt) * 100)
-          const sharePct = totalAmt > 0 ? Math.round((amount / totalAmt) * 100) : 0
-          const isActive = selectedCat === category
+        {cats.map(({ category, amount, count }) => {
+          const pct = Math.round((amount / max) * 100)
+          const sharePct = total > 0 ? Math.round((amount / total) * 100) : 0
+          const active = selected === category
           return (
-            <button
-              key={category}
-              onClick={() => onSelect(isActive ? null : category)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-all mb-0.5 border ${
-                isActive ? `${colors.activeBg} ${colors.activeBorder}` : 'border-transparent hover:bg-white/[0.03]'
-              }`}
-            >
+            <button key={category} onClick={() => onSelect(active ? null : category)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg mb-0.5 border transition-all ${active ? `${col.bg} ${col.border}` : 'border-transparent hover:bg-white/[0.03]'}`}>
               <div className="flex items-center justify-between text-xs mb-1.5">
-                <div className="flex items-center gap-1.5 truncate max-w-[55%]">
-                  <span className={`font-medium ${isActive ? 'text-white' : 'text-zinc-300'}`}>{category}</span>
-                  {learnedCount > 0 && (
-                    <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-500 shrink-0">aprendida</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 shrink-0 ml-2">
+                <span className={`font-medium truncate max-w-[55%] ${active ? 'text-white' : 'text-zinc-300'}`}>{category}</span>
+                <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600 tabular-nums">{count} tx</span>
-                  <span className={`font-medium tabular-nums ${isActive ? colors.text : 'text-zinc-400'}`}>{fmtCRC(amount)}</span>
-                  <span className={`w-8 text-right tabular-nums ${isActive ? colors.text : 'text-zinc-600'}`}>{sharePct}%</span>
+                  <span className={`font-medium tabular-nums ${active ? col.text : 'text-zinc-400'}`}>{fmtCRC(amount)}</span>
+                  <span className={`w-8 text-right tabular-nums ${active ? col.text : 'text-zinc-600'}`}>{sharePct}%</span>
                 </div>
               </div>
               <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${isActive ? colors.activeBar : colors.bar}`} style={{ width: `${pct}%` }} />
+                <div className={`h-full rounded-full ${active ? col.active : col.bar}`} style={{ width: `${pct}%` }} />
               </div>
             </button>
           )
         })}
-        {cats.length === 0 && (
-          <p className="text-center text-xs text-zinc-600 py-6">Sin movimientos</p>
-        )}
+        {cats.length === 0 && <p className="text-center text-xs text-zinc-600 py-6">Sin movimientos</p>}
       </div>
     </div>
   )
 }
 
-// ── main export ───────────────────────────────────────────────────────────────
+// ── transaction table (L3) ────────────────────────────────────────────────────
 
-export function InteractiveSection({ transactions }: InteractiveSectionProps) {
-  const [tab, setTab]            = useState<TabKey>('gastos')
-  const [selectedCat, setSelCat] = useState<string | null>(null)
-  const [selectedSub, setSelSub] = useState<string | null>(null)
-
-  function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
-  function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
-
-  // Build vendor/concept → category maps from the user's own data
-  const vendorMap  = useMemo(() => buildVendorCatMap(transactions), [transactions])
-  const conceptMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
-
-  const getCat = (tx: TxClient) => resolveCategory(tx, vendorMap, conceptMap)
-
-  // Was this tx categorized via learning (not explicit code or regex)?
-  function wasLearned(tx: TxClient): boolean {
-    if (tx.category_code) return false
-    const vKey = (tx.vendor ?? '').toLowerCase().trim()
-    if (vKey && vKey !== 'na' && vendorMap[vKey]) return true
-    const cKey = (tx.concept ?? '').toLowerCase().trim()
-    if (cKey && (!vKey || vKey === 'na') && conceptMap[cKey]) return true
-    return false
-  }
-
-  const cats: CatRow[] = useMemo(() => {
-    const filter = TAB_FILTER[tab]
-    const map: Record<string, CatRow> = {}
-    for (const tx of transactions) {
-      if (!filter(tx)) continue
-      let cat: string
-      if (tx.is_settlement) cat = 'Liquidaciones'
-      else if (isCryptoValuation(tx)) cat = 'Valorización crypto'
-      else cat = getCat(tx)
-      if (!map[cat]) map[cat] = { category: cat, amount: 0, count: 0, txs: [], learnedCount: 0 }
-      map[cat].amount += Number(tx.amount)
-      map[cat].count++
-      map[cat].txs.push(tx)
-      if (wasLearned(tx)) map[cat].learnedCount++
-    }
-    return Object.values(map).sort((a, b) => b.amount - a.amount)
+function TxTable({ rows, title, vMap, cMap }: {
+  rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
+}) {
+  const [search, setSearch] = useState('')
+  const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    if (!q) return rows
+    return rows.filter(tx =>
+      tx.vendor?.toLowerCase().includes(q) ||
+      tx.concept?.toLowerCase().includes(q) ||
+      getCat(tx).toLowerCase().includes(q)
+    )
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, tab, vendorMap, conceptMap])
+  }, [rows, search])
 
-  const totalLearned = useMemo(
-    () => cats.reduce((s, c) => s + c.learnedCount, 0),
-    [cats]
+  return (
+    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="text-xs font-semibold text-zinc-300">{title} <span className="text-zinc-600 font-normal">({filtered.length})</span></h3>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
+          className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[440px]">
+          <thead>
+            <tr className="border-b border-white/[0.04]">
+              {['Fecha','Descripción','Concepto','Categoría','Monto'].map(h => (
+                <th key={h} className="px-4 py-2.5 text-left text-zinc-500 uppercase tracking-wider font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.03]">
+            {filtered.slice(0, 300).map((tx, i) => {
+              const badge = TYPE_BADGE[tx.movement_type ?? '']
+              const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
+              const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
+              return (
+                <tr key={i} className="hover:bg-white/[0.015] transition-colors">
+                  <td className="px-4 py-2.5 text-zinc-500 tabular-nums whitespace-nowrap">{tx.date ? fmtDate(tx.date) : '—'}</td>
+                  <td className="px-4 py-2.5 text-zinc-200 max-w-[160px] truncate">{tx.vendor ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-zinc-400 max-w-[140px] truncate">{tx.concept ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">
+                    {badge && <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>}
+                  </td>
+                  <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
+                    {sign}{fmtCRC(Number(tx.amount))}
+                  </td>
+                </tr>
+              )
+            })}
+            {filtered.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
+}
 
-  const catTxs: TxClient[] = useMemo(() => {
-    if (!selectedCat) return cats.flatMap(c => c.txs)
-    return cats.find(c => c.category === selectedCat)?.txs ?? []
-  }, [cats, selectedCat])
+// ── main ──────────────────────────────────────────────────────────────────────
 
-  const subcats: SubRow[] = useMemo(() => {
-    const map: Record<string, SubRow> = {}
-    for (const tx of catTxs) {
-      const key = getTxSubcategory(tx)
-      if (!map[key]) map[key] = { name: key, amount: 0, count: 0 }
-      map[key].amount += Number(tx.amount)
-      map[key].count++
+const PERIODS: { key: PeriodKey; label: string }[] = [
+  { key: 'all', label: 'Todo' },
+  { key: 'ytd', label: 'Este año' },
+  { key: '1y',  label: '12 meses' },
+  { key: '3m',  label: '3 meses' },
+]
+
+const TABS: { key: TabKey; label: string; color: string }[] = [
+  { key: 'gastos',    label: 'Gastos',             color: 'rgb(251 113 133)' },
+  { key: 'ingresos',  label: 'Ingresos',            color: 'rgb(52 211 153)'  },
+  { key: 'objetivos', label: 'Ahorros e Inversiones', color: 'rgb(167 139 250)' },
+]
+
+export function InteractiveSection({ transactions }: { transactions: TxClient[] }) {
+  const [period, setPeriod] = useState<PeriodKey>('all')
+  const [tab, setTab]       = useState<TabKey>('gastos')
+  const [selCat, setSelCat] = useState<string | null>(null)
+  const [selSub, setSelSub] = useState<string | null>(null)
+
+  function selectTab(t: TabKey)       { setTab(t); setSelCat(null); setSelSub(null) }
+  function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
+
+  // Build learning maps from ALL transactions (full history, not period-filtered)
+  const vMap = useMemo(() => buildVendorCatMap(transactions), [transactions])
+  const cMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
+  const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
+
+  // Period filter — client-side, no page reload
+  const cutoff = useMemo(() => periodCutoff(period), [period])
+  const periodTxs = useMemo(() =>
+    cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions,
+  [transactions, cutoff])
+
+  // Tab filter
+  const tabFilter = TAB_FILTER[tab]
+  const tabTxs = useMemo(() => periodTxs.filter(tabFilter), [periodTxs, tab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Monthly trend for current tab+period (no separate metric selector)
+  const trendPoints = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const tx of tabTxs) {
+      if (!tx.date) continue
+      const k = tx.date.slice(0, 7)
+      map[k] = (map[k] ?? 0) + Number(tx.amount ?? 0)
     }
-    return Object.values(map).sort((a, b) => b.amount - a.amount).slice(0, 25)
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, amount]) => ({ month, amount }))
+  }, [tabTxs])
+
+  // Category breakdown (L1)
+  const cats = useMemo(() => {
+    const map: Record<string, { amount: number; count: number }> = {}
+    for (const tx of tabTxs) {
+      const cat = tx.is_settlement ? 'Liquidaciones' : getCat(tx)
+      if (!map[cat]) map[cat] = { amount: 0, count: 0 }
+      map[cat].amount += Number(tx.amount ?? 0)
+      map[cat].count++
+    }
+    return Object.entries(map).map(([category, v]) => ({ category, ...v })).sort((a, b) => b.amount - a.amount)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabTxs])
+
+  // Filtered by selected category
+  const catTxs = useMemo(() =>
+    selCat ? tabTxs.filter(tx => (tx.is_settlement ? 'Liquidaciones' : getCat(tx)) === selCat) : tabTxs,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [tabTxs, selCat])
+
+  // Subcategories (L2) — grouped by concept
+  const subcats = useMemo(() => {
+    const map: Record<string, { amount: number; count: number }> = {}
+    for (const tx of catTxs) {
+      const k = getTxConcept(tx)
+      if (!map[k]) map[k] = { amount: 0, count: 0 }
+      map[k].amount += Number(tx.amount ?? 0)
+      map[k].count++
+    }
+    return Object.entries(map).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount).slice(0, 30)
   }, [catTxs])
 
-  const tableTxs: TxClient[] = useMemo(() => {
-    if (!selectedSub) return catTxs
-    return catTxs.filter(tx => getTxSubcategory(tx) === selectedSub)
-  }, [catTxs, selectedSub])
+  // Final transaction list (L3)
+  const tableTxs = useMemo(() =>
+    selSub ? catTxs.filter(tx => getTxConcept(tx) === selSub) : catTxs,
+  [catTxs, selSub])
 
-  const catTotal = useMemo(
-    () => selectedCat
-      ? (cats.find(c => c.category === selectedCat)?.amount ?? 0)
-      : cats.reduce((s, c) => s + c.amount, 0),
-    [cats, selectedCat]
-  )
+  const catTotal = selCat
+    ? (cats.find(c => c.category === selCat)?.amount ?? 0)
+    : cats.reduce((s, c) => s + c.amount, 0)
 
-  const TAB_LABELS: Record<TabKey, string> = {
-    gastos:    'Gastos',
-    ingresos:  'Ingresos',
-    objetivos: 'Ahorros e Inversiones',
-  }
+  const tabColor = TABS.find(t => t.key === tab)!.color
+  const tableTitle = selSub || selCat || TABS.find(t => t.key === tab)!.label
 
-  // ── Monthly trend chart — recomputed whenever tab or selected category changes ──
-  // This is what makes the chart stay in sync with the drilldown selection.
-  const chartData: MonthPoint[] = useMemo(() => {
-    const filter = TAB_FILTER[tab]
-    const monthMap: Record<string, { amount: number }> = {}
-
-    for (const tx of transactions) {
-      if (!tx.date || !tx.movement_type) continue
-      if (!filter(tx)) continue
-      // If a category is selected, only include transactions for that category
-      if (selectedCat) {
-        let cat: string
-        if (tx.is_settlement) cat = 'Liquidaciones'
-        else if (!tx.movement_type) cat = 'Valorización crypto'
-        else cat = getCat(tx)
-        if (cat !== selectedCat) continue
-      }
-      const key = tx.date.slice(0, 7)
-      if (!monthMap[key]) monthMap[key] = { amount: 0 }
-      monthMap[key].amount += Number(tx.amount ?? 0)
+  // KPIs for current period
+  const kpis = useMemo(() => {
+    let income = 0, expenses = 0, invested = 0
+    for (const tx of periodTxs) {
+      if (!tx.movement_type) continue
+      const amt = Number(tx.amount ?? 0)
+      if (isInflow(tx)) income += amt
+      else if (isOutflow(tx)) expenses += amt
+      else if (isSavings(tx)) invested += amt
     }
-
-    const sorted = Object.entries(monthMap).sort(([a], [b]) => a.localeCompare(b))
-    let cumulative = 0
-    return sorted.map(([month, { amount }]) => {
-      cumulative += amount
-      const income   = tab === 'ingresos' ? amount : 0
-      const expenses = tab === 'gastos'   ? amount : 0
-      const net = tab === 'objetivos' ? amount : income - expenses
-      return {
-        month,
-        income,
-        expenses,
-        net,
-        savings_rate: income > 0 ? ((income - expenses) / income) * 100 : 0,
-        cumulative,
-      }
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, tab, selectedCat, vendorMap, conceptMap])
-
-  const tableTitle = selectedSub || selectedCat || TAB_LABELS[tab]
+    const net = income - expenses
+    const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0
+    return { income, expenses, invested, net, savingsRate }
+  }, [periodTxs])
 
   return (
     <div className="space-y-4">
-      {/* Tab selector */}
-      <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1 w-fit">
-        {(['gastos', 'ingresos', 'objetivos'] as TabKey[]).map(t => (
-          <button
-            key={t}
-            onClick={() => selectTab(t)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              tab === t ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {TAB_LABELS[t]}
-          </button>
+      {/* Period + Tab in one row */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Period filter — client-side, no reload */}
+        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1">
+          {PERIODS.map(p => (
+            <button key={p.key} onClick={() => setPeriod(p.key)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${period === p.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {/* Tab filter */}
+        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1">
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => selectTab(t.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${tab === t.key ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Ingresos',    value: kpis.income,     color: 'text-emerald-400' },
+          { label: 'Gastos',      value: kpis.expenses,   color: 'text-rose-400' },
+          { label: 'Balance',     value: kpis.net,        color: kpis.net >= 0 ? 'text-blue-400' : 'text-amber-400' },
+          { label: 'Ahorros',     value: kpis.invested,   color: 'text-violet-400' },
+        ].map(k => (
+          <div key={k.label} className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4">
+            <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">{k.label}</p>
+            <p className={`text-base font-semibold tabular-nums ${k.color}`}>{fmtCRC(k.value)}</p>
+          </div>
         ))}
       </div>
 
-      {/* Trend chart — synced with active tab and selected category */}
-      <MetricChart data={chartData} defaultMetric={tab === 'ingresos' ? 'income' : tab === 'gastos' ? 'expenses' : 'net'} />
-
-      {/* L1 — category bar chart */}
-      <CategoryBarChart
-        cats={cats}
-        tab={tab}
-        selectedCat={selectedCat}
-        onSelect={selectCat}
-        totalLearned={totalLearned}
-      />
-
-      {/* L2 — subcategory breakdown */}
-      {selectedCat && (
-        <SubcategoryPanel
-          rows={subcats}
-          catName={selectedCat}
-          total={catTotal}
-          selectedSub={selectedSub}
-          onSelect={setSelSub}
-        />
+      {/* Trend chart — one line, matches current tab, no extra metric selector */}
+      {trendPoints.length > 1 && (
+        <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4">
+          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+            Tendencia — {TABS.find(t => t.key === tab)!.label}
+            <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
+          </p>
+          <TrendChart points={trendPoints} color={tabColor} />
+        </div>
       )}
 
-      {/* L3 — transaction detail */}
-      <TransactionsTable rows={tableTxs} title={tableTitle} vendorMap={vendorMap} conceptMap={conceptMap} />
+      {/* L1 — category bars */}
+      <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} />
+
+      {/* L2 — concept breakdown */}
+      {selCat && (
+        <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} />
+      )}
+
+      {/* L3 — transactions */}
+      <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} />
     </div>
   )
 }
