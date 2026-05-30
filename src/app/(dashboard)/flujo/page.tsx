@@ -35,8 +35,14 @@ export default async function FlujoPage({ searchParams }: PageProps) {
   const params = await searchParams
 
   // RPC bypasses PostgREST max_rows; movement_type filter applied below
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rawTx } = await (supabase as any).rpc('get_user_transactions', { p_user_id: user.id, p_start_date: null })
+  const { data: rawTx } = await supabase
+    .from('transactions')
+    .select('movement_type, amount, date, expense_group, category_code, vendor, concept, is_settlement, is_passive_income')
+    .not('amount', 'is', null)
+    .not('date', 'is', null)
+    .not('movement_type', 'is', null)
+    .order('date', { ascending: true })
+    .range(0, 19999)
 
   interface TxRow {
     movement_type: string | null

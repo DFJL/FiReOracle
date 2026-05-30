@@ -51,11 +51,16 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     : 'all'
   const start = periodStart(period)
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: rawTx } = await (supabase as any).rpc('get_user_transactions', {
-    p_user_id: user.id,
-    p_start_date: start ?? null,
-  })
+  // Fetch all rows in one shot using range header — bypasses PostgREST max_rows
+  const query = supabase
+    .from('transactions')
+    .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense')
+    .not('amount', 'is', null)
+    .not('date', 'is', null)
+    .order('date', { ascending: true })
+    .range(0, 19999)
+
+  const { data: rawTx } = await (start ? query.gte('date', start) : query)
   const transactions = (rawTx ?? []) as TxClient[]
 
   // ── KPI stats — liquidity only ─────────────────────────────────────────────
