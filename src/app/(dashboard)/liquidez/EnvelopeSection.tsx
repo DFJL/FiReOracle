@@ -253,7 +253,7 @@ export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color }} />
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
                       <span className="text-xs text-zinc-300 truncate">{env.name}</span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">

@@ -7,9 +7,9 @@ export type Envelope = {
   id: string
   name: string
   custodio: string
-  color: string
-  sort_order: number
-  interest_mode: 'manual' | 'auto'
+  color: string | null
+  sort_order: number | null
+  interest_mode: string | null
   annual_rate: number | null
   balance: number
 }
