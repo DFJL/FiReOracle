@@ -109,13 +109,23 @@ function isOutflow(tx: TxClient) {
 
 // Ingresos que tocan liquidez (saldo débito): salario, alquiler, misc activo
 function isLiquidIncome(tx: TxClient) {
-  return tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement
+  if (tx.movement_type !== 'income') return false
+  if (tx.is_passive_income || tx.is_settlement) return false
+  // Liquidaciones de rendimientos = realización de patrimonio previo, no ingreso nuevo
+  const concept = (tx.concept ?? '').toLowerCase()
+  if (concept.startsWith('liquidaci')) return false
+  return true
 }
 
 // Rendimientos que viven en cuentas de ahorro/inversión — no tocan liquidez
+// Incluye liquidaciones (offramp) que realizan patrimonio previo
 function isPatrimonialIncome(tx: TxClient) {
-  return (tx.movement_type === 'income' && !!tx.is_passive_income) ||
-         (!tx.movement_type && tx.amount != null && Number(tx.amount) > 0)
+  if (tx.movement_type === 'income' && !!tx.is_passive_income) return true
+  if (!tx.movement_type && tx.amount != null && Number(tx.amount) > 0) return true
+  // Liquidaciones de rendimientos: is_settlement debería ser true en DB pero no lo está
+  const concept = (tx.concept ?? '').toLowerCase()
+  if (tx.movement_type === 'income' && concept.startsWith('liquidaci')) return true
+  return false
 }
 
 // Mantener isInflow como alias de isLiquidIncome para compatibilidad interna
