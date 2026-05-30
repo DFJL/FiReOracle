@@ -23,16 +23,18 @@ const PRESET_COLORS = [
   '#f87171',
 ]
 
-type FormData = { name: string; custodio: string; color: string; annual_rate: number | null }
+type FormData = { name: string; custodio: string; color: string; annual_rate: number | null; initial_balance?: number | null }
 
 function EnvelopeForm({
   initial,
   existingCustodios,
+  showBalance,
   onSave,
   onCancel,
 }: {
   initial?: Partial<Envelope>
   existingCustodios: string[]
+  showBalance?: boolean
   onSave: (data: FormData) => Promise<void>
   onCancel: () => void
 }) {
@@ -40,6 +42,7 @@ function EnvelopeForm({
   const [custodio, setCust]   = useState(initial?.custodio ?? '')
   const [color, setColor]     = useState(initial?.color ?? PRESET_COLORS[0])
   const [rate, setRate]       = useState(initial?.annual_rate?.toString() ?? '')
+  const [balance, setBalance] = useState('')
   const [error, setError]     = useState('')
   const [isPending, start]    = useTransition()
 
@@ -48,7 +51,11 @@ function EnvelopeForm({
     if (!custodio.trim()) { setError('Custodio requerido'); return }
     setError('')
     start(async () => {
-      await onSave({ name, custodio, color, annual_rate: rate ? parseFloat(rate) : null })
+      await onSave({
+        name, custodio, color,
+        annual_rate: rate ? parseFloat(rate) : null,
+        initial_balance: showBalance && balance ? parseFloat(balance.replace(/,/g, '')) : null,
+      })
     })
   }
 
@@ -106,6 +113,18 @@ function EnvelopeForm({
           />
         </div>
       </div>
+
+      {showBalance && (
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Saldo inicial ₡ (opcional)</p>
+          <input
+            type="number"
+            value={balance} onChange={e => setBalance(e.target.value)}
+            placeholder="0"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
+          />
+        </div>
+      )}
 
       {error && <p className="text-xs text-rose-400">{error}</p>}
 
@@ -175,6 +194,7 @@ export function EnvelopeManager({ envelopes: initial }: { envelopes: Envelope[] 
           <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-3">Nuevo sobre</p>
           <EnvelopeForm
             existingCustodios={custodios}
+            showBalance
             onSave={handleCreate}
             onCancel={() => setShowAdd(false)}
           />
