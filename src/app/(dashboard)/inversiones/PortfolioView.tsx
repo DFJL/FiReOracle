@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { BucketData } from './page'
+import type { BucketData } from './buckets'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`

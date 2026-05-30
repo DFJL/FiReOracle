@@ -1,20 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { INVESTMENT_BUCKETS, type BucketDef } from './buckets'
+import { INVESTMENT_BUCKETS, type BucketDef, type BucketData } from './buckets'
 import { PortfolioView } from './PortfolioView'
-
-export interface BucketData {
-  key: string
-  name: string
-  industry: string
-  color: string
-  deposits: number       // cash in (aperturas, compras)
-  liquidaciones: number  // cash out (settlements)
-  rendimientos: number   // cash returns (intereses, farming liquidados)
-  balance: number        // deposits - liquidaciones + rendimientos
-  valorizationNet: number // mark-to-market net (informational only, not cash)
-}
 
 function matchesBucket(vendor: string, concept: string, def: BucketDef): boolean {
   const v = vendor.toLowerCase().trim()

@@ -14,6 +14,14 @@ export interface BucketDef {
   conceptPatterns?: RegExp[]
 }
 
+export interface BucketData extends Omit<BucketDef, 'conceptPatterns'> {
+  deposits: number
+  liquidaciones: number
+  rendimientos: number
+  balance: number
+  valorizationNet: number
+}
+
 export const INVESTMENT_BUCKETS: BucketDef[] = [
   {
     key: 'transcomer',
