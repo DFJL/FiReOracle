@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect } from 'react'
 import type { NetWorthItem } from '@/app/actions/netWorthItems'
-import { updateNetWorthItem, addNetWorthItem, deleteNetWorthItem } from '@/app/actions/netWorthItems'
+import { updateItemPreservingHistory, addNetWorthItem, deleteNetWorthItem } from '@/app/actions/netWorthItems'
 
 const CAT_META = {
   liquido:   { label: 'Líquido',   color: '#f59e0b', border: 'border-amber-500/20',   head: 'bg-amber-500/[0.06]'   },
@@ -36,6 +36,13 @@ export function ComposicionDetallada({
   if (items.length === 0) return null
 
   const snapshotDate = items[0]?.snapshot_date ?? new Date().toISOString().slice(0, 10)
+  const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
+  const isCurrentMonth = snapshotDate.slice(0, 7) === currentMonth.slice(0, 7)
+
+  const periodLabel = (() => {
+    const [y, m] = snapshotDate.slice(0, 7).split('-').map(Number)
+    return new Date(y, m - 1, 1).toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })
+  })()
 
   function startEdit(item: NetWorthItem) {
     setEditingId(item.id)
@@ -46,7 +53,11 @@ export function ComposicionDetallada({
     const val = parseFloat(editValue)
     if (isNaN(val) || val === item.value_crc) { setEditingId(null); return }
     startTransition(async () => {
-      const res = await updateNetWorthItem(item.id, val)
+      const res = await updateItemPreservingHistory(
+        snapshotDate,
+        { item_name: item.item_name, category: item.category, sort_order: item.sort_order },
+        val,
+      )
       if (!res?.error) {
         setItems(prev => prev.map(i => i.id === item.id ? { ...i, value_crc: val } : i))
       }
@@ -68,7 +79,7 @@ export function ComposicionDetallada({
     const maxOrder = Math.max(-1, ...items.filter(i => i.category === cat).map(i => i.sort_order))
     startTransition(async () => {
       const res = await addNetWorthItem({
-        snapshot_date: snapshotDate,
+        snapshot_date: currentMonth,
         category: cat,
         item_name: name,
         value_crc: val,
@@ -91,6 +102,16 @@ export function ComposicionDetallada({
   }
 
   return (
+    <div className="space-y-2">
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] text-zinc-500">Período:</span>
+      <span className="text-[10px] font-semibold text-zinc-400 capitalize">{periodLabel}</span>
+      {!isCurrentMonth && (
+        <span className="text-[9px] text-amber-500/70 font-medium">
+          · editar crea nuevo registro para el mes actual
+        </span>
+      )}
+    </div>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {CATEGORY_ORDER.map(cat => {
         const catItems = [...items.filter(i => i.category === cat)]
@@ -213,6 +234,7 @@ export function ComposicionDetallada({
           </div>
         )
       })}
+    </div>
     </div>
   )
 }
