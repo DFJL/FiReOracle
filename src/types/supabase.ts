@@ -773,6 +773,39 @@ export type Database = {
         }
         Relationships: []
       }
+      net_worth_items: {
+        Row: {
+          id: string
+          user_id: string
+          snapshot_date: string
+          category: string
+          item_name: string
+          value_crc: number
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          snapshot_date: string
+          category: string
+          item_name: string
+          value_crc: number
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          snapshot_date?: string
+          category?: string
+          item_name?: string
+          value_crc?: number
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
       net_worth_snapshots: {
         Row: {
           created_at: string | null
