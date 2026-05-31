@@ -1223,6 +1223,62 @@ export type Database = {
           },
         ]
       }
+      user_investment_buckets: {
+        Row: {
+          account_id: string | null
+          bucket_type: string
+          color: string | null
+          concept_map: Json | null
+          created_at: string | null
+          id: string
+          industry: string | null
+          is_active: boolean | null
+          name: string
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+          vendors: string[] | null
+        }
+        Insert: {
+          account_id?: string | null
+          bucket_type: string
+          color?: string | null
+          concept_map?: Json | null
+          created_at?: string | null
+          id?: string
+          industry?: string | null
+          is_active?: boolean | null
+          name: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+          vendors?: string[] | null
+        }
+        Update: {
+          account_id?: string | null
+          bucket_type?: string
+          color?: string | null
+          concept_map?: Json | null
+          created_at?: string | null
+          id?: string
+          industry?: string | null
+          is_active?: boolean | null
+          name?: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id?: string
+          vendors?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_investment_buckets_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "financial_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string
