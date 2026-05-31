@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PatrimonioView } from './PatrimonioView'
+import type { SnapshotRow } from '@/app/actions/netWorthSnapshot'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -24,6 +25,7 @@ export default async function PatrimonioPage() {
     { data: envelopes },
     { data: assetRows },
     { data: liabilityRows },
+    { data: snapshotRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
       .select('id, bucket_type, vendors, concept_map, account_id')
@@ -49,6 +51,10 @@ export default async function PatrimonioPage() {
       .select('id, name, liability_type, current_balance, original_balance, interest_rate, is_active, as_of_date')
       .eq('user_id', user.id)
       .eq('is_active', true),
+    admin.from('net_worth_snapshots')
+      .select('id, snapshot_date, liquid_crc, invested_crc, iliquid_crc, liabilities_crc, net_worth_crc, notes, source')
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: true }),
   ])
 
   // Snapshot bucket balances (fetch in parallel for all snapshot buckets)
@@ -192,6 +198,7 @@ export default async function PatrimonioPage() {
         assets={activeAssets}
         liabilities={activeLiabilities}
         monthlyTrend={monthlyTrend}
+        snapshots={(snapshotRows ?? []) as SnapshotRow[]}
       />
     </div>
   )

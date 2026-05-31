@@ -773,6 +773,51 @@ export type Database = {
         }
         Relationships: []
       }
+      net_worth_snapshots: {
+        Row: {
+          created_at: string | null
+          id: string
+          iliquid_crc: number
+          invested_crc: number
+          liabilities_crc: number
+          liquid_crc: number
+          net_worth_crc: number | null
+          notes: string | null
+          snapshot_date: string
+          source: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          iliquid_crc?: number
+          invested_crc?: number
+          liabilities_crc?: number
+          liquid_crc?: number
+          net_worth_crc?: number | null
+          notes?: string | null
+          snapshot_date: string
+          source?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          iliquid_crc?: number
+          invested_crc?: number
+          liabilities_crc?: number
+          liquid_crc?: number
+          net_worth_crc?: number | null
+          notes?: string | null
+          snapshot_date?: string
+          source?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       network_entries: {
         Row: {
           amount: number

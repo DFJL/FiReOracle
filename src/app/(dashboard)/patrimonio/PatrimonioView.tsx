@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, RefreshCw, Trash2, TrendingUp } from 'lucide-react'
+import { Plus, RefreshCw, Trash2, TrendingUp, Download, Upload, Camera } from 'lucide-react'
 import {
   createAsset,
   updateAssetValue,
@@ -10,6 +10,12 @@ import {
   updateLiabilityBalance,
   deactivateLiability,
 } from '@/app/actions/patrimonio'
+import {
+  saveSnapshot,
+  bulkImportSnapshots,
+  deleteSnapshot,
+  type SnapshotRow,
+} from '@/app/actions/netWorthSnapshot'
 
 type Asset = {
   id: string; name: string; asset_type: string
@@ -37,6 +43,7 @@ type Props = {
   assets: Asset[]
   liabilities: Liability[]
   monthlyTrend: TrendPoint[]
+  snapshots: SnapshotRow[]
 }
 
 const ASSET_TYPES = [
@@ -69,40 +76,97 @@ function fmtShort(v: number) {
 
 function today() { return new Date().toISOString().slice(0, 10) }
 
-// ─── Trend chart ─────────────────────────────────────────────────────────────
+// ─── Snapshot net worth chart (stacked area + net worth line) ────────────────
 
-function TrendChart({ data }: { data: TrendPoint[] }) {
-  const pts = data.slice(-24)
-  if (pts.length < 2) {
+function NetWorthChart({
+  snapshots, fallback,
+}: {
+  snapshots: SnapshotRow[]
+  fallback: TrendPoint[]
+}) {
+  const useSnapshots = snapshots.length >= 2
+
+  if (!useSnapshots && fallback.length < 2) {
     return (
-      <div className="h-28 flex items-center justify-center text-xs text-zinc-600">
-        Sin historial de movimientos aún
+      <div className="h-36 flex flex-col items-center justify-center text-xs text-zinc-600 gap-1">
+        <span>Sin historial aún.</span>
+        <span className="text-[10px]">Guardá un snapshot mensual para construir la serie histórica.</span>
       </div>
     )
   }
-  const W = 600, H = 80, PAD = 4
+
+  const W = 600, H = 110, PAD_X = 4, PAD_Y = 6
+
+  if (useSnapshots) {
+    const pts = snapshots.slice(-36)
+    const maxV = Math.max(...pts.map(p => Number(p.liquid_crc) + Number(p.invested_crc) + Number(p.iliquid_crc)))
+    const range = maxV || 1
+    const x = (i: number) => PAD_X + (i / (pts.length - 1)) * (W - 2 * PAD_X)
+    const yv = (v: number) => H - PAD_Y - (v / range) * (H - 2 * PAD_Y)
+
+    // stacked area paths
+    const liqTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc))])
+    const invTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc) + Number(p.invested_crc))])
+    const ilqTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc) + Number(p.invested_crc) + Number(p.iliquid_crc))])
+    const nwLine  = pts.map((p, i) => [x(i), yv(Number(p.net_worth_crc))])
+
+    // Draw areas from x-axis up to each cumulative level; later draws overwrite earlier
+    // Order: iliquid (full height, blue) → invested+liquid (green) → liquid (amber)
+    const toArea = (topPts: number[][]) =>
+      topPts.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
+      + ` L${topPts[topPts.length-1][0].toFixed(1)},${H} L${topPts[0][0].toFixed(1)},${H} Z`
+
+    const ilqArea = toArea(ilqTop)
+    const invArea = toArea(invTop)
+    const liqArea = toArea(liqTop)
+    const nwPath  = nwLine.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
+
+    return (
+      <div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
+          <path d={ilqArea}  fill="#3b82f6" fillOpacity="0.25" />
+          <path d={invArea}  fill="#a3e635" fillOpacity="0.25" />
+          <path d={liqArea}  fill="#f59e0b" fillOpacity="0.25" />
+          <path d={nwPath}   fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          <text x={PAD_X+2} y={H-2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].snapshot_date.slice(0,7)}</text>
+          <text x={W-PAD_X-2} y={H-2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length-1].snapshot_date.slice(0,7)}</text>
+        </svg>
+        <div className="flex gap-3 mt-1 text-[9px] font-black uppercase tracking-[0.1em]">
+          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-amber-500/50 inline-block"/>Líquido</span>
+          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-[#a3e635]/50 inline-block"/>Invertido</span>
+          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-blue-500/50 inline-block"/>Ilíquido</span>
+          <span className="flex items-center gap-1 text-[#a3e635]"><span className="w-2 h-1 rounded-sm bg-[#a3e635] inline-block"/>Patrimonio neto</span>
+        </div>
+      </div>
+    )
+  }
+
+  // fallback: simple net worth line from computed monthly data
+  const pts = fallback.slice(-24)
   const values = pts.map(p => p.total)
-  const minV = Math.min(...values)
-  const maxV = Math.max(...values)
+  const minV = Math.min(...values), maxV = Math.max(...values)
   const range = maxV - minV || 1
-  const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
-  const y = (v: number) => H - PAD - ((v - minV) / range) * (H - 2 * PAD)
-  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.total).toFixed(1)}`).join(' ')
-  const areaPath = `${linePath} L ${x(pts.length - 1).toFixed(1)} ${H} L ${x(0).toFixed(1)} ${H} Z`
+  const x = (i: number) => PAD_X + (i / (pts.length - 1)) * (W - 2 * PAD_X)
+  const y = (v: number) => H - PAD_Y - ((v - minV) / range) * (H - 2 * PAD_Y)
+  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ')
+  const areaPath = `${linePath} L${x(pts.length-1).toFixed(1)},${H} L${x(0).toFixed(1)},${H} Z`
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-28" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="pnGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#a3e635" stopOpacity="0.2" />
-          <stop offset="100%" stopColor="#a3e635" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill="url(#pnGrad)" />
-      <path d={linePath} fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      <text x={PAD + 2} y={H - 2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].month}</text>
-      <text x={W - PAD - 2} y={H - 2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length - 1].month}</text>
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="pnGrad2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a3e635" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="#a3e635" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#pnGrad2)" />
+        <path d={linePath} fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        <text x={PAD_X+2} y={H-2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].month}</text>
+        <text x={W-PAD_X-2} y={H-2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length-1].month}</text>
+      </svg>
+      <p className="text-[9px] text-zinc-700 mt-1">Liquidez + portafolio transaccional. Guardá snapshots para incluir activos ilíquidos y pasivos.</p>
+    </div>
   )
 }
 
@@ -189,10 +253,82 @@ function BreakdownBar({
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
+// ─── CSV paste parser ────────────────────────────────────────────────────────
+
+function parsePastedSnapshots(raw: string): Array<{
+  snapshot_date: string; liquid_crc: number; invested_crc: number
+  iliquid_crc: number; liabilities_crc: number
+}> | string {
+  const lines = raw.trim().split('\n').filter(l => l.trim())
+  if (lines.length === 0) return 'Sin datos'
+
+  const parseNum = (s: string) => {
+    const clean = s.replace(/[₡,\s]/g, '').replace(',', '.')
+    const n = parseFloat(clean)
+    return isNaN(n) ? 0 : n
+  }
+
+  const parseDate = (s: string): string | null => {
+    const t = s.trim()
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t
+    // DD/MM/YYYY
+    const dmy = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`
+    // MM/YYYY or YYYY/MM
+    const my = t.match(/^(\d{1,2})\/(\d{4})$/)
+    if (my) return `${my[2]}-${my[1].padStart(2,'0')}-01`
+    const ym = t.match(/^(\d{4})\/(\d{1,2})$/)
+    if (ym) return `${ym[1]}-${ym[2].padStart(2,'0')}-01`
+    // YYYY-MM
+    if (/^\d{4}-\d{2}$/.test(t)) return `${t}-01`
+    return null
+  }
+
+  const sep = lines[0].includes('\t') ? '\t' : ','
+  const firstCols = lines[0].toLowerCase().split(sep)
+
+  // Detect header row
+  const isHeader = firstCols.some(c => /fecha|date|mes|liquid|invest|iliq|pasiv|liab/.test(c))
+  const dataLines = isHeader ? lines.slice(1) : lines
+
+  // Column mapping (default: date, liquid, invested, iliquid, liabilities)
+  let ci = { date: 0, liquid: 1, invested: 2, iliquid: 3, liabilities: 4 }
+  if (isHeader) {
+    firstCols.forEach((c, i) => {
+      if (/fecha|date|mes/.test(c))                    ci.date       = i
+      else if (/^l[ií]q/.test(c) && !/iliq/.test(c))  ci.liquid     = i
+      else if (/invert/.test(c))                       ci.invested   = i
+      else if (/il[ií]q/.test(c))                      ci.iliquid    = i
+      else if (/pasiv|liab/.test(c))                   ci.liabilities = i
+    })
+  }
+
+  const rows = []
+  for (const line of dataLines) {
+    const cols = line.split(sep)
+    if (cols.length < 4) continue
+    const snapshot_date = parseDate(cols[ci.date] ?? '')
+    if (!snapshot_date) continue
+    rows.push({
+      snapshot_date,
+      liquid_crc:      parseNum(cols[ci.liquid]      ?? '0'),
+      invested_crc:    parseNum(cols[ci.invested]    ?? '0'),
+      iliquid_crc:     parseNum(cols[ci.iliquid]     ?? '0'),
+      liabilities_crc: parseNum(cols[ci.liabilities] ?? '0'),
+    })
+  }
+
+  if (rows.length === 0) return 'No se encontraron filas válidas. Revisá el formato.'
+  return rows
+}
+
+// ─── Main component ──────────────────────────────────────────────────────────
+
 export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
-  assets, liabilities, monthlyTrend,
+  assets, liabilities, monthlyTrend, snapshots,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -218,6 +354,18 @@ export function PatrimonioView({
   const [newLiabOrigBal, setNewLiabOrigBal]   = useState('')
   const [newLiabRate, setNewLiabRate]         = useState('')
   const [liabNewBal, setLiabNewBal]           = useState('')
+
+  // Snapshot state
+  const [showSnapshotPanel, setShowSnapshotPanel] = useState(false)
+  const [showImport, setShowImport]               = useState(false)
+  const [importText, setImportText]               = useState('')
+  const [importMsg, setImportMsg]                 = useState<string | null>(null)
+  const [snapDate, setSnapDate]                   = useState(today())
+  const [snapLiquid, setSnapLiquid]               = useState('')
+  const [snapInvested, setSnapInvested]           = useState('')
+  const [snapIliquid, setSnapIliquid]             = useState('')
+  const [snapLiabilities, setSnapLiabilities]     = useState('')
+  const [snapNotes, setSnapNotes]                 = useState('')
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
@@ -300,7 +448,67 @@ export function PatrimonioView({
     })
   }
 
+  function handleSaveSnapshot(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    startTransition(async () => {
+      const result = await saveSnapshot({
+        snapshot_date: snapDate,
+        liquid_crc:      parseFloat(snapLiquid      || '0'),
+        invested_crc:    parseFloat(snapInvested    || '0'),
+        iliquid_crc:     parseFloat(snapIliquid     || '0'),
+        liabilities_crc: parseFloat(snapLiabilities || '0'),
+        notes: snapNotes || undefined,
+      })
+      if (result.error) { setError(result.error); return }
+      setShowSnapshotPanel(false)
+      setSnapNotes('')
+    })
+  }
+
+  function prefillSnapshot() {
+    setSnapDate(today())
+    setSnapLiquid(String(Math.round(liquidBalance)))
+    setSnapInvested(String(Math.round(totalInvested)))
+    setSnapIliquid(String(Math.round(iliquidTotal)))
+    setSnapLiabilities(String(Math.round(totalLiabilities)))
+    setShowSnapshotPanel(true)
+  }
+
+  function handleImport() {
+    setImportMsg(null)
+    const parsed = parsePastedSnapshots(importText)
+    if (typeof parsed === 'string') { setImportMsg(parsed); return }
+    startTransition(async () => {
+      const result = await bulkImportSnapshots(parsed)
+      if (result.error) { setImportMsg(`Error: ${result.error}`); return }
+      setImportMsg(`✓ ${result.count} snapshots importados`)
+      setImportText('')
+      setShowImport(false)
+    })
+  }
+
+  function handleDeleteSnapshot(id: string) {
+    startTransition(async () => {
+      await deleteSnapshot(id)
+    })
+  }
+
   const pnColor = patrimonioNeto >= 0 ? 'text-[#a3e635]' : 'text-rose-400'
+
+  // Month-over-month and year-over-year delta from snapshots
+  const sorted = [...snapshots].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+  const lastSnap = sorted[sorted.length - 1]
+  const prevMonthSnap = sorted[sorted.length - 2]
+  const yearAgoSnap   = sorted.find(s => {
+    const d = new Date(lastSnap?.snapshot_date ?? today())
+    const target = new Date(d.getFullYear() - 1, d.getMonth(), 1)
+    return s.snapshot_date.slice(0,7) === target.toISOString().slice(0,7)
+  })
+  const momDelta = lastSnap && prevMonthSnap
+    ? Number(lastSnap.net_worth_crc) - Number(prevMonthSnap.net_worth_crc) : null
+  const yoyDelta = lastSnap && yearAgoSnap
+    ? Number(lastSnap.net_worth_crc) - Number(yearAgoSnap.net_worth_crc) : null
 
   return (
     <div className="space-y-8">
@@ -345,18 +553,183 @@ export function PatrimonioView({
         />
       </div>
 
-      {/* Trend chart */}
-      <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-2">
-        <div className="flex items-center gap-2">
-          <TrendingUp size={12} className="text-[#a3e635]" />
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
-            Evolución de portafolio
-          </p>
-          <span className="text-[9px] text-zinc-700 normal-case tracking-normal">
-            Liquidez + portafolio transaccional
-          </span>
+      {/* Net worth trend + deltas */}
+      <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={12} className="text-[#a3e635]" />
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Patrimonio Neto — Evolución</p>
+            {snapshots.length > 0 && (
+              <span className="text-[9px] text-zinc-600">{snapshots.length} snapshots</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {momDelta !== null && (
+              <span className={`text-xs font-bold ${momDelta >= 0 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                {momDelta >= 0 ? '▲' : '▼'} {fmtShort(Math.abs(momDelta))} vs mes ant.
+              </span>
+            )}
+            {yoyDelta !== null && (
+              <span className={`text-xs font-bold ${yoyDelta >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                {yoyDelta >= 0 ? '▲' : '▼'} {fmtShort(Math.abs(yoyDelta))} vs 12m
+              </span>
+            )}
+          </div>
         </div>
-        <TrendChart data={monthlyTrend} />
+        <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} />
+      </div>
+
+      {/* ── Net Worth Snapshots ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Snapshots Mensuales</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">Registro histórico del patrimonio neto</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowImport(v => !v)}
+              className="flex items-center gap-1.5 text-xs font-bold text-zinc-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-white/[0.08] hover:bg-white/[0.04]">
+              <Upload size={11} />
+              Importar CSV
+            </button>
+            <button onClick={prefillSnapshot}
+              className="flex items-center gap-1.5 text-xs font-bold text-[#a3e635] hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-[#a3e635]/20 hover:bg-[#a3e635]/10">
+              <Camera size={11} />
+              Guardar snapshot
+            </button>
+          </div>
+        </div>
+
+        {/* Import panel */}
+        {showImport && (
+          <div className="bg-white/[0.03] rounded-xl border border-white/[0.08] p-4 space-y-3">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Importar desde Google Sheets</p>
+            <p className="text-[10px] text-zinc-600">
+              Copiá el rango de tu hoja (Ctrl+C) y pegalo aquí. Columnas esperadas (con o sin encabezados):<br/>
+              <code className="text-zinc-400">Fecha · Líquido · Invertido · Ilíquido · Pasivos</code>
+            </p>
+            <textarea
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+              rows={8}
+              placeholder={"fecha\tliquido\tinvertido\tiliquido\tpasivos\n2024-01-31\t5000000\t8000000\t15000000\t3000000\n2024-02-29\t5200000\t8100000\t15000000\t2900000"}
+              className="w-full bg-black/30 border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/30 resize-y"
+            />
+            {importMsg && (
+              <p className={`text-xs ${importMsg.startsWith('✓') ? 'text-[#a3e635]' : 'text-rose-400'}`}>{importMsg}</p>
+            )}
+            <div className="flex gap-2">
+              <button onClick={handleImport} disabled={isPending || !importText.trim()}
+                className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+                {isPending ? 'Importando…' : 'Importar'}
+              </button>
+              <button onClick={() => { setShowImport(false); setImportMsg(null) }}
+                className="px-4 py-2 text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Save snapshot form */}
+        {showSnapshotPanel && (
+          <form onSubmit={handleSaveSnapshot} className="bg-white/[0.03] rounded-xl border border-[#a3e635]/20 p-4 space-y-3">
+            <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-[0.14em]">Nuevo snapshot</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="col-span-2 md:col-span-1">
+                <label className={lbl}>Fecha</label>
+                <input type="date" value={snapDate} onChange={e => setSnapDate(e.target.value)} className={inputCls} required />
+              </div>
+              <div>
+                <label className={lbl}>Líquido (₡)</label>
+                <input type="number" min="0" step="any" value={snapLiquid} onChange={e => setSnapLiquid(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={lbl}>Invertido (₡)</label>
+                <input type="number" min="0" step="any" value={snapInvested} onChange={e => setSnapInvested(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={lbl}>Ilíquido (₡)</label>
+                <input type="number" min="0" step="any" value={snapIliquid} onChange={e => setSnapIliquid(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={lbl}>Pasivos (₡)</label>
+                <input type="number" min="0" step="any" value={snapLiabilities} onChange={e => setSnapLiabilities(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                <input type="text" value={snapNotes} onChange={e => setSnapNotes(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-zinc-500">
+                Patrimonio neto: <span className={Number(snapLiquid||0)+Number(snapInvested||0)+Number(snapIliquid||0)-Number(snapLiabilities||0) >= 0 ? 'text-[#a3e635] font-bold' : 'text-rose-400 font-bold'}>
+                  {fmtShort(Number(snapLiquid||0)+Number(snapInvested||0)+Number(snapIliquid||0)-Number(snapLiabilities||0))}
+                </span>
+              </div>
+              <button type="submit" disabled={isPending}
+                className="ml-auto px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+                {isPending ? 'Guardando…' : 'Guardar'}
+              </button>
+              <button type="button" onClick={() => setShowSnapshotPanel(false)}
+                className="px-4 py-2 text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+                Cancelar
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Snapshot history table */}
+        {sorted.length > 0 ? (
+          <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-white/[0.06]">
+                  <th className="px-3 py-2 text-left text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Fecha</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Liq</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Inv</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Ilíq</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Pasivos</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Neto</th>
+                  <th className="px-1 py-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.slice().reverse().slice(0, 24).map((s, i) => {
+                  const prev = sorted.slice().reverse()[i + 1]
+                  const delta = prev ? Number(s.net_worth_crc) - Number(prev.net_worth_crc) : null
+                  return (
+                    <tr key={s.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                      <td className="px-3 py-1.5 text-zinc-400">{s.snapshot_date.slice(0, 7)}</td>
+                      <td className="px-3 py-1.5 text-right text-amber-400">{fmtShort(Number(s.liquid_crc))}</td>
+                      <td className="px-3 py-1.5 text-right text-[#a3e635]">{fmtShort(Number(s.invested_crc))}</td>
+                      <td className="px-3 py-1.5 text-right text-blue-400">{fmtShort(Number(s.iliquid_crc))}</td>
+                      <td className="px-3 py-1.5 text-right text-rose-400">{fmtShort(Number(s.liabilities_crc))}</td>
+                      <td className="px-3 py-1.5 text-right font-bold text-white">
+                        {fmtShort(Number(s.net_worth_crc))}
+                        {delta !== null && (
+                          <span className={`ml-1.5 text-[9px] ${delta >= 0 ? 'text-[#a3e635]/70' : 'text-rose-400/70'}`}>
+                            {delta >= 0 ? '▲' : '▼'}{fmtShort(Math.abs(delta))}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1.5">
+                        <button onClick={() => handleDeleteSnapshot(s.id)} disabled={isPending}
+                          className="p-1 rounded text-zinc-700 hover:text-rose-400 transition-colors">
+                          <Trash2 size={11} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-6 text-xs text-zinc-600 bg-white/[0.02] rounded-xl border border-white/[0.04]">
+            Sin snapshots aún. Importá tu historial desde Google Sheets o guardá el estado actual.
+          </div>
+        )}
       </div>
 
       {/* ── Activos Ilíquidos ── */}
