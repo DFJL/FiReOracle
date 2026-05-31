@@ -5,14 +5,18 @@ import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import { saveNetWorthItemForPeriod, addNetWorthItem, deleteNetWorthItem } from '@/app/actions/netWorthItems'
 
 const CAT_META = {
-  liquido:   { label: 'Líquido',   color: '#f59e0b', border: 'border-amber-500/20',   head: 'bg-amber-500/[0.06]'   },
-  invertido: { label: 'Invertido', color: '#a3e635', border: 'border-[#a3e635]/20',  head: 'bg-[#a3e635]/[0.04]'  },
-  iliquido:  { label: 'Ilíquido',  color: '#60a5fa', border: 'border-blue-500/20',   head: 'bg-blue-500/[0.04]'   },
-  pasivo:    { label: 'Pasivos',   color: '#f43f5e', border: 'border-rose-500/20',   head: 'bg-rose-500/[0.04]'   },
+  liquido:     { label: 'Liquidez',          color: '#f59e0b', border: 'border-amber-500/20',   head: 'bg-amber-500/[0.06]'   },
+  inversiones: { label: 'Inversiones',        color: '#a3e635', border: 'border-[#a3e635]/20',  head: 'bg-[#a3e635]/[0.04]'  },
+  invertido:   { label: 'Fondos & Pensiones', color: '#84cc16', border: 'border-lime-500/20',   head: 'bg-lime-500/[0.04]'   },
+  iliquido:    { label: 'Ilíquido',           color: '#60a5fa', border: 'border-blue-500/20',   head: 'bg-blue-500/[0.04]'   },
+  pasivo:      { label: 'Pasivos',            color: '#f43f5e', border: 'border-rose-500/20',   head: 'bg-rose-500/[0.04]'   },
 } as const
 
 type Category = keyof typeof CAT_META
-const CATEGORY_ORDER: Category[] = ['liquido', 'invertido', 'iliquido', 'pasivo']
+
+// First 3 are grouped under "Portafolio", last 2 are standalone
+const PORTFOLIO_CATS: Category[] = ['liquido', 'inversiones', 'invertido']
+const STANDALONE_CATS: Category[] = ['iliquido', 'pasivo']
 
 function fmtPreview(raw: string): string {
   const n = parseFloat(raw.replace(/,/g, ''))
@@ -123,11 +127,88 @@ export function ComposicionDetallada({
     })
   }
 
+  const portfolioTotal = [...PORTFOLIO_CATS, ...STANDALONE_CATS.filter(c => c !== 'pasivo')]
+    .flatMap(cat => items.filter(i => i.category === cat))
+    .reduce((s, i) => {
+      const k = i.item_name.toLowerCase()
+      return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
+    }, 0)
+
   const activeSheet = editSheet !== null || addSheet !== null
+
+  function renderCatCard(cat: Category) {
+    const catItems = [...items.filter(i => i.category === cat)]
+      .sort((a, b) => a.sort_order - b.sort_order)
+    const total = catItems.reduce((s, i) => {
+      const k = i.item_name.toLowerCase()
+      return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
+    }, 0)
+    const m = CAT_META[cat]
+    return (
+      <div key={cat} className={`rounded-xl border ${m.border} overflow-hidden`}>
+        <div className={`px-3 py-2 border-b border-white/[0.05] flex items-center justify-between ${m.head}`}>
+          <p className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: m.color }}>
+            {m.label}
+          </p>
+          {catItems.length > 0 && (
+            <p className="text-xs font-bold" style={{ color: m.color }}>{fmt(total)}</p>
+          )}
+        </div>
+
+        {catItems.map(item => {
+          const computedKey  = item.item_name.toLowerCase()
+          const isComputed   = computedKey in computedValues
+          const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
+          return (
+            <div key={item.id}
+              className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01] group">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
+                <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
+                {isComputed && (
+                  <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => !isComputed && openEdit(item)}
+                  disabled={isComputed}
+                  title={isComputed ? 'Calculado automáticamente' : 'Editar'}
+                  className={`text-xs font-bold tabular-nums ${isComputed ? 'cursor-default' : 'active:opacity-60'}`}
+                  style={{ color: m.color }}
+                >
+                  {fmt(displayValue)}
+                </button>
+                {!isComputed && (
+                  <button
+                    onClick={() => handleDelete(item.id)}
+                    disabled={isPending}
+                    title="Eliminar"
+                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-opacity disabled:opacity-20"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+
+        <button
+          onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
+          className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
+        >
+          + agregar
+        </button>
+      </div>
+    )
+  }
 
   return (
     <>
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* Period + saved feedback */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-zinc-500">Período:</span>
@@ -136,7 +217,7 @@ export function ComposicionDetallada({
           </span>
         </div>
         {savedMsg && (
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-opacity ${
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
             savedMsg.startsWith('Error') ? 'bg-rose-500/20 text-rose-400' : 'bg-lime-500/20 text-lime-400'
           }`}>
             {savedMsg}
@@ -144,75 +225,20 @@ export function ComposicionDetallada({
         )}
       </div>
 
+      {/* Portafolio group */}
+      <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+        <div className="px-3 py-2 bg-white/[0.03] border-b border-white/[0.06] flex items-center justify-between">
+          <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">Portafolio</p>
+          <p className="text-xs font-bold text-zinc-300">{fmt(portfolioTotal)}</p>
+        </div>
+        <div className="p-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {PORTFOLIO_CATS.map(cat => renderCatCard(cat))}
+        </div>
+      </div>
+
+      {/* Standalone categories */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {CATEGORY_ORDER.map(cat => {
-          const catItems = [...items.filter(i => i.category === cat)]
-            .sort((a, b) => a.sort_order - b.sort_order)
-          const total = catItems.reduce((s, i) => {
-            const k = i.item_name.toLowerCase()
-            return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
-          }, 0)
-          const m = CAT_META[cat]
-          return (
-            <div key={cat} className={`rounded-xl border ${m.border} overflow-hidden`}>
-              <div className={`px-3 py-2 border-b border-white/[0.05] flex items-center justify-between ${m.head}`}>
-                <p className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: m.color }}>
-                  {m.label}
-                </p>
-                {catItems.length > 0 && (
-                  <p className="text-xs font-bold" style={{ color: m.color }}>{fmt(total)}</p>
-                )}
-              </div>
-
-              {catItems.map(item => {
-                const computedKey  = item.item_name.toLowerCase()
-                const isComputed   = computedKey in computedValues
-                const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
-                return (
-                  <div key={item.id}
-                    className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01] group">
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
-                      <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
-                      {isComputed && (
-                        <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => !isComputed && openEdit(item)}
-                        disabled={isComputed}
-                        title={isComputed ? 'Calculado automáticamente' : 'Editar'}
-                        className={`text-xs font-bold tabular-nums ${isComputed ? 'cursor-default' : 'active:opacity-60'}`}
-                        style={{ color: m.color }}
-                      >
-                        {fmt(displayValue)}
-                      </button>
-                      {!isComputed && (
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          disabled={isPending}
-                          title="Eliminar"
-                          className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-opacity disabled:opacity-20"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-
-              <button
-                onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
-                className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
-              >
-                + agregar
-              </button>
-            </div>
-          )
-        })}
+        {STANDALONE_CATS.map(cat => renderCatCard(cat))}
       </div>
     </div>
 
@@ -222,10 +248,7 @@ export function ComposicionDetallada({
         className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
         onClick={e => { if (e.target === e.currentTarget) { setEdit(null); setAdd(null) } }}
       >
-        {/* Backdrop */}
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-
-        {/* Sheet */}
         <div className="relative w-full sm:max-w-sm bg-zinc-900 border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl">
           {editSheet && <EditSheetContent
             sheet={editSheet}
@@ -257,7 +280,7 @@ function PeriodInput({ value, onChange }: { value: string; onChange: (v: string)
       value={value}
       max={new Date().toISOString().slice(0, 7)}
       onChange={e => onChange(e.target.value)}
-      className="w-full bg-white/[0.06] border border-white/[0.12] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 appearance-none"
+      className="w-full bg-white/[0.06] border border-white/[0.12] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30"
     />
   )
 }
@@ -274,7 +297,7 @@ function ValueInput({ value, onChange, onEnter }: { value: string; onChange: (v:
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && onEnter?.()}
         placeholder="0"
-        className="w-full bg-white/[0.06] border border-white/[0.12] rounded-xl pl-8 pr-4 py-3 text-xl font-bold text-white focus:outline-none focus:border-white/30 tabular-nums placeholder-zinc-700"
+        className="w-full bg-white/[0.06] border border-white/[0.12] rounded-xl pl-8 pr-24 py-3 text-xl font-bold text-white focus:outline-none focus:border-white/30 tabular-nums placeholder-zinc-700"
       />
       {value && (
         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-xs pointer-events-none">
@@ -299,6 +322,7 @@ function EditSheetContent({ sheet, onChange, onSave, onClose, isPending }: {
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-0.5">Editar valor</p>
           <p className="text-base font-bold text-white">{sheet.item.item_name}</p>
+          <p className="text-[10px] text-zinc-500 mt-0.5 capitalize">{CAT_META[sheet.item.category as Category]?.label ?? sheet.item.category}</p>
         </div>
         <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 p-1">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -363,7 +387,7 @@ function AddSheetContent({ sheet, onChange, onSave, onClose, isPending, catColor
         <input
           autoFocus
           type="text"
-          placeholder="ej. Pensión voluntaria"
+          placeholder="ej. ROP"
           value={sheet.name}
           onChange={e => onChange({ ...sheet, name: e.target.value })}
           className="w-full bg-white/[0.06] border border-white/[0.12] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 placeholder-zinc-700"

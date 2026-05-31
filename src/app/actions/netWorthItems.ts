@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache'
 export type NetWorthItem = {
   id: string
   snapshot_date: string
-  category: 'liquido' | 'invertido' | 'iliquido' | 'pasivo'
+  category: 'liquido' | 'inversiones' | 'invertido' | 'iliquido' | 'pasivo'
   item_name: string
   value_crc: number
   sort_order: number
