@@ -17,6 +17,8 @@ import {
   type SnapshotRow,
 } from '@/app/actions/netWorthSnapshot'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import type { NetWorthItem } from '@/app/actions/netWorthItems'
+import { ComposicionDetallada } from './ComposicionDetallada'
 
 type Asset = {
   id: string; name: string; asset_type: string
@@ -46,6 +48,7 @@ type Props = {
   monthlyTrend: TrendPoint[]
   snapshots: SnapshotRow[]
   exchangeRate: ExchangeRate
+  netWorthItems: NetWorthItem[]
 }
 
 const ASSET_TYPES = [
@@ -544,7 +547,7 @@ function parsePastedSnapshots(raw: string): Array<{
 export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
-  assets, liabilities, monthlyTrend, snapshots, exchangeRate,
+  assets, liabilities, monthlyTrend, snapshots, exchangeRate, netWorthItems,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -796,6 +799,14 @@ export function PatrimonioView({
           totalActivos={dispActivos}
         />
       </div>
+
+      {/* Composición detallada */}
+      {netWorthItems.length > 0 && (
+        <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-4">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Composición Detallada</p>
+          <ComposicionDetallada items={netWorthItems} fmt={fmt} />
+        </div>
+      )}
 
       {/* Net worth trend + deltas */}
       <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-3">

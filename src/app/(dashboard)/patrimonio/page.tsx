@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PatrimonioView } from './PatrimonioView'
 import type { SnapshotRow } from '@/app/actions/netWorthSnapshot'
+import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 type ConceptMap = {
@@ -27,6 +28,7 @@ export default async function PatrimonioPage() {
     { data: assetRows },
     { data: liabilityRows },
     { data: snapshotRows },
+    { data: itemRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
       .select('id, bucket_type, vendors, concept_map, account_id')
@@ -56,6 +58,11 @@ export default async function PatrimonioPage() {
       .select('id, snapshot_date, liquid_crc, invested_crc, iliquid_crc, liabilities_crc, net_worth_crc, notes, source')
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true }),
+    admin.from('net_worth_items')
+      .select('id, snapshot_date, category, item_name, value_crc, sort_order')
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: false })
+      .limit(100),
   ])
 
   // Snapshot bucket balances (fetch in parallel for all snapshot buckets)
@@ -187,6 +194,13 @@ export default async function PatrimonioPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
+  // Latest snapshot's item breakdown
+  const allItems = (itemRows ?? []) as NetWorthItem[]
+  const latestItemDate = allItems[0]?.snapshot_date ?? null
+  const netWorthItems = latestItemDate
+    ? allItems.filter(r => r.snapshot_date === latestItemDate).sort((a, b) => a.sort_order - b.sort_order)
+    : []
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PatrimonioView
@@ -203,6 +217,7 @@ export default async function PatrimonioPage() {
         monthlyTrend={monthlyTrend}
         snapshots={(snapshotRows ?? []) as SnapshotRow[]}
         exchangeRate={exchangeRate}
+        netWorthItems={netWorthItems}
       />
     </div>
   )
