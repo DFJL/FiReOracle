@@ -4,6 +4,18 @@ import { redirect } from 'next/navigation'
 import { EnvelopeSection } from './EnvelopeSection'
 import { SelfLoansSection } from './SelfLoansSection'
 
+export type SubEnvelope = {
+  id: string
+  name: string
+  custodio: string
+  color: string | null
+  sort_order: number | null
+  interest_mode: string | null
+  annual_rate: number | null
+  parent_envelope_id: string
+  balance: number
+}
+
 export type Envelope = {
   id: string
   name: string
@@ -12,7 +24,9 @@ export type Envelope = {
   sort_order: number | null
   interest_mode: string | null
   annual_rate: number | null
-  balance: number
+  parent_envelope_id: null
+  balance: number   // own movements if no children; sum of children if has children
+  children: SubEnvelope[]
 }
 
 export type SelfLoan = {
@@ -41,7 +55,7 @@ export default async function LiquidezPage() {
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate')
+      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -51,21 +65,63 @@ export default async function LiquidezPage() {
       .eq('user_id', user.id),
     admin
       .from('self_loans')
-      .select('id, description, original_amount, amount_repaid, balance_remaining, loan_date, status, source_envelope_id, notes')
+      .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, notes')
       .eq('user_id', user.id)
       .order('loan_date', { ascending: false }),
   ])
 
-  const balanceMap: Record<string, number> = {}
+  // Own balance from movements
+  const ownBalance: Record<string, number> = {}
   for (const m of movements ?? []) {
-    balanceMap[m.envelope_id] = (balanceMap[m.envelope_id] ?? 0) + Number(m.amount)
+    ownBalance[m.envelope_id] = (ownBalance[m.envelope_id] ?? 0) + Number(m.amount)
   }
 
-  const enriched: Envelope[] = (envelopes ?? []).map(e => ({
-    ...e,
-    balance: balanceMap[e.id] ?? 0,
-  }))
+  // Group children by parent
+  const childMap: Record<string, SubEnvelope[]> = {}
+  for (const e of envelopes ?? []) {
+    if (!e.parent_envelope_id) continue
+    if (!childMap[e.parent_envelope_id]) childMap[e.parent_envelope_id] = []
+    childMap[e.parent_envelope_id].push({
+      id: e.id,
+      name: e.name,
+      custodio: e.custodio,
+      color: e.color,
+      sort_order: e.sort_order,
+      interest_mode: e.interest_mode,
+      annual_rate: e.annual_rate,
+      parent_envelope_id: e.parent_envelope_id,
+      balance: ownBalance[e.id] ?? 0,
+    })
+  }
 
+  // Root envelopes: balance = sum of children (if has children) or own movements
+  const rootEnvelopes: Envelope[] = (envelopes ?? [])
+    .filter(e => !e.parent_envelope_id)
+    .map(e => {
+      const children = childMap[e.id] ?? []
+      const balance = children.length > 0
+        ? children.reduce((s, c) => s + c.balance, 0)
+        : (ownBalance[e.id] ?? 0)
+      return {
+        id: e.id,
+        name: e.name,
+        custodio: e.custodio,
+        color: e.color,
+        sort_order: e.sort_order,
+        interest_mode: e.interest_mode,
+        annual_rate: e.annual_rate,
+        parent_envelope_id: null,
+        balance,
+        children,
+      }
+    })
+
+  // Flat leaf envelopes (for interest distribution — only leaves hold actual movements)
+  const leafEnvelopes: (Envelope | SubEnvelope)[] = rootEnvelopes.flatMap<Envelope | SubEnvelope>(e =>
+    e.children.length > 0 ? e.children : [e]
+  )
+
+  // Envelope name map for self-loans
   const envelopeNameMap: Record<string, string> = {}
   for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
 
@@ -81,22 +137,18 @@ export default async function LiquidezPage() {
     notes: l.notes,
   }))
 
-  if (enriched.length === 0) {
+  if (rootEnvelopes.length === 0) {
     return (
       <div className="p-4 md:p-8 max-w-3xl mx-auto">
         <div className="mb-8">
-          <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">
-            Fire Oracle
-          </p>
+          <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">Fire Oracle</p>
           <p className="text-3xl font-black text-white tracking-tight leading-none">Liquidez</p>
         </div>
         <div className="rounded-2xl border border-dashed border-[#a3e635]/[0.15] p-10 text-center space-y-3">
           <p className="text-zinc-400 text-sm font-semibold">Sin sobres configurados</p>
-          <p className="text-zinc-600 text-xs">Creá tus sobres de ahorro en Configuración para empezar a registrar tu liquidez.</p>
-          <a
-            href="/configuracion"
-            className="inline-block mt-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-xs font-black hover:bg-[#a3e635]/20 transition-all"
-          >
+          <p className="text-zinc-600 text-xs">Creá tus sobres de ahorro en Configuración para empezar.</p>
+          <a href="/configuracion"
+            className="inline-block mt-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-xs font-black hover:bg-[#a3e635]/20 transition-all">
             Ir a Configuración
           </a>
         </div>
@@ -106,9 +158,9 @@ export default async function LiquidezPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
-      <EnvelopeSection envelopes={enriched} />
+      <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} />
       <div className="border-t border-white/[0.06] pt-8">
-        <SelfLoansSection loans={enrichedLoans} envelopes={enriched} />
+        <SelfLoansSection loans={enrichedLoans} envelopes={leafEnvelopes as Envelope[]} />
       </div>
     </div>
   )
