@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import type { Envelope, SubEnvelope } from './page'
 import { addMovement, distributeInterest } from './actions'
+import { createSubEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -190,6 +191,77 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
   )
 }
 
+const SUB_PRESET_COLORS = ['#a3e635','#60a5fa','#f472b6','#fb923c','#a78bfa','#34d399','#fbbf24','#f87171']
+
+function AddSubEnvelopePanel({ parentId, onClose }: { parentId: string; onClose: () => void }) {
+  const [name, setName]       = useState('')
+  const [color, setColor]     = useState(SUB_PRESET_COLORS[0])
+  const [rate, setRate]       = useState('')
+  const [balance, setBalance] = useState('')
+  const [error, setError]     = useState('')
+  const [isPending, start]    = useTransition()
+
+  function submit() {
+    if (!name.trim()) { setError('Nombre requerido'); return }
+    setError('')
+    start(async () => {
+      const res = await createSubEnvelope(parentId, {
+        name,
+        color,
+        annual_rate: rate ? parseFloat(rate) : null,
+        initial_balance: balance ? parseFloat(balance.replace(/,/g, '')) : null,
+      })
+      if (res?.error) { setError(res.error); return }
+      onClose()
+    })
+  }
+
+  return (
+    <div className="mx-4 mb-3 mt-1 rounded-xl bg-white/[0.04] border border-[#a3e635]/[0.12] p-4 space-y-3">
+      <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest">Nuevo sub-sobre</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Nombre</p>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Fondo X"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Tasa anual % (opcional)</p>
+          <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)} placeholder="4.5"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 items-start">
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1.5">Color</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {SUB_PRESET_COLORS.map(c => (
+              <button key={c} type="button" onClick={() => setColor(c)}
+                className={`w-5 h-5 rounded-full transition-all ${color === c ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-[#080c08] scale-110' : 'opacity-60 hover:opacity-100'}`}
+                style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Saldo inicial ₡ (opcional)</p>
+          <input type="number" value={balance} onChange={e => setBalance(e.target.value)} placeholder="0"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+      </div>
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={isPending}
+          className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50 transition-opacity">
+          {isPending ? '...' : 'Crear sub-sobre'}
+        </button>
+        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/[0.06] text-zinc-400 text-xs hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function EnvelopeSection({
   envelopes,
   leafEnvelopes,
@@ -197,8 +269,9 @@ export function EnvelopeSection({
   envelopes: Envelope[]
   leafEnvelopes: (Envelope | SubEnvelope)[]
 }) {
-  const [openId, setOpenId]         = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [openId, setOpenId]             = useState<string | null>(null)
+  const [expandedId, setExpandedId]     = useState<string | null>(null)
+  const [subAddParentId, setSubAdd]     = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
 
   const custodios = [...new Set(envelopes.map(e => e.custodio))]
@@ -320,10 +393,26 @@ export function EnvelopeSection({
                       />
                     </div>
                   ))}
-                  <div className="flex items-center justify-between pl-9 pr-4 py-1.5 bg-white/[0.02] border-t border-white/[0.03]">
-                    <span className="text-[9px] text-zinc-700 uppercase tracking-wider">Total</span>
-                    <span className="text-[9px] font-black tabular-nums text-zinc-500">{fmtCRC(env.balance)}</span>
-                  </div>
+                  {subAddParentId === env.id ? (
+                    <div className="border-t border-white/[0.03]">
+                      <AddSubEnvelopePanel
+                        parentId={env.id}
+                        onClose={() => setSubAdd(null)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between pl-9 pr-4 py-1.5 bg-white/[0.02] border-t border-white/[0.03]">
+                      <span className="text-[9px] text-zinc-700 uppercase tracking-wider">Total</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => { setSubAdd(env.id); setOpenId(null) }}
+                          className="text-[9px] font-black text-[#a3e635]/60 hover:text-[#a3e635] transition-colors">
+                          + Sub-sobre
+                        </button>
+                        <span className="text-[9px] font-black tabular-nums text-zinc-500">{fmtCRC(env.balance)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

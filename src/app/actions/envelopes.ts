@@ -94,6 +94,72 @@ export async function updateEnvelope(id: string, data: Partial<EnvelopeData>) {
   revalidatePath('/configuracion')
 }
 
+export async function createSubEnvelope(parentId: string, data: {
+  name: string
+  color: string
+  annual_rate: number | null
+  initial_balance?: number | null
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  const { data: parent } = await admin
+    .from('savings_envelopes')
+    .select('id, custodio, sort_order')
+    .eq('id', parentId)
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!parent) return { error: 'Sobre padre no encontrado' }
+
+  const { data: maxRow } = await admin
+    .from('savings_envelopes')
+    .select('sort_order')
+    .eq('user_id', user.id)
+    .eq('parent_envelope_id', parentId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const sort_order = (maxRow?.sort_order ?? parent.sort_order ?? 0) + 1
+
+  const { error, data: inserted } = await admin
+    .from('savings_envelopes')
+    .insert({
+      user_id: user.id,
+      name: data.name.trim(),
+      custodio: parent.custodio,
+      color: data.color,
+      annual_rate: data.annual_rate,
+      interest_mode: 'manual',
+      sort_order,
+      parent_envelope_id: parentId,
+      is_active: true,
+    })
+    .select('id')
+    .single()
+
+  if (error) return { error: error.message }
+
+  if (data.initial_balance && data.initial_balance > 0 && inserted?.id) {
+    await admin.from('envelope_movements').insert({
+      user_id: user.id,
+      envelope_id: inserted.id,
+      movement_type: 'deposito',
+      amount: data.initial_balance,
+      date: new Date().toISOString().slice(0, 10),
+      notes: 'Saldo inicial',
+    })
+  }
+
+  revalidatePath('/liquidez')
+  revalidatePath('/configuracion')
+}
+
 export async function deactivateEnvelope(id: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

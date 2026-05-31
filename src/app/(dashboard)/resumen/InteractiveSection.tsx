@@ -418,22 +418,40 @@ function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
 
 // ── transaction table (L3) ────────────────────────────────────────────────────
 
+type TxSortKey = 'date' | 'amount' | 'vendor' | 'category'
+
 function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
   currency: 'CRC' | 'USD'; tcSell: number
 }) {
-  const [search, setSearch] = useState('')
+  const [search, setSearch]   = useState('')
+  const [sortKey, setSortKey] = useState<TxSortKey>('date')
+  const [sortAsc, setSortAsc] = useState(false)
+
+  function cycleSort(key: TxSortKey) {
+    if (sortKey === key) { setSortAsc(a => !a) } else { setSortKey(key); setSortAsc(false) }
+  }
+
   const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (!q) return rows
-    return rows.filter(tx =>
+    const base = !q ? rows : rows.filter(tx =>
       tx.vendor?.toLowerCase().includes(q) ||
       tx.concept?.toLowerCase().includes(q) ||
       getCat(tx).toLowerCase().includes(q)
     )
+    return [...base].sort((a, b) => {
+      let va: string | number = 0, vb: string | number = 0
+      if (sortKey === 'date')     { va = a.date ?? ''; vb = b.date ?? '' }
+      if (sortKey === 'amount')   { va = Number(a.amount ?? 0); vb = Number(b.amount ?? 0) }
+      if (sortKey === 'vendor')   { va = (a.vendor ?? '').toLowerCase(); vb = (b.vendor ?? '').toLowerCase() }
+      if (sortKey === 'category') { va = getCat(a).toLowerCase(); vb = getCat(b).toLowerCase() }
+      if (va < vb) return sortAsc ? -1 : 1
+      if (va > vb) return sortAsc ? 1 : -1
+      return 0
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search])
+  }, [rows, search, sortKey, sortAsc])
 
   function fmtTx(crc: number) {
     if (currency === 'USD') {
@@ -454,8 +472,19 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
         <table className="w-full text-xs min-w-[440px]">
           <thead>
             <tr className="border-b border-white/[0.04]">
-              {['Fecha','Descripción','Concepto','Categoría','Monto'].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left text-zinc-500 uppercase tracking-wider font-semibold">{h}</th>
+              {([
+                { label: 'Fecha',      key: 'date'     },
+                { label: 'Descripción',key: 'vendor'   },
+                { label: 'Concepto',   key: null        },
+                { label: 'Categoría',  key: 'category' },
+                { label: 'Monto',      key: 'amount'   },
+              ] as { label: string; key: TxSortKey | null }[]).map(({ label, key }) => (
+                <th key={label}
+                  onClick={key ? () => cycleSort(key) : undefined}
+                  className={`px-4 py-2.5 text-left text-[9px] text-zinc-500 uppercase tracking-wider font-black whitespace-nowrap ${key ? 'cursor-pointer hover:text-zinc-300 select-none transition-colors' : ''}`}>
+                  {label}
+                  {key && sortKey === key && <span className="ml-1 opacity-60">{sortAsc ? '↑' : '↓'}</span>}
+                </th>
               ))}
             </tr>
           </thead>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
 
@@ -80,8 +80,20 @@ function monthlyAggregates(txs: TxRow[]): (MonthData & { hasData: boolean })[] {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
+type SortKey = 'month' | 'income' | 'expenses' | 'withdrawals' | 'net' | 'cumulative' | 'rate'
+
 export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
-  const [period, setPeriod] = useState<PeriodKey>('ytd')
+  const [period, setPeriod]   = useState<PeriodKey>('ytd')
+  const [sortKey, setSortKey] = useState<SortKey | null>(null)
+  const [sortAsc, setSortAsc] = useState(false)
+
+  const cycleSort = useCallback((key: SortKey) => {
+    setSortKey(prev => {
+      if (prev !== key) { setSortAsc(false); return key }
+      setSortAsc(a => !a)
+      return key
+    })
+  }, [])
 
   const cutoff     = useMemo(() => periodCutoff(period), [period])
   const filtered   = useMemo(() => cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions, [transactions, cutoff])
@@ -95,6 +107,15 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
   const activeMonths   = monthly.filter(r => r.hasData)
   const bestMonth      = [...activeMonths].sort((a, b) => b.net - a.net)[0]
   const worstMonth     = [...activeMonths].sort((a, b) => a.net - b.net)[0]
+
+  const sortedMonths = useMemo(() => {
+    if (!sortKey) return activeMonths
+    return [...activeMonths].sort((a, b) => {
+      const va = a[sortKey] ?? -Infinity
+      const vb = b[sortKey] ?? -Infinity
+      return sortAsc ? (va > vb ? 1 : va < vb ? -1 : 0) : (va < vb ? 1 : va > vb ? -1 : 0)
+    })
+  }, [activeMonths, sortKey, sortAsc])
 
   const now        = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
@@ -187,13 +208,25 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-white/[0.04]">
-                  {['Mes','Ingresos','Gastos','Retiros','Flujo neto','Acumulado','Margen neto'].map(h => (
-                    <th key={h} className="px-5 py-3 text-left text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  {([
+                    { label: 'Mes',        key: 'month'       },
+                    { label: 'Ingresos',   key: 'income'      },
+                    { label: 'Gastos',     key: 'expenses'    },
+                    { label: 'Retiros',    key: 'withdrawals' },
+                    { label: 'Flujo neto', key: 'net'         },
+                    { label: 'Acumulado',  key: 'cumulative'  },
+                    { label: 'Margen neto',key: 'rate'        },
+                  ] as { label: string; key: SortKey }[]).map(({ label, key }) => (
+                    <th key={key} onClick={() => cycleSort(key)}
+                      className="px-5 py-3 text-left text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:text-zinc-300 select-none transition-colors">
+                      {label}
+                      {sortKey === key && <span className="ml-1 opacity-60">{sortAsc ? '↑' : '↓'}</span>}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.03]">
-                {monthly.filter(r => r.hasData).map(r => (
+                {sortedMonths.map(r => (
                   <tr key={r.month} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-5 py-3 text-zinc-300 font-black whitespace-nowrap">
                       {MONTH_NAMES[parseInt(r.month.slice(5,7))-1]} {r.month.slice(0,4)}
