@@ -40,14 +40,12 @@ function AddMovementPanel({ envelope, onClose }: { envelope: Envelope; onClose: 
   }
 
   return (
-    <div className="mx-3 mb-2 mt-1 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
+    <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
       <div className="flex gap-1 flex-wrap">
         {MOV_TYPES.map(({ v, l }) => (
           <button key={v} onClick={() => setType(v)}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-              type === v
-                ? 'bg-[#a3e635] text-black'
-                : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200'
+              type === v ? 'bg-[#a3e635] text-black' : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200'
             }`}
           >{l}</button>
         ))}
@@ -178,7 +176,7 @@ function InterestModal({
 }
 
 export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
-  const [openId, setOpenId]             = useState<string | null>(null)
+  const [openId, setOpenId]         = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
 
   const custodios = [...new Set(envelopes.map(e => e.custodio))]
@@ -189,7 +187,7 @@ export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div>
         <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">
@@ -212,75 +210,58 @@ export function EnvelopeSection({ envelopes }: { envelopes: Envelope[] }) {
         </div>
       </div>
 
-      {/* Custodio groups — side by side on md+ */}
-      <div className="grid md:grid-cols-2 gap-4">
+      {/* Custodio summary + interest buttons */}
+      <div className="flex gap-2 flex-wrap">
         {custodios.map(cust => {
-        const group     = envelopes.filter(e => e.custodio === cust)
-        const custTotal = group.reduce((s, e) => s + e.balance, 0)
-        const pct       = total > 0 ? (custTotal / total) * 100 : 0
-
-        return (
-          <div key={cust} className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden self-start">
-            {/* Custodio header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.05]">
+          const custTotal = envelopes.filter(e => e.custodio === cust).reduce((s, e) => s + e.balance, 0)
+          const pct = total > 0 ? (custTotal / total) * 100 : 0
+          return (
+            <div key={cust} className="flex-1 min-w-[150px] flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.10]">
               <div>
-                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Custodio</p>
-                <p className="text-base font-black text-white mt-0.5">{cust}</p>
+                <p className="text-xs font-black text-zinc-200">{cust}</p>
+                <p className="text-[10px] tabular-nums text-zinc-500">{fmtCRC(custTotal)} · {pct.toFixed(1)}%</p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="text-sm font-black tabular-nums text-zinc-200">{fmtCRC(custTotal)}</p>
-                  <p className="text-[9px] tabular-nums text-zinc-600">{pct.toFixed(1)}%</p>
-                </div>
-                <button
-                  onClick={() => setInterest(cust)}
-                  className="px-3 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all"
-                >
-                  + Interés
-                </button>
-              </div>
+              <button
+                onClick={() => setInterest(cust)}
+                className="px-2.5 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all shrink-0"
+              >
+                + Interés
+              </button>
             </div>
-
-            {/* Envelopes */}
-            <div className="p-2 space-y-0.5">
-              {group.map(env => (
-                <div key={env.id}>
-                  <button
-                    onClick={() => setOpenId(openId === env.id ? null : env.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all text-left ${
-                      openId === env.id
-                        ? 'bg-white/[0.06] border border-white/[0.06]'
-                        : 'hover:bg-white/[0.03] border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
-                      <span className="text-xs text-zinc-300 truncate">{env.name}</span>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className={`text-xs font-black tabular-nums ${
-                        env.balance > 0 ? 'text-zinc-100' : 'text-zinc-600'
-                      }`}>
-                        {fmtCRC(env.balance)}
-                      </span>
-                      <span className="text-zinc-600 text-[10px] w-3 text-center">
-                        {openId === env.id ? '−' : '+'}
-                      </span>
-                    </div>
-                  </button>
-
-                  {openId === env.id && (
-                    <AddMovementPanel
-                      envelope={env}
-                      onClose={() => setOpenId(null)}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )
+          )
         })}
+      </div>
+
+      {/* Flat envelope table */}
+      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+        {envelopes.map((env, i) => (
+          <div key={env.id} className={i > 0 ? 'border-t border-white/[0.03]' : ''}>
+            <button
+              onClick={() => setOpenId(openId === env.id ? null : env.id)}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                openId === env.id ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
+              <span className="flex-1 text-xs text-zinc-300 truncate min-w-0">{env.name}</span>
+              <span className="text-[9px] font-bold text-zinc-600 px-1.5 py-0.5 rounded bg-white/[0.04] shrink-0 tabular-nums">
+                {env.custodio}
+              </span>
+              <span className={`text-xs font-black tabular-nums shrink-0 w-16 text-right ${
+                env.balance > 0 ? 'text-zinc-100' : 'text-zinc-600'
+              }`}>
+                {fmtCRC(env.balance)}
+              </span>
+              <span className="text-zinc-600 text-[10px] w-3 text-center shrink-0">
+                {openId === env.id ? '−' : '+'}
+              </span>
+            </button>
+
+            {openId === env.id && (
+              <AddMovementPanel envelope={env} onClose={() => setOpenId(null)} />
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Interest modal */}
