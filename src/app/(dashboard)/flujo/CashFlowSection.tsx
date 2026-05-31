@@ -86,7 +86,6 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
   const cutoff     = useMemo(() => periodCutoff(period), [period])
   const filtered   = useMemo(() => cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions, [transactions, cutoff])
   const monthly    = useMemo(() => monthlyAggregates(filtered), [filtered])
-  const heatData   = useMemo(() => monthlyAggregates(transactions).map(({ hasData: _, ...r }) => r), [transactions])
   const chartData  = useMemo(() => monthly.map(({ hasData: _, ...r }) => r), [monthly])
 
   const totalIncome    = monthly.reduce((s, r) => s + r.income, 0)
@@ -130,7 +129,7 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
           { label: 'Ingresos',      value: fmt(totalIncome),                                      color: 'text-[#a3e635]'  },
           { label: 'Egresos',       value: fmt(totalExpenses),                                    color: 'text-rose-400'   },
           { label: 'Flujo neto',    value: fmt(totalNet),                                         color: totalNet >= 0 ? 'text-blue-400' : 'text-amber-400' },
-          { label: 'Tasa de ahorro',value: totalRate !== null ? totalRate.toFixed(1) + '%' : '—', color: totalRate !== null && totalRate >= 20 ? 'text-[#a3e635]' : totalRate !== null && totalRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
+          { label: 'Margen neto',   value: totalRate !== null ? totalRate.toFixed(1) + '%' : '—', color: totalRate !== null && totalRate >= 20 ? 'text-[#a3e635]' : totalRate !== null && totalRate >= 10 ? 'text-amber-400' : 'text-rose-400' },
         ].map(k => (
           <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
             <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{k.value}</p>
@@ -168,13 +167,13 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
         <MonthlyBarsChart data={chartData} />
       </div>
 
-      {/* Heatmap — always full history */}
+      {/* Heatmap — filtered by selected period */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
         <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
-          Tasa de ahorro histórica
+          Margen neto mensual
         </p>
-        <p className="text-xs text-zinc-500 mb-3">Todos los períodos registrados</p>
-        <SavingsHeatmap data={heatData} />
+        <p className="text-xs text-zinc-500 mb-3">{periodFull}</p>
+        <SavingsHeatmap data={chartData} />
       </div>
 
       {/* Monthly table */}
@@ -188,7 +187,7 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-white/[0.04]">
-                  {['Mes','Ingresos','Gastos','Retiros','Flujo neto','Acumulado','Tasa de ahorro'].map(h => (
+                  {['Mes','Ingresos','Gastos','Retiros','Flujo neto','Acumulado','Margen neto'].map(h => (
                     <th key={h} className="px-5 py-3 text-left text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>

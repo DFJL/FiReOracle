@@ -23,7 +23,7 @@ export default async function InversionesPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: bucketRows }, { data: txs }, { data: movements }] = await Promise.all([
+  const [{ data: bucketRows }, { data: txs }, { data: movements }, { data: envelopes }] = await Promise.all([
     admin
       .from('user_investment_buckets')
       .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')
@@ -37,8 +37,13 @@ export default async function InversionesPage() {
       .not('amount', 'is', null),
     admin
       .from('envelope_movements')
-      .select('amount, date, movement_type')
+      .select('amount, date, movement_type, envelope_id')
       .eq('user_id', user.id),
+    admin
+      .from('savings_envelopes')
+      .select('id, parent_envelope_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true),
   ])
 
   // Fetch snapshot balances for snapshot_based buckets
@@ -57,10 +62,15 @@ export default async function InversionesPage() {
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
 
-  // liquidBalance = sum of envelope movements (principal only, excluding interes type)
-  // This matches the Liquidez page so both views show the same number.
+  // Mirror Liquidez page logic exactly: parent envelopes that have children are ignored
+  // (their balance = sum of children). Only leaf-envelope movements count.
+  const parentEnvelopeIds = new Set(
+    (envelopes ?? [])
+      .filter(e => e.parent_envelope_id !== null)
+      .map(e => e.parent_envelope_id as string)
+  )
   const liquidBalance = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes')
+    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
 
   // Compute bucket balances (current)
@@ -157,10 +167,12 @@ export default async function InversionesPage() {
     }
   }
 
-  // Step 2: liquidez monthly deltas from envelope_movements
+  // Step 2: liquidez monthly deltas from envelope_movements (leaf envelopes only, no interes)
   const liquidezDeltas: Record<string, number> = {}
   for (const m of movements ?? []) {
     if (!m.date) continue
+    if (m.movement_type === 'interes') continue
+    if (parentEnvelopeIds.has(m.envelope_id)) continue
     const month = m.date.slice(0, 7)
     liquidezDeltas[month] = (liquidezDeltas[month] ?? 0) + Number(m.amount)
   }

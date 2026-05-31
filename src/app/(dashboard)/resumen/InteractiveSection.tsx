@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -694,26 +695,42 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
         {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
           {[
-            { label: 'Ingresos',      crc: kpis.income,       color: 'text-[#a3e635]',  sub: null as string | null },
-            { label: 'Gastos',        crc: kpis.expenses,     color: 'text-rose-400',   sub: null },
-            { label: 'Valor. pasivo', crc: kpis.rendimientos, color: 'text-blue-400',   sub: 'no realizado' },
-            { label: 'Tasa de ahorro', crc: -1,               color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
-              sub: `margen neto ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
-          ].map(k => {
-            const isPct = k.crc === -1
-            const display = isPct ? `${savingsRate}%` : fmtAmt(k.crc)
-            const secondary = (!isPct && currency === 'CRC')
-              ? `$${Math.round(toUSD(k.crc)).toLocaleString('en-US')}`
-              : null
-            return (
-              <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1">
-                <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{display}</p>
-                {secondary && <p className="text-[10px] tabular-nums text-zinc-600">{secondary}</p>}
-                <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em] mt-0.5">{k.label}</p>
-                {k.sub && <p className="text-[9px] text-zinc-600 tabular-nums">{k.sub}</p>}
-              </div>
-            )
-          })}
+            {
+              label: 'Ingresos',
+              display: fmtAmt(kpis.income),
+              color: 'text-[#a3e635]',
+              secondary: currency === 'CRC' ? `$${Math.round(toUSD(kpis.income)).toLocaleString('en-US')}` : null as string | null,
+              sub: kpis.rendimientos > 0 ? `+${fmtAmt(kpis.rendimientos)} val. pasiva` : null as string | null,
+            },
+            {
+              label: 'Gastos',
+              display: fmtAmt(kpis.expenses),
+              color: 'text-rose-400',
+              secondary: currency === 'CRC' ? `$${Math.round(toUSD(kpis.expenses)).toLocaleString('en-US')}` : null,
+              sub: null,
+            },
+            {
+              label: 'Tasa de ahorro',
+              display: `${savingsRate}%`,
+              color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
+              secondary: null,
+              sub: kpis.invested > 0 ? `${fmtAmt(kpis.invested)} invertido` : null,
+            },
+            {
+              label: 'Margen neto',
+              display: `${netMargin >= 0 ? '+' : ''}${netMargin}%`,
+              color: netMargin >= 20 ? 'text-blue-400' : netMargin >= 0 ? 'text-amber-400' : 'text-rose-400',
+              secondary: null,
+              sub: `${fmtAmt(kpis.net)} libre`,
+            },
+          ].map(k => (
+            <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1">
+              <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{k.display}</p>
+              {k.secondary && <p className="text-[10px] tabular-nums text-zinc-600">{k.secondary}</p>}
+              <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.16em] mt-0.5">{k.label}</p>
+              {k.sub && <p className="text-[9px] text-zinc-600 tabular-nums">{k.sub}</p>}
+            </div>
+          ))}
         </div>
 
       </div>
@@ -771,14 +788,19 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-3">
-          Tendencia
-          <span className="text-zinc-700 font-normal ml-2">{trendPoints.length} meses</span>
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
+          Tendencia mensual
         </p>
+        <p className="text-xs text-zinc-500 mb-3">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>
         {trendPoints.length > 1
           ? <MultiTrendChart points={trendPoints} />
           : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
         }
+      </div>
+
+      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
+      <div className="mb-4">
+        <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} />
       </div>
 
       {/* L1 + L2 side by side on desktop */}

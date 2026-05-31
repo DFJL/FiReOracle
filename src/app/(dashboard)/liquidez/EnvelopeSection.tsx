@@ -253,6 +253,10 @@ export function EnvelopeSection({
 
       {/* Envelope table */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#a3e635]/[0.08]">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Sobres de ahorro</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Toca un sobre para registrar movimientos</p>
+        </div>
         {envelopes.map((env, i) => {
           const hasChildren = env.children.length > 0
           const isExpanded  = expandedId === env.id
