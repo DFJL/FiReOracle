@@ -795,6 +795,23 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
         ))}
       </div>
 
+      {/* ── Trend chart ───────────────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
+          Tendencia mensual
+        </p>
+        <p className="text-xs text-zinc-500 mb-3">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>
+        {trendPoints.length > 1
+          ? <MultiTrendChart points={trendPoints} />
+          : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
+        }
+      </div>
+
+      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
+      <div className="mb-4">
+        <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} />
+      </div>
+
       {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
       {tab === 'ingresos' && (
         <div className="flex gap-1 mb-4 ml-1">
@@ -814,23 +831,6 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
           ))}
         </div>
       )}
-
-      {/* ── Trend chart ───────────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
-          Tendencia mensual
-        </p>
-        <p className="text-xs text-zinc-500 mb-3">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>
-        {trendPoints.length > 1
-          ? <MultiTrendChart points={trendPoints} />
-          : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
-        }
-      </div>
-
-      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
-      <div className="mb-4">
-        <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} />
-      </div>
 
       {/* L1 + L2 side by side on desktop */}
       <div className="flex gap-4 items-start">

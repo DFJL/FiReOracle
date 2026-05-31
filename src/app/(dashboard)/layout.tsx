@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import { NavLink } from '@/components/nav-link'
 import { TransactionEntryWrapper } from './movimientos/TransactionEntryWrapper'
+import Link from 'next/link'
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -88,6 +89,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
       {/* Main content */}
       <div className="flex-1 md:ml-52 flex flex-col min-h-screen pb-16 md:pb-0">
+        {/* Mobile top bar */}
+        <header className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[#a3e635]/[0.08] bg-[#080c08]">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-md bg-[#a3e635] flex items-center justify-center text-[10px] font-black text-black shrink-0">
+              F
+            </div>
+            <span className="text-xs font-black tracking-widest uppercase text-[#a3e635]">FiReOracle</span>
+          </div>
+          <Link href="/configuracion" className="p-2 rounded-lg text-zinc-400 hover:text-[#a3e635] hover:bg-white/[0.04] transition-colors">
+            <Settings size={18} />
+          </Link>
+        </header>
+
         {/* Onboarding banner */}
         {needsSetup && (
           <div className="bg-blue-600/10 border-b border-blue-500/20 px-4 py-2.5 flex items-center justify-between gap-4">
