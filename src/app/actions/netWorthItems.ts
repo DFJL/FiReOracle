@@ -84,53 +84,21 @@ export async function addNetWorthItem(item: {
   return { ok: true }
 }
 
-/**
- * Updates one item's value for the current month.
- * If the displayed snapshot is from a prior month, all items for that date are
- * first copied to the current month (ignoring conflicts) so no history is lost,
- * then the target item is upserted with the new value.
- */
-export async function updateItemPreservingHistory(
-  displayedSnapshotDate: string,
+export async function saveNetWorthItemForPeriod(
   item: { item_name: string; category: NetWorthItem['category']; sort_order: number },
+  periodYYYYMM: string,
   value_crc: number,
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado' }
 
-  const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
   const admin = createAdminClient()
-
-  if (displayedSnapshotDate !== currentMonth) {
-    const { data: priorItems } = await admin
-      .from('net_worth_items')
-      .select('category, item_name, value_crc, sort_order')
-      .eq('user_id', user.id)
-      .eq('snapshot_date', displayedSnapshotDate)
-
-    if (priorItems && priorItems.length > 0) {
-      const copies = priorItems.map(r => ({
-        user_id: user.id,
-        snapshot_date: currentMonth,
-        category: r.category,
-        item_name: r.item_name,
-        value_crc: r.value_crc,
-        sort_order: r.sort_order,
-      }))
-      // ignoreDuplicates: keep any values the user already set this month
-      const { error: copyErr } = await admin
-        .from('net_worth_items')
-        .upsert(copies, { onConflict: 'user_id,snapshot_date,item_name', ignoreDuplicates: true })
-      if (copyErr) return { error: copyErr.message }
-    }
-  }
-
   const { error } = await admin
     .from('net_worth_items')
     .upsert({
       user_id: user.id,
-      snapshot_date: currentMonth,
+      snapshot_date: periodYYYYMM + '-01',
       category: item.category,
       item_name: item.item_name,
       value_crc,
@@ -139,7 +107,7 @@ export async function updateItemPreservingHistory(
 
   if (error) return { error: error.message }
   revalidatePath('/patrimonio')
-  return { ok: true, newDate: currentMonth }
+  return { ok: true }
 }
 
 export async function deleteNetWorthItem(id: string) {
