@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { EnvelopeSection } from './EnvelopeSection'
+import { SelfLoansSection } from './SelfLoansSection'
 
 export type Envelope = {
   id: string
@@ -14,6 +15,18 @@ export type Envelope = {
   balance: number
 }
 
+export type SelfLoan = {
+  id: string
+  description: string
+  original_amount: number
+  amount_repaid: number
+  loan_date: string
+  status: string
+  source_envelope_id: string | null
+  source_envelope_name: string | null
+  notes: string | null
+}
+
 export default async function LiquidezPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -21,17 +34,27 @@ export default async function LiquidezPage() {
 
   const admin = createAdminClient()
 
-  const { data: envelopes } = await admin
-    .from('savings_envelopes')
-    .select('id, name, custodio, color, sort_order, interest_mode, annual_rate')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .order('sort_order')
-
-  const { data: movements } = await admin
-    .from('envelope_movements')
-    .select('envelope_id, amount')
-    .eq('user_id', user.id)
+  const [
+    { data: envelopes },
+    { data: movements },
+    { data: loans },
+  ] = await Promise.all([
+    admin
+      .from('savings_envelopes')
+      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('sort_order'),
+    admin
+      .from('envelope_movements')
+      .select('envelope_id, amount')
+      .eq('user_id', user.id),
+    admin
+      .from('self_loans')
+      .select('id, description, original_amount, amount_repaid, balance_remaining, loan_date, status, source_envelope_id, notes')
+      .eq('user_id', user.id)
+      .order('loan_date', { ascending: false }),
+  ])
 
   const balanceMap: Record<string, number> = {}
   for (const m of movements ?? []) {
@@ -41,6 +64,21 @@ export default async function LiquidezPage() {
   const enriched: Envelope[] = (envelopes ?? []).map(e => ({
     ...e,
     balance: balanceMap[e.id] ?? 0,
+  }))
+
+  const envelopeNameMap: Record<string, string> = {}
+  for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
+
+  const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => ({
+    id: l.id,
+    description: l.description,
+    original_amount: Number(l.original_amount),
+    amount_repaid: Number(l.amount_repaid),
+    loan_date: l.loan_date,
+    status: l.status,
+    source_envelope_id: l.source_envelope_id ?? null,
+    source_envelope_name: l.source_envelope_id ? (envelopeNameMap[l.source_envelope_id] ?? null) : null,
+    notes: l.notes,
   }))
 
   if (enriched.length === 0) {
@@ -67,8 +105,11 @@ export default async function LiquidezPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl mx-auto">
+    <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
       <EnvelopeSection envelopes={enriched} />
+      <div className="border-t border-white/[0.06] pt-8">
+        <SelfLoansSection loans={enrichedLoans} envelopes={enriched} />
+      </div>
     </div>
   )
 }
