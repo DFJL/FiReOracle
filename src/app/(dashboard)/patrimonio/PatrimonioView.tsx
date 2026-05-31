@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { Plus, RefreshCw, Trash2, TrendingUp, Download, Upload, Camera } from 'lucide-react'
 import {
   createAsset,
@@ -76,7 +76,28 @@ function fmtShort(v: number) {
 
 function today() { return new Date().toISOString().slice(0, 10) }
 
-// ─── Snapshot net worth chart (stacked area + net worth line) ────────────────
+function monthLabel(m: string) {
+  const [y, mo] = m.split('-')
+  const names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+  return `${names[parseInt(mo) - 1]} '${y.slice(2)}`
+}
+
+const NW_SERIES = [
+  { key: '__neto__',      name: 'Patrimonio neto', color: '#a3e635' },
+  { key: '__liquid__',    name: 'Líquido',          color: '#f59e0b' },
+  { key: '__invested__',  name: 'Invertido',         color: '#84cc16' },
+  { key: '__iliquid__',   name: 'Ilíquido',          color: '#60a5fa' },
+  { key: '__pasivos__',   name: 'Pasivos',           color: '#f43f5e' },
+]
+
+const NW_RANGES = [
+  { label: '1A',   months: 12   },
+  { label: '2A',   months: 24   },
+  { label: '5A',   months: 60   },
+  { label: 'Todo', months: 9999 },
+]
+
+// ─── Snapshot net worth chart (interactive, portfolio-style) ─────────────────
 
 function NetWorthChart({
   snapshots, fallback,
@@ -84,6 +105,11 @@ function NetWorthChart({
   snapshots: SnapshotRow[]
   fallback: TrendPoint[]
 }) {
+  const [rangeMonths, setRangeMonths] = useState(9999)
+  const [visible, setVisible]         = useState<Set<string>>(new Set(['__neto__']))
+  const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
+  const svgRef                        = useRef<SVGSVGElement>(null)
+
   const useSnapshots = snapshots.length >= 2
 
   if (!useSnapshots && fallback.length < 2) {
@@ -95,79 +121,203 @@ function NetWorthChart({
     )
   }
 
-  const W = 600, H = 110, PAD_X = 4, PAD_Y = 6
+  const toggle = (key: string) => setVisible(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    return next
+  })
 
   if (useSnapshots) {
-    const pts = snapshots.slice(-36)
-    const maxV = Math.max(...pts.map(p => Number(p.liquid_crc) + Number(p.invested_crc) + Number(p.iliquid_crc)))
-    const range = maxV || 1
-    const x = (i: number) => PAD_X + (i / (pts.length - 1)) * (W - 2 * PAD_X)
-    const yv = (v: number) => H - PAD_Y - (v / range) * (H - 2 * PAD_Y)
+    const pts = snapshots.slice(-rangeMonths)
+    const data = pts.map(p => ({
+      month:    p.snapshot_date.slice(0, 7),
+      balances: {
+        '__neto__':     Number(p.net_worth_crc),
+        '__liquid__':   Number(p.liquid_crc),
+        '__invested__': Number(p.invested_crc),
+        '__iliquid__':  Number(p.iliquid_crc),
+        '__pasivos__':  Number(p.liabilities_crc),
+      } as Record<string, number>,
+    }))
 
-    // stacked area paths
-    const liqTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc))])
-    const invTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc) + Number(p.invested_crc))])
-    const ilqTop  = pts.map((p, i) => [x(i), yv(Number(p.liquid_crc) + Number(p.invested_crc) + Number(p.iliquid_crc))])
-    const nwLine  = pts.map((p, i) => [x(i), yv(Number(p.net_worth_crc))])
+    const W = 800, H = 200
+    const padL = 52, padR = 8, padT = 8, padB = 28
+    const chartW = W - padL - padR
+    const chartH = H - padT - padB
+    const N = data.length
 
-    // Draw areas from x-axis up to each cumulative level; later draws overwrite earlier
-    // Order: iliquid (full height, blue) → invested+liquid (green) → liquid (amber)
-    const toArea = (topPts: number[][]) =>
-      topPts.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
-      + ` L${topPts[topPts.length-1][0].toFixed(1)},${H} L${topPts[0][0].toFixed(1)},${H} Z`
+    const visibleVals = data.flatMap(p =>
+      NW_SERIES.filter(s => visible.has(s.key)).map(s => p.balances[s.key] ?? 0)
+    )
+    const maxV = Math.max(...visibleVals, 1)
 
-    const ilqArea = toArea(ilqTop)
-    const invArea = toArea(invTop)
-    const liqArea = toArea(liqTop)
-    const nwPath  = nwLine.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
+    const xOf = (i: number) => padL + (i / Math.max(N - 1, 1)) * chartW
+    const yOf = (v: number) => padT + chartH - (Math.max(v, 0) / maxV) * chartH
+
+    const labelStep = Math.ceil(N / 8)
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxV)
+
+    const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+      const rect = svgRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const svgX = ((e.clientX - rect.left) / rect.width) * W
+      let closest = 0, minDist = Infinity
+      data.forEach((_, i) => {
+        const dist = Math.abs(xOf(i) - svgX)
+        if (dist < minDist) { minDist = dist; closest = i }
+      })
+      setHoverIdx(closest)
+    }
+
+    const last = data[data.length - 1]
 
     return (
-      <div>
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Evolución patrimonial</p>
-        <p className="text-xs text-zinc-500 mb-3">{pts.length} meses · Líquido · Invertido · Ilíquido · Patrimonio neto</p>
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
-          <path d={ilqArea}  fill="#3b82f6" fillOpacity="0.25" />
-          <path d={invArea}  fill="#a3e635" fillOpacity="0.25" />
-          <path d={liqArea}  fill="#f59e0b" fillOpacity="0.25" />
-          <path d={nwPath}   fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-          <text x={PAD_X+2} y={H-2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].snapshot_date.slice(0,7)}</text>
-          <text x={W-PAD_X-2} y={H-2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length-1].snapshot_date.slice(0,7)}</text>
-        </svg>
-        <div className="flex gap-3 mt-1 text-[9px] font-black uppercase tracking-[0.1em]">
-          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-amber-500/50 inline-block"/>Líquido</span>
-          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-[#a3e635]/50 inline-block"/>Invertido</span>
-          <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-blue-500/50 inline-block"/>Ilíquido</span>
-          <span className="flex items-center gap-1 text-[#a3e635]"><span className="w-2 h-1 rounded-sm bg-[#a3e635] inline-block"/>Neto</span>
+      <div className="space-y-3">
+        {/* Range selector */}
+        <div className="flex justify-end">
+          <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+            {NW_RANGES.map(r => (
+              <button key={r.label} onClick={() => setRangeMonths(r.months)}
+                className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
+                  rangeMonths === r.months ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                }`}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* SVG chart + hover tooltip */}
+        <div className="relative">
+          {hoverIdx !== null && (
+            <div className="absolute z-10 pointer-events-none"
+              style={{ left: `${(xOf(hoverIdx) / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
+              <div className="bg-[#111811] border border-[#a3e635]/20 rounded-xl px-3 py-2.5 shadow-xl whitespace-nowrap">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 text-center">
+                  {monthLabel(data[hoverIdx].month)}
+                </p>
+                {NW_SERIES.filter(s => visible.has(s.key)).map(s => (
+                  <div key={s.key} className="flex items-center justify-between gap-4 leading-5">
+                    <span className="text-[10px]" style={{ color: s.color, opacity: 0.75 }}>{s.name}</span>
+                    <span className="text-[10px] font-black tabular-nums" style={{ color: s.color }}>
+                      {fmtShort(data[hoverIdx].balances[s.key] ?? 0)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full cursor-crosshair" style={{ height: '200px' }}
+            onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
+
+            {/* Grid + Y labels */}
+            {yTicks.map((v, i) => (
+              <g key={i}>
+                <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)}
+                  stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+                <text x={padL - 4} y={yOf(v) + 4} textAnchor="end" fontSize="9" fill="#3f3f46">
+                  {fmtShort(v)}
+                </text>
+              </g>
+            ))}
+
+            {/* Series polylines */}
+            {NW_SERIES.filter(s => visible.has(s.key)).map(s => {
+              const linePoints = data.map((p, i) =>
+                `${xOf(i).toFixed(1)},${yOf(p.balances[s.key] ?? 0).toFixed(1)}`
+              ).join(' ')
+              const isNeto = s.key === '__neto__'
+              return (
+                <polyline key={s.key} points={linePoints} fill="none"
+                  stroke={s.color}
+                  strokeWidth={isNeto ? 2.5 : 1.5}
+                  strokeOpacity={isNeto ? 1 : 0.65}
+                  strokeLinejoin="round" strokeLinecap="round"
+                />
+              )
+            })}
+
+            {/* End-point dots (hidden while hovering) */}
+            {hoverIdx === null && NW_SERIES.filter(s => visible.has(s.key)).map(s => (
+              <circle key={s.key}
+                cx={xOf(N - 1)} cy={yOf(last.balances[s.key] ?? 0)}
+                r={s.key === '__neto__' ? 3 : 2}
+                fill={s.color} opacity={0.9}
+              />
+            ))}
+
+            {/* X-axis month labels */}
+            {data.map((p, i) => {
+              if (i % labelStep !== 0 && i !== N - 1) return null
+              return (
+                <text key={i} x={xOf(i)} y={H - 4} textAnchor="middle" fontSize="9"
+                  fill={hoverIdx === i ? '#71717a' : '#3f3f46'}>
+                  {monthLabel(p.month)}
+                </text>
+              )
+            })}
+
+            {/* Hover crosshair */}
+            {hoverIdx !== null && (
+              <>
+                <line x1={xOf(hoverIdx)} y1={padT} x2={xOf(hoverIdx)} y2={padT + chartH}
+                  stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 2" />
+                {NW_SERIES.filter(s => visible.has(s.key)).map(s => (
+                  <circle key={s.key}
+                    cx={xOf(hoverIdx)} cy={yOf(data[hoverIdx].balances[s.key] ?? 0)}
+                    r={s.key === '__neto__' ? 4 : 3}
+                    fill={s.color} stroke="#0d120d" strokeWidth="1.5"
+                  />
+                ))}
+              </>
+            )}
+          </svg>
+        </div>
+
+        {/* Legend / series toggle */}
+        <div className="flex flex-wrap gap-1.5">
+          {NW_SERIES.map(s => {
+            const on = visible.has(s.key)
+            return (
+              <button key={s.key} onClick={() => toggle(s.key)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-left transition-all ${
+                  on ? 'border-white/[0.10] bg-white/[0.04]' : 'border-transparent opacity-40'
+                }`}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+                <span className="text-[9px] font-semibold text-zinc-300">{s.name}</span>
+                <span className="text-[9px] tabular-nums font-black ml-1" style={{ color: s.color }}>
+                  {fmtShort(last.balances[s.key] ?? 0)}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
     )
   }
 
-  // fallback: simple net worth line from computed monthly data
-  const pts = fallback.slice(-24)
-  const values = pts.map(p => p.total)
-  const minV = Math.min(...values), maxV = Math.max(...values)
-  const range = maxV - minV || 1
-  const x = (i: number) => PAD_X + (i / (pts.length - 1)) * (W - 2 * PAD_X)
-  const y = (v: number) => H - PAD_Y - ((v - minV) / range) * (H - 2 * PAD_Y)
-  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ')
-  const areaPath = `${linePath} L${x(pts.length-1).toFixed(1)},${H} L${x(0).toFixed(1)},${H} Z`
+  // Fallback: simple net worth line derived from transaction data
+  const fbPts = fallback.slice(-24)
+  const fbVals = fbPts.map(p => p.total)
+  const fbMin = Math.min(...fbVals), fbMax = Math.max(...fbVals)
+  const fbRange = fbMax - fbMin || 1
+  const FW = 600, FH = 110, FPX = 4, FPY = 6
+  const fx = (i: number) => FPX + (i / (fbPts.length - 1)) * (FW - 2 * FPX)
+  const fy = (v: number) => FH - FPY - ((v - fbMin) / fbRange) * (FH - 2 * FPY)
+  const fbLine = fbPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${fx(i).toFixed(1)},${fy(p.total).toFixed(1)}`).join(' ')
+  const fbArea = `${fbLine} L${fx(fbPts.length-1).toFixed(1)},${FH} L${fx(0).toFixed(1)},${FH} Z`
 
   return (
     <div>
-      <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Evolución patrimonial</p>
-      <p className="text-xs text-zinc-500 mb-3">{pts.length} meses · Liquidez + portafolio transaccional</p>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${FW} ${FH}`} className="w-full h-36" preserveAspectRatio="none">
         <defs>
           <linearGradient id="pnGrad2" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#a3e635" stopOpacity="0.2" />
             <stop offset="100%" stopColor="#a3e635" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path d={areaPath} fill="url(#pnGrad2)" />
-        <path d={linePath} fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-        <text x={PAD_X+2} y={H-2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].month}</text>
-        <text x={W-PAD_X-2} y={H-2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length-1].month}</text>
+        <path d={fbArea} fill="url(#pnGrad2)" />
+        <path d={fbLine} fill="none" stroke="#a3e635" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        <text x={FPX+2} y={FH-2} fill="#52525b" fontSize="9" textAnchor="start">{fbPts[0].month}</text>
+        <text x={FW-FPX-2} y={FH-2} fill="#52525b" fontSize="9" textAnchor="end">{fbPts[fbPts.length-1].month}</text>
       </svg>
       <p className="text-[9px] text-zinc-700 mt-1">Registrá snapshots mensuales para incluir activos ilíquidos y pasivos en la serie.</p>
     </div>
