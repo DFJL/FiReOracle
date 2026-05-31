@@ -37,7 +37,7 @@ export async function createSelfLoan(data: SelfLoanFormData) {
     source_account_id: acct.id,
     source_envelope_id: data.source_envelope_id,
     currency_code: 'CRC',
-    status: 'active',
+    status: 'pending',
     notes: data.notes || null,
   })
 
@@ -69,7 +69,7 @@ export async function recordSelfLoanPayment(
 
   const newRepaid = Number(loan.amount_repaid) + payment.amount
   const newBalance = Math.max(0, Number(loan.original_amount) - newRepaid)
-  const newStatus = newBalance === 0 ? 'paid' : 'active'
+  const newStatus = newBalance === 0 ? 'paid' : newRepaid > 0 ? 'partial' : 'pending'
 
   // Insert payment record
   const { error: payErr } = await admin.from('self_loan_payments').insert({
