@@ -112,6 +112,89 @@ export type Database = {
           },
         ]
       }
+      asset_value_history: {
+        Row: {
+          asset_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          snapshot_date: string
+          user_id: string
+          value_crc: number
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          snapshot_date: string
+          user_id: string
+          value_crc: number
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          snapshot_date?: string
+          user_id?: string
+          value_crc?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_value_history_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assets: {
+        Row: {
+          as_of_date: string
+          asset_type: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_investable: boolean
+          name: string
+          notes: string | null
+          sort_order: number
+          updated_at: string
+          user_id: string
+          value_crc: number
+        }
+        Insert: {
+          as_of_date: string
+          asset_type: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_investable?: boolean
+          name: string
+          notes?: string | null
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+          value_crc: number
+        }
+        Update: {
+          as_of_date?: string
+          asset_type?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_investable?: boolean
+          name?: string
+          notes?: string | null
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+          value_crc?: number
+        }
+        Relationships: []
+      }
       bonus_plan_items: {
         Row: {
           actual_amount: number | null
@@ -344,6 +427,39 @@ export type Database = {
         }
         Relationships: []
       }
+      budgets: {
+        Row: {
+          category: string
+          created_at: string
+          effective_from: string
+          id: string
+          is_active: boolean
+          monthly_limit: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          effective_from?: string
+          id?: string
+          is_active?: boolean
+          monthly_limit: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          effective_from?: string
+          id?: string
+          is_active?: boolean
+          monthly_limit?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       currencies: {
         Row: {
           code: string
@@ -501,6 +617,69 @@ export type Database = {
           },
         ]
       }
+      goals: {
+        Row: {
+          created_at: string
+          expected_return: number | null
+          goal_type: string
+          id: string
+          is_active: boolean
+          linked_bucket_id: string | null
+          linked_envelope_id: string | null
+          name: string
+          sort_order: number
+          target_amount_crc: number
+          target_date: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expected_return?: number | null
+          goal_type: string
+          id?: string
+          is_active?: boolean
+          linked_bucket_id?: string | null
+          linked_envelope_id?: string | null
+          name: string
+          sort_order?: number
+          target_amount_crc: number
+          target_date?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expected_return?: number | null
+          goal_type?: string
+          id?: string
+          is_active?: boolean
+          linked_bucket_id?: string | null
+          linked_envelope_id?: string | null
+          name?: string
+          sort_order?: number
+          target_amount_crc?: number
+          target_date?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "goals_linked_bucket_id_fkey"
+            columns: ["linked_bucket_id"]
+            isOneToOne: false
+            referencedRelation: "user_investment_buckets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "goals_linked_envelope_id_fkey"
+            columns: ["linked_envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       investment_snapshots: {
         Row: {
           amount: number
@@ -551,6 +730,48 @@ export type Database = {
             referencedColumns: ["code"]
           },
         ]
+      }
+      liabilities: {
+        Row: {
+          as_of_date: string
+          created_at: string
+          current_balance: number
+          id: string
+          interest_rate: number | null
+          is_active: boolean
+          liability_type: string
+          name: string
+          original_balance: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          as_of_date: string
+          created_at?: string
+          current_balance: number
+          id?: string
+          interest_rate?: number | null
+          is_active?: boolean
+          liability_type: string
+          name: string
+          original_balance?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          as_of_date?: string
+          created_at?: string
+          current_balance?: number
+          id?: string
+          interest_rate?: number | null
+          is_active?: boolean
+          liability_type?: string
+          name?: string
+          original_balance?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       network_entries: {
         Row: {
@@ -834,7 +1055,15 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "savings_envelopes_parent_envelope_id_fkey"
+            columns: ["parent_envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       self_loan_payments: {
         Row: {
@@ -956,6 +1185,13 @@ export type Database = {
             columns: ["source_account_id"]
             isOneToOne: false
             referencedRelation: "financial_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "self_loans_source_envelope_id_fkey"
+            columns: ["source_envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
             referencedColumns: ["id"]
           },
         ]
@@ -1228,6 +1464,60 @@ export type Database = {
             referencedColumns: ["code"]
           },
         ]
+      }
+      user_financial_config: {
+        Row: {
+          allocation_targets: Json | null
+          created_at: string
+          fcf_target_ratio: number
+          fire_date_slip_alert_months: number
+          fire_expected_return: number
+          fire_inflation_rate: number
+          fire_target_monthly_exp: number | null
+          fire_withdrawal_rate: number
+          goal_funding_alert_ratio: number
+          runway_green_months: number
+          runway_yellow_months: number
+          savings_rate_green: number
+          savings_rate_yellow: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          allocation_targets?: Json | null
+          created_at?: string
+          fcf_target_ratio?: number
+          fire_date_slip_alert_months?: number
+          fire_expected_return?: number
+          fire_inflation_rate?: number
+          fire_target_monthly_exp?: number | null
+          fire_withdrawal_rate?: number
+          goal_funding_alert_ratio?: number
+          runway_green_months?: number
+          runway_yellow_months?: number
+          savings_rate_green?: number
+          savings_rate_yellow?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          allocation_targets?: Json | null
+          created_at?: string
+          fcf_target_ratio?: number
+          fire_date_slip_alert_months?: number
+          fire_expected_return?: number
+          fire_inflation_rate?: number
+          fire_target_monthly_exp?: number | null
+          fire_withdrawal_rate?: number
+          goal_funding_alert_ratio?: number
+          runway_green_months?: number
+          runway_yellow_months?: number
+          savings_rate_green?: number
+          savings_rate_yellow?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_investment_buckets: {
         Row: {

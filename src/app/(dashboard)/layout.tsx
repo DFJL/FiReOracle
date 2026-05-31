@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { Suspense } from 'react'
 import { NavLink } from '@/components/nav-link'
+import { TransactionEntryWrapper } from './movimientos/TransactionEntryWrapper'
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -104,6 +106,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
+
+      {/* Transaction entry FAB */}
+      <Suspense fallback={null}>
+        <TransactionEntryWrapper />
+      </Suspense>
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#080c08]/95 backdrop-blur-sm border-t border-[#a3e635]/[0.08] flex items-stretch">

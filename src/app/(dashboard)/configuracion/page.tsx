@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { SetupWizard } from './SetupWizard'
 import { EnvelopeManager } from './EnvelopeManager'
 import { BucketManager } from './BucketManager'
+import { FireConfigManager } from './FireConfigManager'
 
 export default async function ConfiguracionPage() {
   const supabase = await createClient()
@@ -14,7 +15,7 @@ export default async function ConfiguracionPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: profile }, { data: envelopes }, { data: buckets }, { data: accounts }] = await Promise.all([
+  const [{ data: profile }, { data: envelopes }, { data: buckets }, { data: accounts }, { data: fireConfig }] = await Promise.all([
     supabase
       .from('user_profiles')
       .select('onboarding_done, display_name, monthly_income, savings_goal_pct, main_currency')
@@ -38,6 +39,11 @@ export default async function ConfiguracionPage() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),
+    admin
+      .from('user_financial_config')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle(),
   ])
 
   return (
@@ -58,6 +64,15 @@ export default async function ConfiguracionPage() {
       />
 
       <div className="px-6 pb-10 max-w-xl mx-auto space-y-10">
+
+        <div className="border-t border-white/[0.06] pt-8">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
+            Parámetros FIRE &amp; Umbrales
+          </p>
+          <p className="text-xs text-zinc-600 mb-4">Configura tu número FIRE, tasas y semáforos. Todos los módulos usan estos valores.</p>
+          <FireConfigManager existing={fireConfig ?? null} />
+        </div>
+
         <div className="border-t border-white/[0.06] pt-8">
           <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-4">
             Módulo de Liquidez
