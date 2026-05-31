@@ -90,12 +90,16 @@ function CurrencyToggle({ currency, onChange }: { currency: 'CRC' | 'USD'; onCha
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate }: {
+type EnvEntry = { id: string; name: string; color: string | null; balance: number }
+type CustodioGroup = { name: string; total: number; envelopes: EnvEntry[] }
+
+export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown }: {
   buckets: BucketData[]
   liquidBalance: number
   totalInvested: number
   totalPatrimony: number
   exchangeRate: ExchangeRate
+  liquidBreakdown: CustodioGroup[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('CRC')
@@ -219,14 +223,49 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
           </div>
 
           {sel.key === LIQUID_KEY ? (
-            /* Liquidez detail — snapshot balance, no tx breakdown */
-            <div className="rounded-xl bg-white/[0.03] px-4 py-4">
-              <p className="text-2xl font-black tabular-nums text-amber-400">{fmt(sel.balance)}</p>
-              {currency === 'CRC' && (
-                <p className="text-[10px] tabular-nums text-zinc-700 mt-0.5">{fmtUSD(toUSD(sel.balance))}</p>
+            /* Liquidez detail — per-custodio breakdown */
+            <div className="space-y-3">
+              {liquidBreakdown.length === 0 ? (
+                <p className="text-xs text-zinc-600 italic">Sin movimientos registrados</p>
+              ) : (
+                liquidBreakdown.map(group => {
+                  const groupPct = liquidBalance > 0 ? (group.total / liquidBalance) * 100 : 0
+                  return (
+                    <div key={group.name} className="rounded-xl bg-white/[0.03] border border-white/[0.05] px-4 py-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-bold text-zinc-300 truncate">{group.name}</p>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-black tabular-nums text-amber-400">{fmt(group.total)}</p>
+                          {currency === 'CRC' && (
+                            <p className="text-[9px] tabular-nums text-zinc-600">{fmtUSD(toUSD(group.total))}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-amber-400/60" style={{ width: `${groupPct}%` }} />
+                      </div>
+                      <div className="space-y-1 pt-1">
+                        {group.envelopes.map(env => {
+                          const envPct = group.total > 0 ? (env.balance / group.total) * 100 : 0
+                          const dotColor = env.color ?? '#f59e0b'
+                          return (
+                            <div key={env.id} className="flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
+                              <span className="text-[10px] text-zinc-400 truncate flex-1">{env.name}</span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="w-16 h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${envPct}%`, background: dotColor, opacity: 0.7 }} />
+                                </div>
+                                <span className="text-[10px] font-semibold tabular-nums text-zinc-300 w-16 text-right">{fmt(env.balance)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })
               )}
-              <p className="text-[9px] text-zinc-500 uppercase tracking-wider mt-2">Saldo líquido total</p>
-              <p className="text-[9px] text-zinc-700">agregado de cuentas corrientes, ahorro y efectivo</p>
             </div>
           ) : (
             <>

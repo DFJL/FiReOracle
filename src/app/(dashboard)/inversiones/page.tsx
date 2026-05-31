@@ -41,9 +41,10 @@ export default async function InversionesPage() {
       .eq('user_id', user.id),
     admin
       .from('savings_envelopes')
-      .select('id, parent_envelope_id')
+      .select('id, name, custodio, color, parent_envelope_id, sort_order')
       .eq('user_id', user.id)
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
 
   // Fetch snapshot balances for snapshot_based buckets
@@ -72,6 +73,34 @@ export default async function InversionesPage() {
   const liquidBalance = (movements ?? [])
     .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
+
+  // Per-leaf envelope balances for drilldown
+  const envelopeBalances: Record<string, number> = {}
+  for (const m of movements ?? []) {
+    if (m.movement_type === 'interes') continue
+    if (parentEnvelopeIds.has(m.envelope_id)) continue
+    envelopeBalances[m.envelope_id] = (envelopeBalances[m.envelope_id] ?? 0) + Number(m.amount)
+  }
+
+  type EnvEntry = { id: string; name: string; color: string | null; balance: number }
+  type CustodioGroup = { name: string; total: number; envelopes: EnvEntry[] }
+  const custodioMap: Record<string, CustodioGroup> = {}
+  for (const env of envelopes ?? []) {
+    if (parentEnvelopeIds.has(env.id)) continue
+    const cust = (env as { id: string; name: string; custodio: string; color: string | null; parent_envelope_id: string | null; sort_order: number | null }).custodio
+    if (!custodioMap[cust]) custodioMap[cust] = { name: cust, total: 0, envelopes: [] }
+    const balance = envelopeBalances[env.id] ?? 0
+    custodioMap[cust].total += balance
+    custodioMap[cust].envelopes.push({
+      id: env.id,
+      name: (env as { id: string; name: string; custodio: string; color: string | null; parent_envelope_id: string | null; sort_order: number | null }).name,
+      color: (env as { id: string; name: string; custodio: string; color: string | null; parent_envelope_id: string | null; sort_order: number | null }).color ?? null,
+      balance,
+    })
+  }
+  const liquidBreakdown: CustodioGroup[] = Object.values(custodioMap)
+    .map(g => ({ ...g, envelopes: g.envelopes.sort((a, b) => b.balance - a.balance) }))
+    .sort((a, b) => b.total - a.total)
 
   // Compute bucket balances (current)
   const buckets: BucketData[] = (bucketRows ?? []).map(def => {
@@ -230,6 +259,7 @@ export default async function InversionesPage() {
         totalInvested={totalInvested}
         totalPatrimony={totalPatrimony}
         exchangeRate={exchangeRate}
+        liquidBreakdown={liquidBreakdown}
       />
       <PortfolioHistory
         points={historyPoints}
