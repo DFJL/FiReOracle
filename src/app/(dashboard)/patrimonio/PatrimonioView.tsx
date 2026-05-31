@@ -16,6 +16,7 @@ import {
   deleteSnapshot,
   type SnapshotRow,
 } from '@/app/actions/netWorthSnapshot'
+import type { ExchangeRate } from '@/lib/exchange-rate'
 
 type Asset = {
   id: string; name: string; asset_type: string
@@ -44,6 +45,7 @@ type Props = {
   liabilities: Liability[]
   monthlyTrend: TrendPoint[]
   snapshots: SnapshotRow[]
+  exchangeRate: ExchangeRate
 }
 
 const ASSET_TYPES = [
@@ -74,6 +76,15 @@ function fmtShort(v: number) {
   return `₡${Math.round(v).toLocaleString('es-CR')}`
 }
 
+function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
+  const val  = curr === 'CRC' ? v : v / rate
+  const sym  = curr === 'CRC' ? '₡' : '$'
+  const abs  = Math.abs(val)
+  if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000)     return `${sym}${Math.round(val / 1_000)}K`
+  return `${sym}${Math.round(val).toLocaleString()}`
+}
+
 function today() { return new Date().toISOString().slice(0, 10) }
 
 function monthLabel(m: string) {
@@ -100,10 +111,13 @@ const NW_RANGES = [
 // ─── Snapshot net worth chart (interactive, portfolio-style) ─────────────────
 
 function NetWorthChart({
-  snapshots, fallback,
+  snapshots, fallback, fmt, assets, liabilities,
 }: {
   snapshots: SnapshotRow[]
   fallback: TrendPoint[]
+  fmt: (v: number) => string
+  assets: Asset[]
+  liabilities: Liability[]
 }) {
   const [rangeMonths, setRangeMonths] = useState(9999)
   const [visible, setVisible]         = useState<Set<string>>(new Set(['__neto__']))
@@ -198,7 +212,7 @@ function NetWorthChart({
                   <div key={s.key} className="flex items-center justify-between gap-4 leading-5">
                     <span className="text-[10px]" style={{ color: s.color, opacity: 0.75 }}>{s.name}</span>
                     <span className="text-[10px] font-black tabular-nums" style={{ color: s.color }}>
-                      {fmtShort(data[hoverIdx].balances[s.key] ?? 0)}
+                      {fmt(data[hoverIdx].balances[s.key] ?? 0)}
                     </span>
                   </div>
                 ))}
@@ -214,7 +228,7 @@ function NetWorthChart({
                 <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)}
                   stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
                 <text x={padL - 4} y={yOf(v) + 4} textAnchor="end" fontSize="9" fill="#3f3f46">
-                  {fmtShort(v)}
+                  {fmt(v)}
                 </text>
               </g>
             ))}
@@ -284,12 +298,60 @@ function NetWorthChart({
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
                 <span className="text-[9px] font-semibold text-zinc-300">{s.name}</span>
                 <span className="text-[9px] tabular-nums font-black ml-1" style={{ color: s.color }}>
-                  {fmtShort(last.balances[s.key] ?? 0)}
+                  {fmt(last.balances[s.key] ?? 0)}
                 </span>
               </button>
             )
           })}
         </div>
+
+        {/* Breakdown drawers — appear when ilíquido or pasivos are toggled on */}
+        {(visible.has('__iliquid__') || visible.has('__pasivos__')) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {visible.has('__iliquid__') && (
+              <div className="rounded-xl border border-blue-500/20 bg-white/[0.02] overflow-hidden">
+                <div className="px-3 py-2 border-b border-white/[0.04] flex items-center justify-between">
+                  <p className="text-[9px] font-black text-blue-400/70 uppercase tracking-[0.12em]">Activos ilíquidos</p>
+                  <p className="text-xs font-bold text-blue-400">{fmt(last.balances['__iliquid__'] ?? 0)}</p>
+                </div>
+                {assets.length > 0 ? assets.map(a => (
+                  <div key={a.id} className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.03] last:border-0">
+                    <div>
+                      <p className="text-xs text-zinc-300">{a.name}</p>
+                      <p className="text-[9px] text-zinc-600">{ASSET_LABEL[a.asset_type] ?? a.asset_type}</p>
+                    </div>
+                    <p className="text-xs font-bold text-blue-400">{fmt(a.value_crc)}</p>
+                  </div>
+                )) : (
+                  <p className="px-3 py-3 text-[10px] text-zinc-600">
+                    Total del snapshot importado. Usá <span className="text-zinc-400">"Agregar activo"</span> para desglosar por inmueble, vehículo, etc.
+                  </p>
+                )}
+              </div>
+            )}
+            {visible.has('__pasivos__') && (
+              <div className="rounded-xl border border-rose-500/20 bg-white/[0.02] overflow-hidden">
+                <div className="px-3 py-2 border-b border-white/[0.04] flex items-center justify-between">
+                  <p className="text-[9px] font-black text-rose-400/70 uppercase tracking-[0.12em]">Pasivos</p>
+                  <p className="text-xs font-bold text-rose-400">{fmt(last.balances['__pasivos__'] ?? 0)}</p>
+                </div>
+                {liabilities.length > 0 ? liabilities.map(l => (
+                  <div key={l.id} className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.03] last:border-0">
+                    <div>
+                      <p className="text-xs text-zinc-300">{l.name}</p>
+                      <p className="text-[9px] text-zinc-600">{LIABILITY_LABEL[l.liability_type] ?? l.liability_type}</p>
+                    </div>
+                    <p className="text-xs font-bold text-rose-400">{fmt(l.current_balance)}</p>
+                  </div>
+                )) : (
+                  <p className="px-3 py-3 text-[10px] text-zinc-600">
+                    Total del snapshot importado. Usá <span className="text-zinc-400">"Agregar pasivo"</span> para desglosar por hipoteca, tarjeta, etc.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -482,10 +544,14 @@ function parsePastedSnapshots(raw: string): Array<{
 export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
-  assets, liabilities, monthlyTrend, snapshots,
+  assets, liabilities, monthlyTrend, snapshots, exchangeRate,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [currency, setCurrency] = useState<'CRC' | 'USD'>('CRC')
+
+  const rate = exchangeRate.sell
+  const fmt = (v: number) => fmtAmt(v, currency, rate)
 
   // Asset CRUD state
   const [showAddAsset, setShowAddAsset]       = useState(false)
@@ -648,12 +714,23 @@ export function PatrimonioView({
     })
   }
 
-  const pnColor = patrimonioNeto >= 0 ? 'text-[#a3e635]' : 'text-rose-400'
-
   // Month-over-month and year-over-year delta from snapshots
   const sorted = [...snapshots].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
   const lastSnap = sorted[sorted.length - 1]
   const prevMonthSnap = sorted[sorted.length - 2]
+
+  // When snapshots exist, prefer them as the authoritative KPI source so the
+  // card values match the chart's most recent data point.
+  const dispNW     = lastSnap ? Number(lastSnap.net_worth_crc)   : patrimonioNeto
+  const dispActivos = lastSnap
+    ? Number(lastSnap.liquid_crc) + Number(lastSnap.invested_crc) + Number(lastSnap.iliquid_crc)
+    : totalActivos
+  const dispPasivos = lastSnap ? Number(lastSnap.liabilities_crc) : totalLiabilities
+  const dispLiq    = lastSnap ? Number(lastSnap.liquid_crc)       : liquidBalance
+  const dispInv    = lastSnap ? Number(lastSnap.invested_crc)     : totalInvested
+  const dispIliq   = lastSnap ? Number(lastSnap.iliquid_crc)      : iliquidTotal
+
+  const pnColor = dispNW >= 0 ? 'text-[#a3e635]' : 'text-rose-400'
   const yearAgoSnap   = sorted.find(s => {
     const d = new Date(lastSnap?.snapshot_date ?? today())
     const target = new Date(d.getFullYear() - 1, d.getMonth(), 1)
@@ -668,31 +745,44 @@ export function PatrimonioView({
     <div className="space-y-8">
 
       {/* Header */}
-      <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em]">Balance Patrimonial</p>
-        <h1 className="text-2xl font-black text-white mt-0.5">Patrimonio</h1>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em]">Balance Patrimonial</p>
+          <h1 className="text-2xl font-black text-white mt-0.5">Patrimonio</h1>
+          {lastSnap && (
+            <p className="text-[10px] text-zinc-600 mt-0.5">Snapshot {lastSnap.snapshot_date.slice(0,7)}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] mt-1 shrink-0">
+          {(['CRC', 'USD'] as const).map(c => (
+            <button key={c} onClick={() => setCurrency(c)}
+              className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
+                currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
+              }`}>{c === 'CRC' ? '₡' : '$'}</button>
+          ))}
+        </div>
       </div>
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2 md:col-span-1 bg-white/[0.03] rounded-xl p-4 border border-white/[0.06]">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Patrimonio Neto</p>
-          <p className={`text-2xl font-black ${pnColor}`}>{fmtShort(patrimonioNeto)}</p>
+          <p className={`text-2xl font-black ${pnColor}`}>{fmt(dispNW)}</p>
           <p className="text-[10px] text-zinc-600 mt-0.5">Activos − Pasivos</p>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06]">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Total Activos</p>
-          <p className="text-xl font-black text-white">{fmtShort(totalActivos)}</p>
+          <p className="text-xl font-black text-white">{fmt(dispActivos)}</p>
           <p className="text-[10px] text-zinc-600 mt-0.5">Liq + Inv + Ilíq</p>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06]">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Pasivos</p>
-          <p className="text-xl font-black text-rose-400">{fmtShort(totalLiabilities)}</p>
+          <p className="text-xl font-black text-rose-400">{fmt(dispPasivos)}</p>
           <p className="text-[10px] text-zinc-600 mt-0.5">Deuda total</p>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06]">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Invertibles</p>
-          <p className="text-xl font-black text-blue-400">{fmtShort(activosInvertibles)}</p>
+          <p className="text-xl font-black text-blue-400">{fmt(activosInvertibles)}</p>
           <p className="text-[10px] text-zinc-600 mt-0.5">Para número FIRE</p>
         </div>
       </div>
@@ -701,9 +791,9 @@ export function PatrimonioView({
       <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-4">
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Composición</p>
         <BreakdownBar
-          liquidBalance={liquidBalance} totalInvested={totalInvested}
-          iliquidTotal={iliquidTotal} totalLiabilities={totalLiabilities}
-          totalActivos={totalActivos}
+          liquidBalance={dispLiq} totalInvested={dispInv}
+          iliquidTotal={dispIliq} totalLiabilities={dispPasivos}
+          totalActivos={dispActivos}
         />
       </div>
 
@@ -730,7 +820,7 @@ export function PatrimonioView({
             )}
           </div>
         </div>
-        <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} />
+        <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} fmt={fmt} assets={assets} liabilities={liabilities} />
       </div>
 
       {/* ── Historial Mensual ── */}

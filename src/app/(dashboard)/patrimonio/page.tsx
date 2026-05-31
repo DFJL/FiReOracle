@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PatrimonioView } from './PatrimonioView'
 import type { SnapshotRow } from '@/app/actions/netWorthSnapshot'
+import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -184,6 +185,8 @@ export default async function PatrimonioPage() {
     }
   }
 
+  const exchangeRate = await fetchExchangeRate()
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PatrimonioView
@@ -199,6 +202,7 @@ export default async function PatrimonioPage() {
         liabilities={activeLiabilities}
         monthlyTrend={monthlyTrend}
         snapshots={(snapshotRows ?? []) as SnapshotRow[]}
+        exchangeRate={exchangeRate}
       />
     </div>
   )
