@@ -892,6 +892,7 @@ export type Database = {
           notes: string | null
           original_amount: number
           source_account_id: string
+          source_envelope_id: string | null
           status: string
           updated_at: string
           user_id: string
@@ -909,6 +910,7 @@ export type Database = {
           notes?: string | null
           original_amount: number
           source_account_id: string
+          source_envelope_id?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -926,6 +928,7 @@ export type Database = {
           notes?: string | null
           original_amount?: number
           source_account_id?: string
+          source_envelope_id?: string | null
           status?: string
           updated_at?: string
           user_id?: string
