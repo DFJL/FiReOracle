@@ -28,12 +28,12 @@ export async function upsertNetWorthItems(
 
   const admin = createAdminClient()
   const rows = items.map((item, i) => ({
-    user_id:      user.id,
+    user_id:       user.id,
     snapshot_date: item.snapshot_date,
-    category:     item.category,
-    item_name:    item.item_name,
-    value_crc:    item.value_crc,
-    sort_order:   item.sort_order ?? i,
+    category:      item.category,
+    item_name:     item.item_name,
+    value_crc:     item.value_crc,
+    sort_order:    item.sort_order ?? i,
   }))
 
   const { error } = await admin
@@ -43,4 +43,60 @@ export async function upsertNetWorthItems(
   if (error) return { error: error.message }
   revalidatePath('/patrimonio')
   return { count: rows.length }
+}
+
+export async function updateNetWorthItem(id: string, value_crc: number) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('net_worth_items')
+    .update({ value_crc })
+    .eq('id', id)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/patrimonio')
+  return { ok: true }
+}
+
+export async function addNetWorthItem(item: {
+  snapshot_date: string
+  category: NetWorthItem['category']
+  item_name: string
+  value_crc: number
+  sort_order?: number
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('net_worth_items')
+    .upsert({ user_id: user.id, ...item, sort_order: item.sort_order ?? 99 },
+      { onConflict: 'user_id,snapshot_date,item_name' })
+
+  if (error) return { error: error.message }
+  revalidatePath('/patrimonio')
+  return { ok: true }
+}
+
+export async function deleteNetWorthItem(id: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('net_worth_items')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/patrimonio')
+  return { ok: true }
 }

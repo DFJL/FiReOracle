@@ -804,7 +804,11 @@ export function PatrimonioView({
       {netWorthItems.length > 0 && (
         <div className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] space-y-4">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Composición Detallada</p>
-          <ComposicionDetallada items={netWorthItems} fmt={fmt} />
+          <ComposicionDetallada
+            items={netWorthItems}
+            fmt={fmt}
+            computedValues={{ efectivo: dispLiq, ahorros: dispInv }}
+          />
         </div>
       )}
 
