@@ -23,7 +23,7 @@ export default async function InversionesPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: bucketRows }, { data: txs }, { data: accountRows }, { data: movements }] = await Promise.all([
+  const [{ data: bucketRows }, { data: txs }, { data: movements }] = await Promise.all([
     admin
       .from('user_investment_buckets')
       .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')
@@ -36,22 +36,10 @@ export default async function InversionesPage() {
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin
-      .from('financial_accounts')
-      .select('id, account_type')
-      .eq('user_id', user.id)
-      .eq('is_active', true),
-    admin
       .from('envelope_movements')
-      .select('amount, date')
+      .select('amount, date, movement_type')
       .eq('user_id', user.id),
   ])
-
-  // Account IDs owned by snapshot_based buckets — excluded from liquidBalance
-  const snapshotAccountIds = new Set(
-    (bucketRows ?? [])
-      .filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
-      .map(b => b.account_id as string)
-  )
 
   // Fetch snapshot balances for snapshot_based buckets
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
@@ -69,22 +57,11 @@ export default async function InversionesPage() {
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
 
-  // liquidBalance = liquid accounts NOT claimed by a snapshot_based bucket
-  const liquidAccounts = (accountRows ?? []).filter(
-    a => ['checking', 'cash', 'savings'].includes(a.account_type) && !snapshotAccountIds.has(a.id)
-  )
-  const liquidSnaps = await Promise.all(
-    liquidAccounts.map(acc =>
-      admin
-        .from('account_balance_snapshots')
-        .select('real_balance')
-        .eq('account_id', acc.id)
-        .order('snapshot_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    )
-  )
-  const liquidBalance = liquidSnaps.reduce((s, { data }) => s + (data?.real_balance ? Number(data.real_balance) : 0), 0)
+  // liquidBalance = sum of envelope movements (principal only, excluding interes type)
+  // This matches the Liquidez page so both views show the same number.
+  const liquidBalance = (movements ?? [])
+    .filter(m => m.movement_type !== 'interes')
+    .reduce((s, m) => s + Number(m.amount), 0)
 
   // Compute bucket balances (current)
   const buckets: BucketData[] = (bucketRows ?? []).map(def => {
