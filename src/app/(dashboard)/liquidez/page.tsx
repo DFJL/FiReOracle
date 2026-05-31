@@ -13,7 +13,8 @@ export type SubEnvelope = {
   interest_mode: string | null
   annual_rate: number | null
   parent_envelope_id: string
-  balance: number
+  balance: number   // principal only (excludes interes movements)
+  interest: number  // sum of interes movements (reference only)
 }
 
 export type Envelope = {
@@ -25,7 +26,8 @@ export type Envelope = {
   interest_mode: string | null
   annual_rate: number | null
   parent_envelope_id: null
-  balance: number   // own movements if no children; sum of children if has children
+  balance: number   // principal only; sum of children if has children
+  interest: number  // reference only; sum of children if has children
   children: SubEnvelope[]
 }
 
@@ -61,7 +63,7 @@ export default async function LiquidezPage() {
       .order('sort_order'),
     admin
       .from('envelope_movements')
-      .select('envelope_id, amount')
+      .select('envelope_id, amount, movement_type')
       .eq('user_id', user.id),
     admin
       .from('self_loans')
@@ -70,10 +72,15 @@ export default async function LiquidezPage() {
       .order('loan_date', { ascending: false }),
   ])
 
-  // Own balance from movements
+  // Own balance from movements — exclude interes type (reference only)
   const ownBalance: Record<string, number> = {}
+  const ownInterest: Record<string, number> = {}
   for (const m of movements ?? []) {
-    ownBalance[m.envelope_id] = (ownBalance[m.envelope_id] ?? 0) + Number(m.amount)
+    if (m.movement_type === 'interes') {
+      ownInterest[m.envelope_id] = (ownInterest[m.envelope_id] ?? 0) + Number(m.amount)
+    } else {
+      ownBalance[m.envelope_id] = (ownBalance[m.envelope_id] ?? 0) + Number(m.amount)
+    }
   }
 
   // Group children by parent
@@ -91,6 +98,7 @@ export default async function LiquidezPage() {
       annual_rate: e.annual_rate,
       parent_envelope_id: e.parent_envelope_id,
       balance: ownBalance[e.id] ?? 0,
+      interest: ownInterest[e.id] ?? 0,
     })
   }
 
@@ -102,6 +110,9 @@ export default async function LiquidezPage() {
       const balance = children.length > 0
         ? children.reduce((s, c) => s + c.balance, 0)
         : (ownBalance[e.id] ?? 0)
+      const interest = children.length > 0
+        ? children.reduce((s, c) => s + c.interest, 0)
+        : (ownInterest[e.id] ?? 0)
       return {
         id: e.id,
         name: e.name,
@@ -112,6 +123,7 @@ export default async function LiquidezPage() {
         annual_rate: e.annual_rate,
         parent_envelope_id: null,
         balance,
+        interest,
         children,
       }
     })

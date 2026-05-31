@@ -171,9 +171,16 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
         }`}>
         <span className="w-1.5 h-1.5 rounded-full shrink-0 opacity-70" style={{ background: sub.color ?? '#888' }} />
         <span className="flex-1 text-[11px] text-zinc-400 truncate min-w-0">{sub.name}</span>
-        <span className={`text-[11px] font-black tabular-nums shrink-0 w-16 text-right ${
-          sub.balance > 0 ? 'text-zinc-300' : 'text-zinc-600'
-        }`}>{fmtCRC(sub.balance)}</span>
+        <div className="shrink-0 flex flex-col items-end gap-0.5">
+          <span className={`text-[11px] font-black tabular-nums ${
+            sub.balance > 0 ? 'text-zinc-300' : 'text-zinc-600'
+          }`}>{fmtCRC(sub.balance)}</span>
+          {sub.interest > 0 && (
+            <span className="text-[8px] tabular-nums text-amber-500/50">
+              +{fmtCRC(sub.interest)} int.
+            </span>
+          )}
+        </div>
         <span className="text-zinc-700 text-[10px] w-3 text-center shrink-0 hover:text-zinc-500">
           {isOpen ? '−' : '+'}
         </span>
@@ -277,9 +284,16 @@ export function EnvelopeSection({
                 <span className="text-[9px] font-bold text-zinc-600 px-1.5 py-0.5 rounded bg-white/[0.04] shrink-0">
                   {env.custodio}
                 </span>
-                <span className={`text-xs font-black tabular-nums shrink-0 w-16 text-right ${
-                  env.balance > 0 ? 'text-zinc-100' : 'text-zinc-600'
-                }`}>{fmtCRC(env.balance)}</span>
+                <div className="shrink-0 flex flex-col items-end gap-0.5">
+                  <span className={`text-xs font-black tabular-nums ${
+                    env.balance > 0 ? 'text-zinc-100' : 'text-zinc-600'
+                  }`}>{fmtCRC(env.balance)}</span>
+                  {env.interest > 0 && (
+                    <span className="text-[8px] tabular-nums text-amber-500/50">
+                      +{fmtCRC(env.interest)} int.
+                    </span>
+                  )}
+                </div>
                 {!hasChildren && (
                   <span className="text-zinc-600 text-[10px] w-3 text-center shrink-0">
                     {isOpen ? '−' : '+'}
