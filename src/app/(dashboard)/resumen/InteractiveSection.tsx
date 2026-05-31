@@ -24,7 +24,7 @@ export interface AccountSummary {
   savingsBalance: number  // savings + investment accounts
 }
 
-type TabKey        = 'gastos' | 'ingresos' | 'objetivos'
+type TabKey        = 'gastos' | 'ingresos'
 type IncomeSubtab  = 'activo' | 'pasivo'
 type PeriodKey     = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
 
@@ -170,9 +170,8 @@ function isSavings(tx: TxClient) {
 }
 
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
-  gastos:    isOutflow,
-  ingresos:  (tx) => isLiquidIncome(tx) || isPatrimonialIncome(tx),
-  objetivos: (tx) => isSavings(tx) || isPatrimonialLoss(tx) || (tx.movement_type === 'income' && !!tx.is_settlement),
+  gastos:   isOutflow,
+  ingresos: (tx) => isLiquidIncome(tx) || isPatrimonialIncome(tx),
 }
 
 function getTxConcept(tx: TxClient): string {
@@ -351,9 +350,8 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect, fmt }: {
 // ── category bar chart (L1) ───────────────────────────────────────────────────
 
 const TAB_COLORS = {
-  gastos:    { bar: 'bg-rose-500/50',        active: 'bg-rose-400',        bg: 'bg-rose-500/10',        border: 'border-rose-500/30',        text: 'text-rose-400' },
-  ingresos:  { bar: 'bg-[#a3e635]/40',       active: 'bg-[#a3e635]',       bg: 'bg-[#a3e635]/10',       border: 'border-[#a3e635]/30',       text: 'text-[#a3e635]' },
-  objetivos: { bar: 'bg-amber-400/40',        active: 'bg-amber-400',       bg: 'bg-amber-400/10',       border: 'border-amber-400/30',       text: 'text-amber-400' },
+  gastos:   { bar: 'bg-rose-500/50',  active: 'bg-rose-400',  bg: 'bg-rose-500/10',  border: 'border-rose-500/30',  text: 'text-rose-400'  },
+  ingresos: { bar: 'bg-[#a3e635]/40', active: 'bg-[#a3e635]', bg: 'bg-[#a3e635]/10', border: 'border-[#a3e635]/30', text: 'text-[#a3e635]' },
 }
 
 function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
@@ -502,9 +500,8 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
 ]
 
 const TABS: { key: TabKey; label: string; color: string }[] = [
-  { key: 'gastos',    label: 'Gastos',    color: 'rgb(251 113 133)' },
-  { key: 'ingresos',  label: 'Ingresos',  color: '#a3e635'           },
-  { key: 'objetivos', label: 'Ahorros',   color: 'rgb(251 191 36)'  },
+  { key: 'gastos',   label: 'Gastos',   color: 'rgb(251 113 133)' },
+  { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
 export function InteractiveSection({ transactions, accounts, exchangeRate }: {
@@ -700,8 +697,8 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
             { label: 'Ingresos',      crc: kpis.income,       color: 'text-[#a3e635]',  sub: null as string | null },
             { label: 'Gastos',        crc: kpis.expenses,     color: 'text-rose-400',   sub: null },
             { label: 'Valor. pasivo', crc: kpis.rendimientos, color: 'text-blue-400',   sub: 'no realizado' },
-            { label: 'Tasa ahorro',   crc: -1,               color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
-              sub: `margen ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
+            { label: 'Tasa de ahorro', crc: -1,               color: savingsRate >= 30 ? 'text-[#a3e635]' : savingsRate >= 20 ? 'text-amber-400' : 'text-rose-400',
+              sub: `margen neto ${netMargin >= 0 ? '+' : ''}${netMargin}%` },
           ].map(k => {
             const isPct = k.crc === -1
             const display = isPct ? `${savingsRate}%` : fmtAmt(k.crc)
@@ -742,9 +739,9 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
           <button key={t.key} onClick={() => selectTab(t.key)}
             className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
               tab === t.key
-                ? t.key === 'gastos'    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                : t.key === 'ingresos'  ? 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
-                :                         'bg-amber-400/10 border-amber-400/30 text-amber-400'
+                ? t.key === 'gastos'
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  : 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
                 : 'border-transparent text-zinc-600 hover:text-zinc-400'
             }`}>
             {t.label}

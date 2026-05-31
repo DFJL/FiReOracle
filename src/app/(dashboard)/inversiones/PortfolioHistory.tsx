@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
 export type HistoryPoint = {
@@ -50,6 +50,8 @@ export function PortfolioHistory({
   const [rangeMonths, setRangeMonths] = useState<number>(12)
   const [visible, setVisible]         = useState<Set<string>>(new Set([TOTAL_KEY]))
   const [currency, setCurrency]       = useState<'CRC' | 'USD'>('CRC')
+  const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
+  const svgRef                        = useRef<SVGSVGElement>(null)
 
   if (points.length < 2) return null
 
@@ -78,6 +80,18 @@ export function PortfolioHistory({
     if (next.has(key)) { next.delete(key) } else { next.add(key) }
     return next
   })
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const svgX = ((e.clientX - rect.left) / rect.width) * W
+    let closest = 0, minDist = Infinity
+    data.forEach((_, i) => {
+      const dist = Math.abs(xOf(i) - svgX)
+      if (dist < minDist) { minDist = dist; closest = i }
+    })
+    setHoverIdx(closest)
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // SVG dimensions
   const W = 800, H = 200
@@ -125,8 +139,28 @@ export function PortfolioHistory({
         </div>
       </div>
 
-      {/* SVG Chart */}
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: '200px' }}>
+      {/* SVG Chart + Tooltip */}
+      <div className="relative">
+      {hoverIdx !== null && (
+        <div className="absolute z-10 pointer-events-none"
+          style={{ left: `${(xOf(hoverIdx) / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
+          <div className="bg-[#111811] border border-[#a3e635]/20 rounded-xl px-3 py-2.5 shadow-xl whitespace-nowrap text-[11px]">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 text-center">
+              {monthLabel(data[hoverIdx].month)}
+            </p>
+            {allSeries.filter(s => visible.has(s.key)).map(s => (
+              <div key={s.key} className="flex items-center justify-between gap-4 leading-5">
+                <span className="text-[10px]" style={{ color: s.color, opacity: 0.75 }}>{s.name}</span>
+                <span className="font-black tabular-nums" style={{ color: s.color }}>
+                  {fmt(data[hoverIdx].balances[s.key] ?? 0)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full cursor-crosshair" style={{ height: '200px' }}
+        onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         {/* Horizontal grid + Y labels */}
         {yTicks.map((v, i) => (
           <g key={i}>
@@ -157,8 +191,8 @@ export function PortfolioHistory({
           )
         })}
 
-        {/* Dots at last point for visible series */}
-        {allSeries.filter(s => visible.has(s.key)).map(s => {
+        {/* Dots at last point — hidden while hovering */}
+        {hoverIdx === null && allSeries.filter(s => visible.has(s.key)).map(s => {
           const last = data[data.length - 1]
           return (
             <circle key={s.key}
@@ -172,12 +206,32 @@ export function PortfolioHistory({
         {data.map((p, i) => {
           if (i % labelStep !== 0 && i !== N - 1) return null
           return (
-            <text key={i} x={xOf(i)} y={H - 4} textAnchor="middle" fontSize="9" fill="#3f3f46">
+            <text key={i} x={xOf(i)} y={H - 4} textAnchor="middle" fontSize="9"
+              fill={hoverIdx === i ? '#71717a' : '#3f3f46'}>
               {monthLabel(p.month)}
             </text>
           )
         })}
+
+        {/* Hover crosshair */}
+        {hoverIdx !== null && (
+          <>
+            <line x1={xOf(hoverIdx)} y1={padT} x2={xOf(hoverIdx)} y2={padT + chartH}
+              stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 2" />
+            {allSeries.filter(s => visible.has(s.key)).map(s => (
+              <circle key={s.key}
+                cx={xOf(hoverIdx)}
+                cy={yOf(data[hoverIdx].balances[s.key] ?? 0)}
+                r={s.key === TOTAL_KEY ? 4 : 3}
+                fill={s.color}
+                stroke="#0d120d"
+                strokeWidth="1.5"
+              />
+            ))}
+          </>
+        )}
       </svg>
+      </div>
 
       {/* Legend / toggle */}
       <div className="flex flex-wrap gap-1.5">
