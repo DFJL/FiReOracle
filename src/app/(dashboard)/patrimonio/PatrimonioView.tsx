@@ -123,6 +123,8 @@ function NetWorthChart({
 
     return (
       <div>
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Evolución patrimonial</p>
+        <p className="text-xs text-zinc-500 mb-3">{pts.length} meses · Líquido · Invertido · Ilíquido · Patrimonio neto</p>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
           <path d={ilqArea}  fill="#3b82f6" fillOpacity="0.25" />
           <path d={invArea}  fill="#a3e635" fillOpacity="0.25" />
@@ -135,7 +137,7 @@ function NetWorthChart({
           <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-amber-500/50 inline-block"/>Líquido</span>
           <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-[#a3e635]/50 inline-block"/>Invertido</span>
           <span className="flex items-center gap-1 text-zinc-600"><span className="w-2 h-2 rounded-sm bg-blue-500/50 inline-block"/>Ilíquido</span>
-          <span className="flex items-center gap-1 text-[#a3e635]"><span className="w-2 h-1 rounded-sm bg-[#a3e635] inline-block"/>Patrimonio neto</span>
+          <span className="flex items-center gap-1 text-[#a3e635]"><span className="w-2 h-1 rounded-sm bg-[#a3e635] inline-block"/>Neto</span>
         </div>
       </div>
     )
@@ -153,6 +155,8 @@ function NetWorthChart({
 
   return (
     <div>
+      <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">Evolución patrimonial</p>
+      <p className="text-xs text-zinc-500 mb-3">{pts.length} meses · Liquidez + portafolio transaccional</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-36" preserveAspectRatio="none">
         <defs>
           <linearGradient id="pnGrad2" x1="0" y1="0" x2="0" y2="1">
@@ -165,7 +169,7 @@ function NetWorthChart({
         <text x={PAD_X+2} y={H-2} fill="#52525b" fontSize="9" textAnchor="start">{pts[0].month}</text>
         <text x={W-PAD_X-2} y={H-2} fill="#52525b" fontSize="9" textAnchor="end">{pts[pts.length-1].month}</text>
       </svg>
-      <p className="text-[9px] text-zinc-700 mt-1">Liquidez + portafolio transaccional. Guardá snapshots para incluir activos ilíquidos y pasivos.</p>
+      <p className="text-[9px] text-zinc-700 mt-1">Registrá snapshots mensuales para incluir activos ilíquidos y pasivos en la serie.</p>
     </div>
   )
 }
@@ -558,9 +562,9 @@ export function PatrimonioView({
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <TrendingUp size={12} className="text-[#a3e635]" />
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Patrimonio Neto — Evolución</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Evolución Histórica</p>
             {snapshots.length > 0 && (
-              <span className="text-[9px] text-zinc-600">{snapshots.length} snapshots</span>
+              <span className="text-[9px] text-zinc-600">{snapshots.length} meses</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -579,18 +583,18 @@ export function PatrimonioView({
         <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} />
       </div>
 
-      {/* ── Net Worth Snapshots ── */}
+      {/* ── Historial Mensual ── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Snapshots Mensuales</p>
-            <p className="text-[10px] text-zinc-600 mt-0.5">Registro histórico del patrimonio neto</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Historial Mensual</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">Patrimonio neto registrado mes a mes</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowImport(v => !v)}
               className="flex items-center gap-1.5 text-xs font-bold text-zinc-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-white/[0.08] hover:bg-white/[0.04]">
               <Upload size={11} />
-              Importar CSV
+              Importar historial
             </button>
             <button onClick={prefillSnapshot}
               className="flex items-center gap-1.5 text-xs font-bold text-[#a3e635] hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-[#a3e635]/20 hover:bg-[#a3e635]/10">
@@ -603,9 +607,9 @@ export function PatrimonioView({
         {/* Import panel */}
         {showImport && (
           <div className="bg-white/[0.03] rounded-xl border border-white/[0.08] p-4 space-y-3">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Importar desde Google Sheets</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Pegar desde Google Sheets</p>
             <p className="text-[10px] text-zinc-600">
-              Copiá el rango de tu hoja (Ctrl+C) y pegalo aquí. Columnas esperadas (con o sin encabezados):<br/>
+              Seleccioná el rango en tu hoja, copiá (Ctrl+C) y pegá abajo. Detecta encabezados automáticamente.<br/>
               <code className="text-zinc-400">Fecha · Líquido · Invertido · Ilíquido · Pasivos</code>
             </p>
             <textarea
@@ -685,12 +689,12 @@ export function PatrimonioView({
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-white/[0.06]">
-                  <th className="px-3 py-2 text-left text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Fecha</th>
-                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Liq</th>
-                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Inv</th>
-                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Ilíq</th>
+                  <th className="px-3 py-2 text-left text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Mes</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Líquido</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Invertido</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Ilíquido</th>
                   <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Pasivos</th>
-                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Neto</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Patrimonio Neto</th>
                   <th className="px-1 py-2 w-8" />
                 </tr>
               </thead>
