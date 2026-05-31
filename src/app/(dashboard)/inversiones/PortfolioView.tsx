@@ -4,8 +4,6 @@ import { useState } from 'react'
 import type { BucketData } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
-// ── formatters ────────────────────────────────────────────────────────────────
-
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
   if (Math.abs(n) >= 1_000)     return `₡${Math.round(n / 1_000)}K`
@@ -22,10 +20,21 @@ function fmtPct(n: number) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
 
-// ── Mini donut SVG ────────────────────────────────────────────────────────────
+const LIQUID_KEY   = '__liquidez__'
+const LIQUID_COLOR = '#f59e0b'
 
-function Donut({ slices }: { slices: { pct: number; color: string }[] }) {
-  const R = 40, cx = 50, cy = 50, stroke = 14
+// ── Donut ─────────────────────────────────────────────────────────────────────
+
+function Donut({
+  slices,
+  selected,
+  onSelect,
+}: {
+  slices: { pct: number; color: string; key: string }[]
+  selected: string | null
+  onSelect: (key: string) => void
+}) {
+  const R = 40, cx = 50, cy = 50, strokeW = 14
   const circ = 2 * Math.PI * R
   let offset = 0
   const segments = slices.map(s => {
@@ -35,15 +44,29 @@ function Donut({ slices }: { slices: { pct: number; color: string }[] }) {
     return seg
   })
   return (
-    <svg viewBox="0 0 100 100" width="120" height="120" className="shrink-0">
-      {segments.map((s, i) => (
-        <circle key={i} cx={cx} cy={cy} r={R}
-          fill="none" stroke={s.color} strokeWidth={stroke}
-          strokeDasharray={`${s.len} ${circ - s.len}`}
-          strokeDashoffset={-s.offset}
-          style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%' }}
-        />
-      ))}
+    <svg viewBox="0 0 100 100" width="130" height="130" className="shrink-0">
+      {segments.map((s, i) => {
+        const active = selected === s.key
+        return (
+          <circle
+            key={i}
+            cx={cx} cy={cy} r={R}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={active ? strokeW + 3 : strokeW}
+            strokeDasharray={`${s.len} ${circ - s.len}`}
+            strokeDashoffset={-s.offset}
+            opacity={selected && !active ? 0.35 : 1}
+            style={{
+              transform: 'rotate(-90deg)',
+              transformOrigin: '50% 50%',
+              cursor: 'pointer',
+              transition: 'stroke-width 0.15s, opacity 0.15s',
+            }}
+            onClick={() => onSelect(s.key)}
+          />
+        )
+      })}
     </svg>
   )
 }
@@ -74,24 +97,38 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   totalPatrimony: number
   exchangeRate: ExchangeRate
 }) {
-  const [selected, setSelected]   = useState<string | null>(null)
-  const [currency, setCurrency]   = useState<'CRC' | 'USD'>('CRC')
+  const [selected, setSelected] = useState<string | null>(null)
+  const [currency, setCurrency] = useState<'CRC' | 'USD'>('CRC')
 
-  const rate = exchangeRate.sell
-  const toUSD = (crc: number) => crc / rate
+  const rate   = exchangeRate.sell
+  const toUSD  = (crc: number) => crc / rate
+  const fmt    = (crc: number) => currency === 'CRC' ? fmtCRC(crc) : fmtUSD(toUSD(crc))
 
-  function fmt(crc: number) {
-    return currency === 'CRC' ? fmtCRC(crc) : fmtUSD(toUSD(crc))
+  // Synthetic liquidez entry appended to bucket list
+  const liquidItem: BucketData = {
+    key: LIQUID_KEY,
+    name: 'Liquidez',
+    industry: 'Cuentas líquidas',
+    color: LIQUID_COLOR,
+    vendors: [],
+    balance: liquidBalance,
+    deposits: 0, liquidaciones: 0, rendimientos: 0,
+    passiveValuation: 0, markToMarketLoss: 0, valorizationNet: 0,
   }
 
-  const sel = selected ? buckets.find(b => b.key === selected) : null
+  const allItems = [...buckets, liquidItem]
 
-  const donutSlices = buckets.map(b => ({
-    pct: totalInvested > 0 ? (b.balance / totalInvested) * 100 : 0,
+  function toggle(key: string) { setSelected(prev => prev === key ? null : key) }
+
+  const donutSlices = allItems.map(b => ({
+    pct:   totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0,
     color: b.color,
+    key:   b.key,
   }))
 
-  const now = new Date()
+  const sel = selected ? allItems.find(b => b.key === selected) ?? null : null
+
+  const now        = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
 
   return (
@@ -118,8 +155,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
         {[
           { label: 'Patrimonio total', crc: totalPatrimony, color: 'text-[#a3e635]' },
-          { label: 'Invertido',         crc: totalInvested,  color: 'text-blue-400' },
-          { label: 'Liquidez',          crc: liquidBalance,  color: 'text-amber-400' },
+          { label: 'Invertido',        crc: totalInvested,  color: 'text-blue-400' },
+          { label: 'Liquidez',         crc: liquidBalance,  color: 'text-amber-400' },
         ].map(k => (
           <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
             <p className={`text-2xl font-black tabular-nums leading-none ${k.color}`}>{fmt(k.crc)}</p>
@@ -131,18 +168,21 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
         ))}
       </div>
 
-      {/* Donut + bucket list */}
+      {/* Donut + item list */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
         <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-4">Distribución</p>
         <div className="flex gap-6 items-center flex-wrap">
-          <Donut slices={donutSlices} />
-          <div className="flex-1 min-w-0 space-y-2">
-            {buckets.map(b => {
-              const pct = totalInvested > 0 ? (b.balance / totalInvested) * 100 : 0
+          <Donut slices={donutSlices} selected={selected} onSelect={toggle} />
+          <div className="flex-1 min-w-0 space-y-1.5">
+            {allItems.map(b => {
+              const pct    = totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0
               const active = selected === b.key
+              const isLiquid = b.key === LIQUID_KEY
               return (
-                <button key={b.key} onClick={() => setSelected(active ? null : b.key)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${active ? 'bg-white/[0.06] border-white/[0.10]' : 'border-transparent hover:bg-white/[0.03]'}`}>
+                <button key={b.key} onClick={() => toggle(b.key)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
+                    active ? 'bg-white/[0.06] border-white/[0.10]' : 'border-transparent hover:bg-white/[0.03]'
+                  }`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.color }} />
@@ -156,8 +196,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                       <p className="text-[9px] tabular-nums" style={{ color: b.color }}>{pct.toFixed(1)}%</p>
                     </div>
                   </div>
-                  <div className="mt-2 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: b.color, opacity: 0.7 }} />
+                  <div className="mt-1.5 h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: b.color, opacity: active ? 0.9 : 0.55 }} />
                   </div>
                 </button>
               )
@@ -166,7 +206,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
         </div>
       </div>
 
-      {/* Bucket detail */}
+      {/* Detail panel */}
       {sel && (
         <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5 space-y-4">
           <div className="flex items-center justify-between">
@@ -178,42 +218,56 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
             <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Balance',        crc: sel.balance,                              color: 'text-white',      sub: 'valor actual' },
-              { label: 'Depósitos',      crc: sel.deposits,                             color: 'text-zinc-200',   sub: 'cash in' },
-              { label: 'Liquidaciones',  crc: sel.liquidaciones,                        color: 'text-rose-400',   sub: 'cash out' },
-              { label: 'Rendimientos',   crc: sel.passiveValuation + sel.rendimientos,  color: 'text-[#a3e635]',  sub: 'NAV + efectivo' },
-            ].map(k => (
-              <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
-                <p className={`text-base font-black tabular-nums ${k.color}`}>{fmt(k.crc)}</p>
-                {currency === 'CRC' && (
-                  <p className="text-[9px] tabular-nums text-zinc-700">{fmtUSD(toUSD(k.crc))}</p>
-                )}
-                <p className="text-[9px] text-zinc-500 uppercase tracking-wider mt-1">{k.label}</p>
-                <p className="text-[9px] text-zinc-700">{k.sub}</p>
+          {sel.key === LIQUID_KEY ? (
+            /* Liquidez detail — snapshot balance, no tx breakdown */
+            <div className="rounded-xl bg-white/[0.03] px-4 py-4">
+              <p className="text-2xl font-black tabular-nums text-amber-400">{fmt(sel.balance)}</p>
+              {currency === 'CRC' && (
+                <p className="text-[10px] tabular-nums text-zinc-700 mt-0.5">{fmtUSD(toUSD(sel.balance))}</p>
+              )}
+              <p className="text-[9px] text-zinc-500 uppercase tracking-wider mt-2">Saldo líquido total</p>
+              <p className="text-[9px] text-zinc-700">agregado de cuentas corrientes, ahorro y efectivo</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'Balance',       crc: sel.balance,                             color: 'text-white',     sub: 'valor actual' },
+                  { label: 'Depósitos',     crc: sel.deposits,                            color: 'text-zinc-200',  sub: 'cash in' },
+                  { label: 'Liquidaciones', crc: sel.liquidaciones,                       color: 'text-rose-400',  sub: 'cash out' },
+                  { label: 'Rendimientos',  crc: sel.passiveValuation + sel.rendimientos, color: 'text-[#a3e635]', sub: 'NAV + efectivo' },
+                ].map(k => (
+                  <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
+                    <p className={`text-base font-black tabular-nums ${k.color}`}>{fmt(k.crc)}</p>
+                    {currency === 'CRC' && (
+                      <p className="text-[9px] tabular-nums text-zinc-700">{fmtUSD(toUSD(k.crc))}</p>
+                    )}
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider mt-1">{k.label}</p>
+                    <p className="text-[9px] text-zinc-700">{k.sub}</p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {sel.markToMarketLoss > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
-              <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pérdida valor</span>
-              <span className="text-sm font-black tabular-nums ml-auto text-rose-400">
-                -{fmt(sel.markToMarketLoss)}
-              </span>
-              <span className="text-[9px] text-zinc-700">mark-to-market · no cash</span>
-            </div>
-          )}
+              {sel.markToMarketLoss > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+                  <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pérdida valor</span>
+                  <span className="text-sm font-black tabular-nums ml-auto text-rose-400">
+                    -{fmt(sel.markToMarketLoss)}
+                  </span>
+                  <span className="text-[9px] text-zinc-700">mark-to-market · no cash</span>
+                </div>
+              )}
 
-          {sel.deposits - sel.liquidaciones > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
-              <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">ROI cash</span>
-              <span className={`text-sm font-black tabular-nums ml-auto ${sel.balance >= sel.deposits - sel.liquidaciones ? 'text-[#a3e635]' : 'text-rose-400'}`}>
-                {fmtPct(((sel.balance - (sel.deposits - sel.liquidaciones)) / (sel.deposits - sel.liquidaciones)) * 100)}
-              </span>
-              <span className="text-[9px] text-zinc-700">(balance − neto desplegado) / neto desplegado</span>
-            </div>
+              {sel.deposits - sel.liquidaciones > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+                  <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">ROI cash</span>
+                  <span className={`text-sm font-black tabular-nums ml-auto ${sel.balance >= sel.deposits - sel.liquidaciones ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                    {fmtPct(((sel.balance - (sel.deposits - sel.liquidaciones)) / (sel.deposits - sel.liquidaciones)) * 100)}
+                  </span>
+                  <span className="text-[9px] text-zinc-700">(balance − neto desplegado) / neto desplegado</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
