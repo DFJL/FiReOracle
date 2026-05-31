@@ -29,6 +29,7 @@ export function ComposicionDetallada({
   const [addingCat, setAddingCat] = useState<Category | null>(null)
   const [newName, setNewName] = useState('')
   const [newValue, setNewValue] = useState('')
+  const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => { setItems(initialItems) }, [initialItems])
@@ -49,6 +50,11 @@ export function ComposicionDetallada({
     setEditValue(String(item.value_crc))
   }
 
+  function showSaved(msg: string) {
+    setSavedMsg(msg)
+    setTimeout(() => setSavedMsg(null), 3000)
+  }
+
   function saveEdit(item: NetWorthItem) {
     const val = parseFloat(editValue)
     if (isNaN(val) || val === item.value_crc) { setEditingId(null); return }
@@ -58,8 +64,16 @@ export function ComposicionDetallada({
         { item_name: item.item_name, category: item.category, sort_order: item.sort_order },
         val,
       )
-      if (!res?.error) {
+      if (res?.error) {
+        setSavedMsg(`Error: ${res.error}`)
+      } else {
         setItems(prev => prev.map(i => i.id === item.id ? { ...i, value_crc: val } : i))
+        const savedMonth = res.newDate ?? currentMonth
+        const [y, m] = savedMonth.slice(0, 7).split('-').map(Number)
+        const label = new Date(y, m - 1, 1).toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })
+        showSaved(snapshotDate !== currentMonth
+          ? `Guardado para ${label} — ${snapshotDate.slice(0,7)} queda intacto`
+          : `Guardado ✓`)
       }
       setEditingId(null)
     })
@@ -103,12 +117,19 @@ export function ComposicionDetallada({
 
   return (
     <div className="space-y-2">
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] text-zinc-500">Período:</span>
-      <span className="text-[10px] font-semibold text-zinc-400 capitalize">{periodLabel}</span>
-      {!isCurrentMonth && (
-        <span className="text-[9px] text-amber-500/70 font-medium">
-          · editar crea nuevo registro para el mes actual
+    <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-zinc-500">Período:</span>
+        <span className="text-[10px] font-semibold text-zinc-400 capitalize">{periodLabel}</span>
+        {!isCurrentMonth && (
+          <span className="text-[9px] text-amber-400/80 font-medium">
+            · editar crea registro para el mes actual
+          </span>
+        )}
+      </div>
+      {savedMsg && (
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${savedMsg.startsWith('Error') ? 'bg-rose-500/20 text-rose-400' : 'bg-lime-500/20 text-lime-400'}`}>
+          {savedMsg}
         </span>
       )}
     </div>
