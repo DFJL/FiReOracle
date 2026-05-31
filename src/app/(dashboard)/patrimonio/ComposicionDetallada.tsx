@@ -34,20 +34,35 @@ function monthLabel(ym: string) {
 type EditSheet = { item: NetWorthItem; period: string; value: string } | null
 type AddSheet  = { cat: Category; name: string; period: string; value: string } | null
 
+type Breakdown = { name: string; balance: number }[]
+
 export function ComposicionDetallada({
   items: initialItems,
   fmt,
   computedValues = {},
+  liquidezBreakdown = [],
+  inversionesBreakdown = [],
 }: {
   items: NetWorthItem[]
   fmt: (v: number) => string
   computedValues?: Record<string, number>
+  liquidezBreakdown?: Breakdown
+  inversionesBreakdown?: Breakdown
 }) {
   const [items, setItems]       = useState<NetWorthItem[]>(initialItems)
   const [editSheet, setEdit]    = useState<EditSheet>(null)
   const [addSheet, setAdd]      = useState<AddSheet>(null)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<Category>>(new Set(['liquido', 'inversiones', 'invertido', 'iliquido', 'pasivo']))
   const [isPending, startTransition] = useTransition()
+
+  function toggleExpand(cat: Category) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat); else next.add(cat)
+      return next
+    })
+  }
 
   useEffect(() => { setItems(initialItems) }, [initialItems])
 
@@ -144,63 +159,97 @@ export function ComposicionDetallada({
       return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
     }, 0)
     const m = CAT_META[cat]
+    const isOpen = expanded.has(cat)
+    // Live drilldown rows for auto-computed categories
+    const drillRows: Breakdown =
+      cat === 'liquido'     ? liquidezBreakdown :
+      cat === 'inversiones' ? inversionesBreakdown : []
+
     return (
       <div key={cat} className={`rounded-xl border ${m.border} overflow-hidden`}>
-        <div className={`px-3 py-2 border-b border-white/[0.05] flex items-center justify-between ${m.head}`}>
-          <p className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: m.color }}>
-            {m.label}
-          </p>
-          {catItems.length > 0 && (
-            <p className="text-xs font-bold" style={{ color: m.color }}>{fmt(total)}</p>
-          )}
-        </div>
-
-        {catItems.map(item => {
-          const computedKey  = item.item_name.toLowerCase()
-          const isComputed   = computedKey in computedValues
-          const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
-          return (
-            <div key={item.id}
-              className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01] group">
-              <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
-                <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
-                {isComputed && (
-                  <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => !isComputed && openEdit(item)}
-                  disabled={isComputed}
-                  title={isComputed ? 'Calculado automáticamente' : 'Editar'}
-                  className={`text-xs font-bold tabular-nums ${isComputed ? 'cursor-default' : 'active:opacity-60'}`}
-                  style={{ color: m.color }}
-                >
-                  {fmt(displayValue)}
-                </button>
-                {!isComputed && (
-                  <button
-                    onClick={() => handleDelete(item.id)}
-                    disabled={isPending}
-                    title="Eliminar"
-                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-opacity disabled:opacity-20"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          )
-        })}
-
+        {/* Header — click to collapse/expand */}
         <button
-          onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
-          className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
+          onClick={() => toggleExpand(cat)}
+          className={`w-full px-3 py-2 flex items-center justify-between ${m.head} ${isOpen ? 'border-b border-white/[0.05]' : ''}`}
         >
-          + agregar
+          <div className="flex items-center gap-1.5">
+            <p className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: m.color }}>
+              {m.label}
+            </p>
+            <svg
+              className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              style={{ color: m.color, opacity: 0.5 }}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <p className="text-xs font-bold" style={{ color: m.color }}>{fmt(total)}</p>
         </button>
+
+        {isOpen && (
+          <>
+            {/* Manual net_worth_items */}
+            {catItems.map(item => {
+              const computedKey  = item.item_name.toLowerCase()
+              const isComputed   = computedKey in computedValues
+              const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
+              return (
+                <div key={item.id}
+                  className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01] group">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
+                    <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
+                    {isComputed && (
+                      <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => !isComputed && openEdit(item)}
+                      disabled={isComputed}
+                      title={isComputed ? 'Calculado automáticamente' : 'Editar'}
+                      className={`text-xs font-bold tabular-nums ${isComputed ? 'cursor-default' : 'active:opacity-60'}`}
+                      style={{ color: m.color }}
+                    >
+                      {fmt(displayValue)}
+                    </button>
+                    {!isComputed && (
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        disabled={isPending}
+                        title="Eliminar"
+                        className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-opacity disabled:opacity-20"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Live drilldown rows (read-only, from envelopes / buckets) */}
+            {drillRows.length > 0 && (
+              <div className="border-t border-white/[0.05] bg-black/20">
+                {drillRows.map((row, i) => (
+                  <div key={i} className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.02] last:border-0">
+                    <p className="text-[11px] text-zinc-500 truncate pr-2">{row.name}</p>
+                    <p className="text-[11px] tabular-nums text-zinc-400 shrink-0">{fmt(row.balance)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
+              className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
+            >
+              + agregar
+            </button>
+          </>
+        )}
       </div>
     )
   }

@@ -31,7 +31,7 @@ export default async function PatrimonioPage() {
     { data: itemRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
-      .select('id, bucket_type, vendors, concept_map, account_id')
+      .select('id, name, bucket_type, vendors, concept_map, account_id')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('transactions')
@@ -42,7 +42,7 @@ export default async function PatrimonioPage() {
       .select('amount, date, movement_type, envelope_id')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
-      .select('id, parent_envelope_id')
+      .select('id, name, parent_envelope_id')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('assets')
@@ -128,6 +128,51 @@ export default async function PatrimonioPage() {
   const totalActivos = liquidBalance + totalInvested + iliquidTotal
   const patrimonioNeto = totalActivos - totalLiabilities
   const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
+
+  // Per-envelope balance breakdown (for Liquidez drilldown)
+  const envelopeBalanceMap: Record<string, number> = {}
+  for (const m of movements ?? []) {
+    if (m.movement_type === 'interes' || parentEnvelopeIds.has(m.envelope_id)) continue
+    envelopeBalanceMap[m.envelope_id] = (envelopeBalanceMap[m.envelope_id] ?? 0) + Number(m.amount)
+  }
+  const envelopeBreakdown = (envelopes ?? [])
+    .filter(e => !parentEnvelopeIds.has(e.id))
+    .map(e => ({ name: (e as { id: string; name: string; parent_envelope_id: string | null }).name ?? e.id, balance: envelopeBalanceMap[e.id] ?? 0 }))
+    .filter(e => Math.abs(e.balance) > 0.01)
+    .sort((a, b) => b.balance - a.balance)
+
+  // Per-bucket balance breakdown (for Inversiones drilldown)
+  const bucketBreakdown: { name: string; balance: number }[] = []
+  for (const def of bucketRows ?? []) {
+    let balance = 0
+    if (def.bucket_type === 'snapshot_based') {
+      balance = snapshotBalances[def.id] ?? 0
+    } else {
+      let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0
+      for (const tx of txs ?? []) {
+        const amt = Number(tx.amount ?? 0)
+        if (def.bucket_type === 'concept_based' && def.concept_map) {
+          const cm = def.concept_map as unknown as ConceptMap
+          const c = tx.concept ?? ''
+          if (cm.depositConcepts.includes(c))           deposits += amt
+          else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
+          else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
+          else if (cm.liquidacionConcepts.includes(c))   liquidaciones += amt
+        } else if (def.bucket_type === 'vendor_based') {
+          const txVendor = (tx.vendor ?? '').toLowerCase().trim()
+          const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
+          if (!vendors.includes(txVendor)) continue
+          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
+          else if (tx.is_settlement)                                               liquidaciones += amt
+          else if (tx.is_passive_income && tx.movement_type === 'income')          rendimientos += amt
+          else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
+        }
+      }
+      balance = deposits + passiveValuation + rendimientos - liquidaciones
+    }
+    const defWithName = def as typeof def & { name?: string }
+    if (defWithName.name) bucketBreakdown.push({ name: defWithName.name, balance })
+  }
 
   // Monthly trend: liquid + non-snapshot invested running totals
   const bucketDefs = (bucketRows ?? []).filter(b => b.bucket_type !== 'snapshot_based')
@@ -218,6 +263,8 @@ export default async function PatrimonioPage() {
         snapshots={(snapshotRows ?? []) as SnapshotRow[]}
         exchangeRate={exchangeRate}
         netWorthItems={netWorthItems}
+        envelopeBreakdown={envelopeBreakdown}
+        bucketBreakdown={bucketBreakdown}
       />
     </div>
   )

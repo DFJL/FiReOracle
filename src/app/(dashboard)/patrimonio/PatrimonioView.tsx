@@ -49,6 +49,8 @@ type Props = {
   snapshots: SnapshotRow[]
   exchangeRate: ExchangeRate
   netWorthItems: NetWorthItem[]
+  envelopeBreakdown: { name: string; balance: number }[]
+  bucketBreakdown: { name: string; balance: number }[]
 }
 
 const ASSET_TYPES = [
@@ -548,6 +550,7 @@ export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
   assets, liabilities, monthlyTrend, snapshots, exchangeRate, netWorthItems,
+  envelopeBreakdown, bucketBreakdown,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -808,6 +811,8 @@ export function PatrimonioView({
             items={netWorthItems}
             fmt={fmt}
             computedValues={{ liquidez: dispLiq, inversiones: dispInv }}
+            liquidezBreakdown={envelopeBreakdown}
+            inversionesBreakdown={bucketBreakdown}
           />
         </div>
       )}
