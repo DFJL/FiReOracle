@@ -188,6 +188,65 @@ export function TransactionEntryFAB({
     })
   }
 
+  function submitNext(e: React.MouseEvent) {
+    e.preventDefault()
+    setError(null)
+
+    const amtCRC = currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount)
+    if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
+
+    startTransition(async () => {
+      let result: { error: string | null } | undefined
+
+      if (type === 'gasto') {
+        result = await createTransaction({
+          type: 'gasto', date, amount: amtCRC,
+          currency_code: currency,
+          amount_usd: currency === 'USD' ? parseFloat(amountUSD) : undefined,
+          exchange_rate_used: currency === 'USD' ? parseFloat(fxRate) : undefined,
+          vendor, concept,
+          expense_group: expenseGroup || 'na',
+          category_code: categoryCode || undefined,
+          is_settlement: isSettlement,
+          is_survival_expense: isSurvival,
+          notes: notes || undefined,
+        })
+      } else if (type === 'ingreso') {
+        result = await createTransaction({
+          type: 'ingreso', date, amount: amtCRC,
+          currency_code: currency,
+          amount_usd: currency === 'USD' ? parseFloat(amountUSD) : undefined,
+          exchange_rate_used: currency === 'USD' ? parseFloat(fxRate) : undefined,
+          vendor, concept,
+          category_code: categoryCode || undefined,
+          is_passive_income: isPassive,
+          is_settlement: isSettlement,
+          notes: notes || undefined,
+        })
+      } else if (type === 'ahorro') {
+        if (!envelopeId) { setError('Seleccioná un sobre'); return }
+        result = await createTransaction({
+          type: 'ahorro', date, amount: amtCRC,
+          envelope_id: envelopeId,
+          vendor: ahorroVendor || undefined,
+          concept: ahorroConcepto || undefined,
+          notes: notes || undefined,
+        })
+      } else if (type === 'traslado') {
+        if (!fromEnvelopeId || !toEnvelopeId) { setError('Seleccioná origen y destino'); return }
+        result = await createTransaction({
+          type: 'traslado', date, amount: amtCRC,
+          from_envelope_id: fromEnvelopeId,
+          to_envelope_id: toEnvelopeId,
+          notes: notes || undefined,
+        })
+      }
+
+      if (result?.error) { setError(result.error); return }
+      reset()
+    })
+  }
+
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
   const toggle = (checked: boolean, onChange: (v: boolean) => void, label: string) => (
@@ -421,10 +480,16 @@ export function TransactionEntryFAB({
                 <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>
               )}
 
-              <button type="submit" disabled={isPending}
-                className="w-full py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black tracking-wide hover:bg-[#b4f040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                {isPending ? 'Guardando…' : 'Guardar movimiento'}
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={submitNext} disabled={isPending}
+                  className="py-3 rounded-xl bg-white/[0.06] border border-white/[0.10] text-white text-sm font-black tracking-wide hover:bg-white/[0.10] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  {isPending ? '…' : 'Siguiente →'}
+                </button>
+                <button type="submit" disabled={isPending}
+                  className="py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black tracking-wide hover:bg-[#b4f040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  {isPending ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
