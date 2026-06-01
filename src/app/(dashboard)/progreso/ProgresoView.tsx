@@ -80,22 +80,6 @@ export function ProgresoView({
     alerts.push({ level: 'warning', msg: `Tasa de ahorro muy baja: ${(savingsRate * 100).toFixed(0)}%` })
   }
 
-  // No FIRE number set yet
-  if (fireNumber === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">FIRE</p>
-        <p className="text-zinc-400 text-sm max-w-xs">
-          Configurá tu gasto mensual objetivo en retiro para calcular tu número FIRE y ver el progreso.
-        </p>
-        <Link href="/configuracion"
-          className="px-5 py-2.5 rounded-xl bg-[#a3e635] text-black text-sm font-black">
-          Configurar parámetros FIRE
-        </Link>
-      </div>
-    )
-  }
-
   // Radial progress ring
   const R      = 54
   const circ   = 2 * Math.PI * R
@@ -123,6 +107,20 @@ export function ProgresoView({
         </div>
       </div>
 
+      {/* FIRE config missing banner */}
+      {fireNumber === 0 && (
+        <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-[#a3e635]/[0.06] border border-[#a3e635]/20">
+          <p className="text-xs text-zinc-300">
+            <span className="font-bold text-[#a3e635]">FIRE Number no configurado</span>
+            {' '}— definí tu gasto mensual objetivo en retiro para ver el anillo, hitos y proyección.
+          </p>
+          <Link href="/configuracion"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors">
+            Configurar
+          </Link>
+        </div>
+      )}
+
       {/* Alerts */}
       {alerts.length > 0 && (
         <div className="space-y-2">
@@ -139,8 +137,8 @@ export function ProgresoView({
         </div>
       )}
 
-      {/* Hero card: radial progress + numbers */}
-      <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 sm:p-7">
+      {/* Hero card: radial progress + numbers — only when FIRE configured */}
+      {fireNumber > 0 && <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 sm:p-7">
         <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-10">
 
           {/* Ring */}
@@ -194,17 +192,19 @@ export function ProgresoView({
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* FIRE milestones */}
-      <MilestoneStrip
-        activosInvertibles={activosInvertibles}
-        liquidBalance={liquidBalance}
-        fireNumber={fireNumber}
-        leanFireNumber={leanFireNumber}
-        avgMonthlyExpenses={avgMonthlyExpenses}
-        fmt={fmt}
-      />
+      {fireNumber > 0 && (
+        <MilestoneStrip
+          activosInvertibles={activosInvertibles}
+          liquidBalance={liquidBalance}
+          fireNumber={fireNumber}
+          leanFireNumber={leanFireNumber}
+          avgMonthlyExpenses={avgMonthlyExpenses}
+          fmt={fmt}
+        />
+      )}
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -267,9 +267,10 @@ export function ProgresoView({
       </div>
 
       {/* Combined historical + forecast chart */}
+      {/* Combined chart — show historical even without FIRE config, forecast only when configured */}
       <CombinedChart
         snapshots={snapshots}
-        forecast={forecastYears}
+        forecast={fireNumber > 0 ? forecastYears : []}
         fireNumber={fireNumber}
         leanFireNumber={leanFireNumber}
         currency={currency}
@@ -277,13 +278,15 @@ export function ProgresoView({
       />
 
       {/* Footer hint */}
-      <p className="text-[10px] text-zinc-700 text-center pb-2">
-        Proyección: {(fireConfig.expReturn * 100).toFixed(0)}% retorno anual ·{' '}
-        {fmt(monthlySavings)}/mes aporte ·{' '}
-        <Link href="/configuracion" className="underline hover:text-zinc-500 transition-colors">
-          ajustar parámetros
-        </Link>
-      </p>
+      {fireNumber > 0 && (
+        <p className="text-[10px] text-zinc-700 text-center pb-2">
+          Proyección: {(fireConfig.expReturn * 100).toFixed(0)}% retorno anual ·{' '}
+          {fmt(monthlySavings)}/mes aporte ·{' '}
+          <Link href="/configuracion" className="underline hover:text-zinc-500 transition-colors">
+            ajustar parámetros
+          </Link>
+        </p>
+      )}
     </div>
   )
 }
