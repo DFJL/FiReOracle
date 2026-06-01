@@ -185,15 +185,31 @@ function getTxConcept(tx: TxClient): string {
 
 interface SeriesPoint { month: string; income: number; passive: number; expenses: number; balance: number }
 
+const TREND_SERIES = [
+  { key: 'income',   color: '#a3e635',         label: 'Ingresos',    dashed: false },
+  { key: 'passive',  color: 'rgb(34 211 238)',  label: 'Ing. pasivo', dashed: true  },
+  { key: 'expenses', color: 'rgb(251 113 133)', label: 'Gastos',      dashed: false },
+  { key: 'balance',  color: 'rgb(96 165 250)',  label: 'Balance',     dashed: true  },
+] as const
+
 function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  const [visible, setVisible] = useState<Set<string>>(() => new Set(['income', 'passive', 'expenses', 'balance']))
+
+  function toggle(key: string) {
+    setVisible(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
 
   if (points.length < 2) return null
   const W = 800, H = 160, px = 4, pt = 8, pb = 24
   const chartH = H - pt - pb
   const chartW = W - px * 2
 
-  // Shared scale across all series so they're visually comparable
+  // Shared scale across all series so toggling doesn't rescale
   const allVals = points.flatMap(p => [p.income, p.passive, p.expenses, p.balance])
   const minV = Math.min(...allVals, 0)
   const maxV = Math.max(...allVals, 1)
@@ -242,24 +258,30 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
               {MONTH_LABELS[parseInt(points[hi].month.slice(5,7))-1]} {points[hi].month.slice(0,4)}
             </p>
             <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[#a3e635]/70">Ingresos</span>
-                <span className="font-black text-[#a3e635] tabular-nums">{fmt(points[hi].income)}</span>
-              </div>
-              {points[hi].passive > 0 && (
+              {visible.has('income') && (
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-[#a3e635]/70">Ingresos</span>
+                  <span className="font-black text-[#a3e635] tabular-nums">{fmt(points[hi].income)}</span>
+                </div>
+              )}
+              {visible.has('passive') && points[hi].passive > 0 && (
                 <div className="flex items-center justify-between gap-4 pl-3">
                   <span className="text-[9px] text-cyan-400/60">↳ Pasivo</span>
                   <span className="font-black text-cyan-400 tabular-nums text-[9px]">{fmt(points[hi].passive)}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-rose-400/70">Gastos</span>
-                <span className="font-black text-rose-400 tabular-nums">{fmt(points[hi].expenses)}</span>
-              </div>
-              <div className="border-t border-white/[0.06] mt-1 pt-1 flex items-center justify-between gap-4">
-                <span className="text-blue-400/70">Balance</span>
-                <span className={`font-black tabular-nums ${points[hi].balance >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{fmt(points[hi].balance)}</span>
-              </div>
+              {visible.has('expenses') && (
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-rose-400/70">Gastos</span>
+                  <span className="font-black text-rose-400 tabular-nums">{fmt(points[hi].expenses)}</span>
+                </div>
+              )}
+              {visible.has('balance') && (
+                <div className="border-t border-white/[0.06] mt-1 pt-1 flex items-center justify-between gap-4">
+                  <span className="text-blue-400/70">Balance</span>
+                  <span className={`font-black tabular-nums ${points[hi].balance >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{fmt(points[hi].balance)}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -274,20 +296,22 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
         </defs>
         {zeroY !== null && <line x1={px} y1={zeroY} x2={W-px} y2={zeroY} stroke="rgb(113 113 122/0.25)" strokeDasharray="4 3" strokeWidth="1" />}
         {/* Income fill */}
-        <path d={inc.d + ` L${inc.xs[inc.xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${inc.xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`}
-          fill="url(#grad-inc)" />
+        {visible.has('income') && (
+          <path d={inc.d + ` L${inc.xs[inc.xs.length-1].toFixed(1)},${(pt+chartH).toFixed(1)} L${inc.xs[0].toFixed(1)},${(pt+chartH).toFixed(1)} Z`}
+            fill="url(#grad-inc)" />
+        )}
         {/* Lines */}
-        <path d={exp.d} fill="none" stroke="rgb(251 113 133)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
-        <path d={pas.d} fill="none" stroke="rgb(34 211 238)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" strokeDasharray="5 3" />
-        <path d={bal.d} fill="none" stroke="rgb(96 165 250)"  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" strokeDasharray="5 3" />
-        <path d={inc.d} fill="none" stroke="#a3e635"           strokeWidth="2"   strokeLinecap="round" strokeLinejoin="round" />
+        {visible.has('expenses') && <path d={exp.d} fill="none" stroke="rgb(251 113 133)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />}
+        {visible.has('passive')  && <path d={pas.d} fill="none" stroke="rgb(34 211 238)"  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" strokeDasharray="5 3" />}
+        {visible.has('balance')  && <path d={bal.d} fill="none" stroke="rgb(96 165 250)"  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" strokeDasharray="5 3" />}
+        {visible.has('income')   && <path d={inc.d} fill="none" stroke="#a3e635"          strokeWidth="2"   strokeLinecap="round" strokeLinejoin="round" />}
         {/* Hover crosshair + dots */}
         {hi !== null && hx !== null && <>
           <line x1={hx} y1={pt} x2={hx} y2={pt + chartH} stroke="white" strokeWidth="1" strokeDasharray="3 2" opacity="0.15" />
-          <circle cx={hx} cy={inc.ys[hi]} r="3.5" fill="#a3e635"          stroke="#0d120d" strokeWidth="2" />
-          <circle cx={hx} cy={pas.ys[hi]} r="3" fill="rgb(34 211 238)" stroke="#0d120d" strokeWidth="2" />
-          <circle cx={hx} cy={exp.ys[hi]} r="3.5" fill="rgb(251 113 133)" stroke="#0d120d" strokeWidth="2" />
-          <circle cx={hx} cy={bal.ys[hi]} r="3.5" fill="rgb(96 165 250)"  stroke="#0d120d" strokeWidth="2" />
+          {visible.has('income')   && <circle cx={hx} cy={inc.ys[hi]} r="3.5" fill="#a3e635"          stroke="#0d120d" strokeWidth="2" />}
+          {visible.has('passive')  && <circle cx={hx} cy={pas.ys[hi]} r="3"   fill="rgb(34 211 238)"  stroke="#0d120d" strokeWidth="2" />}
+          {visible.has('expenses') && <circle cx={hx} cy={exp.ys[hi]} r="3.5" fill="rgb(251 113 133)" stroke="#0d120d" strokeWidth="2" />}
+          {visible.has('balance')  && <circle cx={hx} cy={bal.ys[hi]} r="3.5" fill="rgb(96 165 250)"  stroke="#0d120d" strokeWidth="2" />}
         </>}
         {points.map((p, i) => {
           if (i % step !== 0) return null
@@ -298,19 +322,22 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
           )
         })}
       </svg>
-      {/* Legend */}
-      <div className="flex gap-4 mt-1 px-1">
-        {[
-          { color: '#a3e635',          label: 'Ingresos' },
-          { color: 'rgb(34 211 238)',  label: 'Ing. pasivo', dashed: true },
-          { color: 'rgb(251 113 133)', label: 'Gastos' },
-          { color: 'rgb(96 165 250)',  label: 'Balance', dashed: true },
-        ].map(s => (
-          <div key={s.label} className="flex items-center gap-1.5">
-            <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={s.dashed ? '4 2' : undefined} /></svg>
-            <span className="text-[9px] text-zinc-500">{s.label}</span>
-          </div>
-        ))}
+      {/* Legend with toggles */}
+      <div className="flex gap-2 mt-1 px-1 flex-wrap">
+        {TREND_SERIES.map(s => {
+          const on = visible.has(s.key)
+          return (
+            <button key={s.key} onClick={() => toggle(s.key)}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all border ${
+                on ? 'border-white/[0.06] bg-white/[0.03]' : 'border-transparent opacity-40'
+              }`}>
+              <svg width="16" height="8">
+                <line x1="0" y1="4" x2="16" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={s.dashed ? '4 2' : undefined} />
+              </svg>
+              <span className="text-[9px]" style={{ color: on ? s.color : 'rgb(113 113 122)' }}>{s.label}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
