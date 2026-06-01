@@ -554,7 +554,7 @@ export function PatrimonioView({
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [currency, setCurrency] = useState<'CRC' | 'USD'>('CRC')
+  const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
 
   const rate = exchangeRate.sell
   const fmt = (v: number) => fmtAmt(v, currency, rate)

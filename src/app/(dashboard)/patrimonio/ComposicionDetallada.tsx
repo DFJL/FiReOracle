@@ -195,30 +195,33 @@ export function ComposicionDetallada({
               const isComputed   = computedKey in computedValues
               const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
               return (
-                <div key={item.id}
-                  className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01] group">
+                <div
+                  key={item.id}
+                  onClick={() => !isComputed && openEdit(item)}
+                  className={`flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 group ${
+                    isComputed ? 'bg-white/[0.01]' : 'cursor-pointer active:bg-white/[0.03] hover:bg-white/[0.02]'
+                  }`}
+                >
                   <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
                     <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
-                    {isComputed && (
+                    {isComputed ? (
                       <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
+                    ) : (
+                      <svg className="w-2.5 h-2.5 shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                      </svg>
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => !isComputed && openEdit(item)}
-                      disabled={isComputed}
-                      title={isComputed ? 'Calculado automáticamente' : 'Editar'}
-                      className={`text-xs font-bold tabular-nums ${isComputed ? 'cursor-default' : 'active:opacity-60'}`}
-                      style={{ color: m.color }}
-                    >
+                    <span className="text-xs font-bold tabular-nums" style={{ color: m.color }}>
                       {fmt(displayValue)}
-                    </button>
+                    </span>
                     {!isComputed && (
                       <button
-                        onClick={() => handleDelete(item.id)}
+                        onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
                         disabled={isPending}
                         title="Eliminar"
-                        className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-opacity disabled:opacity-20"
+                        className="text-zinc-700 hover:text-rose-400 active:text-rose-400 transition-colors disabled:opacity-20 sm:opacity-0 sm:group-hover:opacity-100"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
