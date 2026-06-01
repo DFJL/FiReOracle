@@ -147,7 +147,7 @@ async function processConfig(
             is_survival_expense: tx.is_survival_expense,
             notes: tx.notes,
           },
-          { onConflict: 'external_id', ignoreDuplicates: true }
+          { onConflict: 'external_id', ignoreDuplicates: false }
         )
         if (error) {
           console.error(`[${sheet_name}] upsert error row ${tx.row_number}:`, error.message)
@@ -192,7 +192,7 @@ async function processConfig(
           for (const line of lines) {
             const { error } = await supabase.from('budget_lines').upsert(
               { external_id: line.external_id, category: line.category, planned_amount: line.planned_amount, actual_amount: line.actual_amount, notes: line.notes },
-              { onConflict: 'external_id', ignoreDuplicates: true }
+              { onConflict: 'external_id', ignoreDuplicates: false }
             )
             if (error) rows_skipped++; else rows_inserted++
             highestRow = Math.max(highestRow, line.row_number)
@@ -205,7 +205,7 @@ async function processConfig(
           for (const item of items) {
             const { error } = await supabase.from('bonus_plan_items').upsert(
               { external_id: item.external_id, description: item.description, amount: item.amount, is_allocated: item.is_allocated },
-              { onConflict: 'external_id', ignoreDuplicates: true }
+              { onConflict: 'external_id', ignoreDuplicates: false }
             )
             if (error) rows_skipped++; else rows_inserted++
             highestRow = Math.max(highestRow, item.row_number)
@@ -217,7 +217,7 @@ async function processConfig(
           for (const entry of entries) {
             const { error } = await supabase.from('network_entries').upsert(
               { external_id: entry.external_id, name: entry.name, amount_owed: entry.amount_owed, currency_code: entry.currency_code, notes: entry.notes },
-              { onConflict: 'external_id', ignoreDuplicates: true }
+              { onConflict: 'external_id', ignoreDuplicates: false }
             )
             if (error) rows_skipped++; else rows_inserted++
             highestRow = Math.max(highestRow, entry.row_number)
@@ -229,7 +229,7 @@ async function processConfig(
           for (const snap of snaps) {
             const { error } = await supabase.from('investment_snapshots').upsert(
               { external_id: snap.external_id, snapshot_date: snap.snapshot_date, fund_name: snap.fund_name, amount: snap.amount, currency_code: snap.currency_code },
-              { onConflict: 'external_id', ignoreDuplicates: true }
+              { onConflict: 'external_id', ignoreDuplicates: false }
             )
             if (error) rows_skipped++; else rows_inserted++
             highestRow = Math.max(highestRow, snap.row_number)

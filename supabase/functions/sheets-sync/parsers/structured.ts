@@ -107,8 +107,14 @@ export function parseStructuredRows(
 
     const col = (idx: number): unknown => row[idx] ?? ''
 
+    // Skip non-transaction rows (headers, labels, row-number-only rows).
+    // A valid transaction must have at least a date or an amount.
+    const rawDateEarly = parseDate(col(1))
+    const rawAmountEarly = parseAmount(col(12))
+    if (rawDateEarly === null && rawAmountEarly === null) continue
+
     const external_id = `${spreadsheetId}::${sheetName}::${rowNumber}`
-    const rawDate = parseDate(col(1))
+    const rawDate = rawDateEarly
     const detail = String(col(14) ?? '').trim() || null
     const concept = String(col(8) ?? '').trim() || null
     const rawGrupo = String(col(9) ?? '').trim()
