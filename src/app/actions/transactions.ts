@@ -54,11 +54,6 @@ export type CreateTransactionInput =
       notes?: string
     }
 
-function dateComponents(date: string) {
-  const d = new Date(date + 'T12:00:00')
-  return { day: d.getDate(), month: d.getMonth() + 1, year: d.getFullYear() }
-}
-
 export async function createTransaction(input: CreateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -67,11 +62,10 @@ export async function createTransaction(input: CreateTransactionInput) {
   const admin = createAdminClient()
 
   if (input.type === 'gasto') {
-    const { day, month, year } = dateComponents(input.date)
     const isUSD = input.currency_code === 'USD'
     const { error } = await admin.from('transactions').insert({
       user_id: user.id,
-      date: input.date, day, month, year,
+      date: input.date,
       amount: input.amount,
       amount_usd: isUSD ? input.amount_usd ?? null : null,
       exchange_rate_used: isUSD ? input.exchange_rate_used ?? null : null,
@@ -91,11 +85,10 @@ export async function createTransaction(input: CreateTransactionInput) {
   }
 
   else if (input.type === 'ingreso') {
-    const { day, month, year } = dateComponents(input.date)
     const isUSD = input.currency_code === 'USD'
     const { error } = await admin.from('transactions').insert({
       user_id: user.id,
-      date: input.date, day, month, year,
+      date: input.date,
       amount: input.amount,
       amount_usd: isUSD ? input.amount_usd ?? null : null,
       exchange_rate_used: isUSD ? input.exchange_rate_used ?? null : null,
@@ -115,11 +108,10 @@ export async function createTransaction(input: CreateTransactionInput) {
   }
 
   else if (input.type === 'ahorro') {
-    const { day, month, year } = dateComponents(input.date)
     // Transaction record: savings outflow in cash flow
     const { error: txErr } = await admin.from('transactions').insert({
       user_id: user.id,
-      date: input.date, day, month, year,
+      date: input.date,
       amount: input.amount,
       currency_code: 'CRC',
       vendor: input.vendor?.trim() || null,
