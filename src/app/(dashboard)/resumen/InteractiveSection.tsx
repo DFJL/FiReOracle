@@ -764,11 +764,11 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
               sub: kpis.invested > 0 ? `${fmtAmt(kpis.invested)} invertido` : null,
             },
             {
-              label: 'Cobertura pasiva',
-              display: `${Math.round(kpis.coverage)}%`,
-              color: kpis.coverage >= 100 ? 'text-[#a3e635]' : kpis.coverage >= 50 ? 'text-cyan-400' : kpis.coverage >= 25 ? 'text-amber-400' : 'text-zinc-400',
-              secondary: kpis.passiveIncome > 0 ? fmtAmt(kpis.passiveIncome) : null as string | null,
-              sub: kpis.coverage >= 100 ? '🟢 independencia financiera' : `gastos: ${fmtAmt(kpis.expenses)}`,
+              label: 'Margen neto',
+              display: `${Math.round(kpis.netMargin)}%`,
+              color: kpis.netMargin >= 30 ? 'text-[#a3e635]' : kpis.netMargin >= 10 ? 'text-amber-400' : 'text-rose-400',
+              secondary: kpis.net !== 0 ? fmtAmt(kpis.net) : null as string | null,
+              sub: kpis.net >= 0 ? 'sobrante del período' : 'déficit del período',
             },
           ].map(k => (
             <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1">
