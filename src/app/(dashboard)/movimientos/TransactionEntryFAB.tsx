@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
-import { Plus, X, ChevronDown } from 'lucide-react'
+import { useState, useTransition, useEffect, useRef } from 'react'
+import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, type TxEntryType } from '@/app/actions/transactions'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
@@ -94,6 +94,22 @@ export function TransactionEntryFAB({
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
 
+  // ── AI mode ────────────────────────────────────────────────────────────────
+  type AiFile = { data: string; type: string; name: string }
+  type ConvMsg = { role: 'user' | 'assistant'; content: string }
+
+  const [aiMode, setAiMode]           = useState(false)
+  const [aiText, setAiText]           = useState('')
+  const [aiFile, setAiFile]           = useState<AiFile | null>(null)
+  const [aiMessages, setAiMessages]   = useState<ConvMsg[]>([])
+  const [aiQuestion, setAiQuestion]   = useState<string | null>(null)
+  const [aiAnswer, setAiAnswer]       = useState('')
+  const [aiLoading, setAiLoading]     = useState(false)
+  const [aiError, setAiError]         = useState<string | null>(null)
+  const [aiPrefilled, setAiPrefilled] = useState(false)
+  const imgInputRef                   = useRef<HTMLInputElement>(null)
+  const pdfInputRef                   = useRef<HTMLInputElement>(null)
+
   // Leaf-only envelopes; parents only used for display label
   const parentIds = new Set(envelopes.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
   const leafEnvelopes = envelopes.filter(e => !parentIds.has(e.id))
@@ -120,9 +136,101 @@ export function TransactionEntryFAB({
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setAhorroVendor(''); setAhorroConcepto('')
     setError(null)
+    // reset AI state
+    setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
+    setAiQuestion(null); setAiAnswer(''); setAiLoading(false)
+    setAiError(null); setAiPrefilled(false)
   }
 
   function close() { reset(); setOpen(false) }
+
+  function handleFileSelect(file: File | undefined | null, kind: 'image' | 'pdf') {
+    if (!file) return
+    const maxBytes = 5 * 1024 * 1024 // 5 MB
+    if (file.size > maxBytes) { setAiError('Archivo demasiado grande (máx 5 MB)'); return }
+    const reader = new FileReader()
+    reader.onload = e => {
+      const result = e.target?.result as string
+      const base64 = result.split(',')[1]
+      setAiFile({ data: base64, type: file.type, name: file.name })
+      setAiError(null)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function analyzeWithAI() {
+    const userText = aiQuestion ? aiAnswer.trim() : aiText.trim()
+    if (!userText && !aiFile) { setAiError('Escribí algo o subí un archivo.'); return }
+    setAiLoading(true); setAiError(null)
+
+    const newMessages: { role: 'user' | 'assistant'; content: string }[] = [
+      ...aiMessages,
+      { role: 'user', content: userText || (aiFile ? `Analizá este ${aiFile.type.startsWith('image') ? 'recibo' : 'PDF'}.` : '') },
+    ]
+
+    try {
+      const res = await fetch('/api/ai-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: newMessages,
+          fileData: aiFile?.data,
+          fileType: aiFile?.type,
+          categories,
+          envelopes,
+        }),
+      })
+
+      if (!res.ok) {
+        const txt = await res.text()
+        setAiError(`Error ${res.status}: ${txt}`)
+        setAiLoading(false)
+        return
+      }
+
+      const data = await res.json() as {
+        status: 'complete' | 'question' | 'error'
+        fields?: Record<string, unknown>
+        partial?: Record<string, unknown>
+        question?: string
+        message?: string
+      }
+
+      if (data.status === 'complete' && data.fields) {
+        const f = data.fields
+        if (typeof f.type === 'string') setType(f.type as TxEntryType)
+        if (typeof f.date === 'string') setDate(f.date)
+        if (typeof f.amount === 'number') setAmount(String(f.amount))
+        if (f.currency === 'USD') setCurrency('USD'); else setCurrency('CRC')
+        if (typeof f.vendor === 'string') setVendor(f.vendor)
+        if (typeof f.concept === 'string') setConcept(f.concept)
+        if (typeof f.category_code === 'string') setCategoryCode(f.category_code)
+        if (typeof f.is_passive_income === 'boolean') setIsPassive(f.is_passive_income)
+        if (typeof f.is_settlement === 'boolean') setIsSettlement(f.is_settlement)
+        if (typeof f.is_survival_expense === 'boolean') setIsSurvival(f.is_survival_expense)
+        if (typeof f.envelope_id === 'string') setEnvelopeId(f.envelope_id)
+        setAiPrefilled(true)
+        setAiMode(false)
+        setAiMessages([])
+        setAiQuestion(null)
+      } else if (data.status === 'question' && data.question) {
+        // apply any partial fields quietly
+        const p = data.partial ?? {}
+        if (typeof p.type === 'string') setType(p.type as TxEntryType)
+        if (typeof p.amount === 'number') setAmount(String(p.amount))
+        if (typeof p.vendor === 'string') setVendor(p.vendor)
+        setAiMessages([...newMessages, { role: 'assistant', content: data.question }])
+        setAiQuestion(data.question)
+        setAiAnswer('')
+      } else {
+        setAiError(data.message ?? 'No se pudo interpretar el input. Sé más específico o usá el formulario manual.')
+      }
+    } catch (err) {
+      setAiError('Error de red. Intentá de nuevo.')
+    }
+
+    setAiLoading(false)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -278,11 +386,86 @@ export function TransactionEntryFAB({
             {/* Header */}
             <div className="flex items-center justify-between">
               <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Nuevo movimiento</p>
-              <button onClick={close} className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+                  <button type="button"
+                    onClick={() => { setAiMode(false); setAiError(null) }}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${!aiMode ? 'bg-white/[0.10] text-white' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    Manual
+                  </button>
+                  <button type="button"
+                    onClick={() => { setAiMode(true); setAiError(null) }}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${aiMode ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    <Sparkles size={10} />
+                    IA
+                  </button>
+                </div>
+                <button onClick={close} className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+              </div>
             </div>
 
-            {/* Type selector */}
-            <div className="grid grid-cols-2 gap-1.5">
+            {/* ── AI panel ── */}
+            {aiMode && (
+              <div className="space-y-3">
+                {aiQuestion && (
+                  <div className="flex gap-2 bg-[#a3e635]/[0.08] border border-[#a3e635]/20 rounded-xl p-3">
+                    <Sparkles size={14} className="text-[#a3e635] mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-[#a3e635]/90 leading-snug">{aiQuestion}</p>
+                  </div>
+                )}
+                <div>
+                  <label className={lbl}>{aiQuestion ? 'Tu respuesta' : 'Describí la transacción'}</label>
+                  <textarea
+                    value={aiQuestion ? aiAnswer : aiText}
+                    onChange={e => aiQuestion ? setAiAnswer(e.target.value) : setAiText(e.target.value)}
+                    placeholder={aiQuestion ? 'Escribí tu respuesta…' : 'Ej: "Pagué ₡15,000 en Spoon por almuerzo" o pegá el texto de un recibo…'}
+                    rows={3}
+                    className={`${inputCls} resize-none`}
+                  />
+                </div>
+                {!aiQuestion && (
+                  <div>
+                    <label className={lbl}>O subí un archivo</label>
+                    <div className="flex gap-2">
+                      <button type="button"
+                        onClick={() => imgInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors">
+                        <Camera size={13} /> Foto de recibo
+                      </button>
+                      <button type="button"
+                        onClick={() => pdfInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors">
+                        <FileText size={13} /> PDF / Factura
+                      </button>
+                      <input ref={imgInputRef} type="file" accept="image/*" className="hidden"
+                        onChange={e => handleFileSelect(e.target.files?.[0], 'image')} />
+                      <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" className="hidden"
+                        onChange={e => handleFileSelect(e.target.files?.[0], 'pdf')} />
+                    </div>
+                    {aiFile && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-[11px] text-zinc-400 truncate max-w-[200px]">{aiFile.name}</span>
+                        <button type="button" onClick={() => setAiFile(null)}
+                          className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={11} /></button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {aiError && (
+                  <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{aiError}</p>
+                )}
+                <button type="button" onClick={analyzeWithAI} disabled={aiLoading}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#a3e635]/20 border border-[#a3e635]/30 text-[#a3e635] text-sm font-black hover:bg-[#a3e635]/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  {aiLoading
+                    ? <><Loader2 size={14} className="animate-spin" /> Analizando…</>
+                    : <><Sparkles size={14} /> {aiQuestion ? 'Responder →' : 'Analizar →'}</>
+                  }
+                </button>
+              </div>
+            )}
+
+            {/* Type selector — hidden in AI mode */}
+            {!aiMode && <div className="grid grid-cols-2 gap-1.5">
               {TYPE_OPTIONS.map(opt => (
                 <button key={opt.value} type="button" onClick={() => { setType(opt.value); setError(null) }}
                   className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
@@ -292,9 +475,18 @@ export function TransactionEntryFAB({
                   <p className="text-[9px] text-zinc-600 mt-0.5 leading-tight">{opt.desc}</p>
                 </button>
               ))}
-            </div>
+            </div>}
 
-            <form onSubmit={submit} className="space-y-3">
+            {!aiMode && <form onSubmit={submit} className="space-y-3">
+
+              {/* Revisión IA banner */}
+              {aiPrefilled && (
+                <div className="flex items-center gap-2 bg-[#a3e635]/[0.06] border border-[#a3e635]/20 rounded-xl px-3 py-2">
+                  <Sparkles size={12} className="text-[#a3e635]/70 flex-shrink-0" />
+                  <p className="text-[11px] text-[#a3e635]/70">Completado por IA — verificá los campos antes de guardar</p>
+                  <button type="button" onClick={() => setAiPrefilled(false)} className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"><X size={11} /></button>
+                </div>
+              )}
 
               {/* ── Date + Amount ── */}
               <div className="grid grid-cols-2 gap-3">
@@ -494,7 +686,7 @@ export function TransactionEntryFAB({
                   {isPending ? 'Guardando…' : 'Guardar'}
                 </button>
               </div>
-            </form>
+            </form>}
           </div>
         </div>
       )}
