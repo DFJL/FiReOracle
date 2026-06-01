@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
-import { createTransaction, type TxEntryType } from '@/app/actions/transactions'
+import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type Category = {
@@ -94,6 +94,10 @@ export function TransactionEntryFAB({
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
 
+  // ── Duplicate detection ──────────────────────────────────────────────────────
+  const [dupHits, setDupHits]         = useState<DuplicateHit[]>([])
+  const [dupDismissed, setDupDismissed] = useState(false)
+
   // ── AI mode ────────────────────────────────────────────────────────────────
   type AiFile = { data: string; type: string; name: string }
   type ConvMsg = { role: 'user' | 'assistant'; content: string }
@@ -129,6 +133,25 @@ export function TransactionEntryFAB({
     setIsSurvival(cat.is_survival_expense)
   }, [categoryCode, categories])
 
+  // Duplicate detection: debounce check when amount + vendor/concept are filled
+  useEffect(() => {
+    if (aiMode || dupDismissed) return
+    if (type !== 'gasto' && type !== 'ingreso') { setDupHits([]); return }
+    const amtNum = currency === 'USD'
+      ? (parseFloat(amountUSD || '0') * parseFloat(fxRate || '0'))
+      : parseFloat(amount || '0')
+    if (!amtNum || amtNum <= 0 || (!vendor.trim() && !concept.trim())) { setDupHits([]); return }
+    setDupDismissed(false)
+    const timer = setTimeout(async () => {
+      const hits = await checkDuplicateTransaction({
+        date, amount: amtNum, vendor, concept,
+        movement_type: type === 'gasto' ? 'expense' : 'income',
+      })
+      setDupHits(hits)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [date, amount, amountUSD, fxRate, vendor, concept, type, currency])
+
   function reset() {
     setType('gasto'); setDate(today()); setAmount(''); setNotes('')
     setCurrency('CRC'); setAmountUSD(''); setFxRate('')
@@ -141,6 +164,7 @@ export function TransactionEntryFAB({
     setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
     setAiQuestion(null); setAiAnswer(''); setAiLoading(false)
     setAiError(null); setAiPrefilled(false)
+    setDupHits([]); setDupDismissed(false)
   }
 
   function close() { reset(); setOpen(false) }
@@ -489,6 +513,22 @@ export function TransactionEntryFAB({
                   <Sparkles size={12} className="text-[#a3e635]/70 flex-shrink-0" />
                   <p className="text-[11px] text-[#a3e635]/70">Completado por IA — verificá los campos antes de guardar</p>
                   <button type="button" onClick={() => setAiPrefilled(false)} className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"><X size={11} /></button>
+                </div>
+              )}
+
+              {/* ── Duplicate warning ── */}
+              {dupHits.length > 0 && !dupDismissed && (
+                <div className="bg-amber-400/[0.08] border border-amber-400/25 rounded-xl px-3 py-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-amber-400 uppercase tracking-[0.12em]">⚠ Posible duplicado</p>
+                    <button type="button" onClick={() => setDupDismissed(true)} className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={11} /></button>
+                  </div>
+                  {dupHits.map(h => (
+                    <p key={h.id} className="text-[11px] text-amber-300/80 leading-snug">
+                      {h.date} · {h.vendor ?? h.concept} · ₡{Number(h.amount).toLocaleString('es-CR')}
+                    </p>
+                  ))}
+                  <p className="text-[10px] text-zinc-600">Verificá antes de guardar o cerrá esta alerta para continuar.</p>
                 </div>
               )}
 

@@ -4,6 +4,57 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 
+export type DuplicateHit = {
+  id: string
+  date: string | null
+  amount: number | string | null
+  vendor: string | null
+  concept: string | null
+  movement_type: string | null
+}
+
+export async function checkDuplicateTransaction(input: {
+  date: string
+  amount: number
+  vendor: string
+  concept: string
+  movement_type: 'expense' | 'income'
+}): Promise<DuplicateHit[]> {
+  if (!input.amount || input.amount <= 0) return []
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const d = new Date(input.date + 'T12:00:00')
+  const from = new Date(d); from.setDate(d.getDate() - 3)
+  const to   = new Date(d); to.setDate(d.getDate() + 3)
+
+  const vendorClean   = input.vendor.trim().toLowerCase()
+  const conceptClean  = input.concept.trim().toLowerCase()
+
+  const { data } = await admin
+    .from('transactions')
+    .select('id, date, amount, vendor, concept, movement_type')
+    .eq('user_id', user.id)
+    .eq('movement_type', input.movement_type)
+    .eq('amount', input.amount)
+    .gte('date', from.toISOString().slice(0, 10))
+    .lte('date', to.toISOString().slice(0, 10))
+    .limit(5)
+
+  if (!data?.length) return []
+
+  // Secondary filter: vendor OR concept must loosely match
+  return data.filter(tx => {
+    const txVendor  = (tx.vendor  ?? '').toLowerCase()
+    const txConcept = (tx.concept ?? '').toLowerCase()
+    const vendorMatch  = vendorClean  && txVendor  && txVendor.includes(vendorClean.slice(0, 4))
+    const conceptMatch = conceptClean && txConcept && txConcept.includes(conceptClean.slice(0, 4))
+    return vendorMatch || conceptMatch
+  })
+}
+
 export type TxEntryType = 'gasto' | 'ingreso' | 'ahorro' | 'traslado'
 
 type CurrencyFields = {
