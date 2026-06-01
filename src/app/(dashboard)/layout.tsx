@@ -6,7 +6,6 @@ import { TransactionEntryWrapper } from './movimientos/TransactionEntryWrapper'
 import Link from 'next/link'
 import {
   LayoutDashboard,
-  ArrowLeftRight,
   PiggyBank,
   TrendingUp,
   Users,
@@ -18,26 +17,45 @@ import {
   Target,
 } from 'lucide-react'
 
-const NAV_ITEMS = [
-  { href: '/resumen',      label: 'Resumen',       icon: <LayoutDashboard size={16} /> },
-  { href: '/movimientos',  label: 'Movimientos',   icon: <ArrowLeftRight size={16} /> },
-  { href: '/flujo',        label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
-  { href: '/presupuesto',  label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
-  { href: '/inversiones',  label: 'Portafolio',    icon: <TrendingUp size={16} /> },
-  { href: '/liquidez',     label: 'Liquidez',      icon: <Wallet size={16} /> },
-  { href: '/prestamos',    label: 'Préstamos',     icon: <Users size={16} /> },
-  { href: '/patrimonio',   label: 'Patrimonio',    icon: <Landmark size={16} /> },
-  { href: '/progreso',     label: 'Progreso FIRE', icon: <Target size={16} /> },
-  { href: '/oracle',       label: 'Oracle',        icon: <Sparkles size={16} /> },
+type NavGroup = {
+  label: string
+  items: { href: string; label: string; icon: React.ReactNode }[]
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Flujos',
+    items: [
+      { href: '/resumen',     label: 'Resumen',       icon: <LayoutDashboard size={16} /> },
+      { href: '/flujo',       label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
+      { href: '/presupuesto', label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
+    ],
+  },
+  {
+    label: 'Patrimonio',
+    items: [
+      { href: '/inversiones', label: 'Portafolio',  icon: <TrendingUp size={16} /> },
+      { href: '/liquidez',    label: 'Liquidez',    icon: <Wallet size={16} /> },
+      { href: '/prestamos',   label: 'Préstamos',   icon: <Users size={16} /> },
+      { href: '/patrimonio',  label: 'Patrimonio',  icon: <Landmark size={16} /> },
+    ],
+  },
+  {
+    label: 'FIRE',
+    items: [
+      { href: '/progreso', label: 'Progreso', icon: <Target size={16} /> },
+      { href: '/oracle',   label: 'Oracle',   icon: <Sparkles size={16} /> },
+    ],
+  },
 ]
 
-// Subset shown in mobile bottom bar (most used)
+// Subset shown in mobile bottom bar
 const BOTTOM_NAV = [
-  { href: '/resumen',    label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
-  { href: '/patrimonio', label: 'Patrimonio', icon: <Landmark size={20} /> },
-  { href: '/progreso',   label: 'FIRE',       icon: <Target size={20} /> },
+  { href: '/resumen',     label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
   { href: '/inversiones', label: 'Portafolio', icon: <TrendingUp size={20} /> },
-  { href: '/liquidez',   label: 'Liquidez',   icon: <Wallet size={20} /> },
+  { href: '/patrimonio',  label: 'Patrimonio', icon: <Landmark size={20} /> },
+  { href: '/progreso',    label: 'FIRE',       icon: <Target size={20} /> },
+  { href: '/oracle',      label: 'Oracle',     icon: <Sparkles size={20} /> },
 ]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -69,9 +87,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </span>
         </div>
 
-        <nav className="flex flex-col gap-0.5">
-          {NAV_ITEMS.map((item) => (
-            <NavLink key={item.href} {...item} />
+        <nav className="flex flex-col gap-3">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="px-3 mb-1 text-[8px] font-black tracking-[0.22em] uppercase text-zinc-700">
+                {group.label}
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => (
+                  <NavLink key={item.href} {...item} />
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
