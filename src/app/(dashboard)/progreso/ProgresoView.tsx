@@ -12,6 +12,7 @@ type Props = {
   fireProgress: number
   runway: number
   avgMonthlyExpenses: number
+  avgMonthlySurvivalExpenses: number
   avgMonthlyIncome: number
   passiveIncome12m: number
   realizedReturnRate: number | null
@@ -35,7 +36,8 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
   fireNumber, fireProgress, runway,
-  avgMonthlyExpenses, avgMonthlyIncome, passiveIncome12m, realizedReturnRate,
+  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome,
+  passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
   fireConfig, runwayGreen, runwayYellow,
 }: Props) {
@@ -47,6 +49,12 @@ export function ProgresoView({
     ? Math.max(0, (avgMonthlyIncome - avgMonthlyExpenses) / avgMonthlyIncome)
     : 0
   const monthlySavings = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
+
+  const passiveMonthlyAvg = passiveIncome12m / 12
+  // Financial Independence: passive covers what % of total expenses
+  const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
+  // Financial Security: passive covers what % of survival-only expenses
+  const fsRatio = avgMonthlySurvivalExpenses > 0 ? passiveMonthlyAvg / avgMonthlySurvivalExpenses : 0
 
   const runwayColor =
     runway >= runwayGreen  ? '#a3e635' :
@@ -157,7 +165,7 @@ export function ProgresoView({
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
 
         <KpiCard
           label="Runway"
@@ -188,10 +196,26 @@ export function ProgresoView({
 
         <KpiCard
           label="Ingreso pasivo"
-          value={fmt(passiveIncome12m / 12)}
+          value={fmt(passiveMonthlyAvg)}
           unit="/mes promedio"
           sub={`${fmt(passiveIncome12m)}/año`}
           color="#84cc16"
+        />
+
+        <KpiCard
+          label="Independencia (FI)"
+          value={`${(fiRatio * 100).toFixed(0)}%`}
+          unit="pasivo / gastos totales"
+          sub={avgMonthlyExpenses > 0 ? `meta: ${fmt(avgMonthlyExpenses)}/mes` : 'sin datos'}
+          color={fiRatio >= 1 ? '#a3e635' : fiRatio >= 0.5 ? '#f59e0b' : '#71717a'}
+        />
+
+        <KpiCard
+          label="Seguridad (FS)"
+          value={avgMonthlySurvivalExpenses > 0 ? `${(fsRatio * 100).toFixed(0)}%` : '—'}
+          unit="pasivo / gastos básicos"
+          sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'sin gastos básicos'}
+          color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
         />
       </div>
 

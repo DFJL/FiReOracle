@@ -22,9 +22,12 @@ export default async function ProgresoPage() {
 
   const admin = createAdminClient()
 
-  const cutoff = new Date()
-  cutoff.setMonth(cutoff.getMonth() - 14)
-  const cutoffDate = cutoff.toISOString().slice(0, 10)
+  // Strictly last 12 complete months (excludes current partial month)
+  const now = new Date()
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const rolling12Start    = new Date(now.getFullYear(), now.getMonth() - 12, 1)
+  const rolling12StartStr = rolling12Start.toISOString().slice(0, 10)
+  const rolling12EndStr   = currentMonthStart.toISOString().slice(0, 10)
 
   const [
     { data: fireConfig },
@@ -40,7 +43,7 @@ export default async function ProgresoPage() {
       .select('id, name, bucket_type, vendors, concept_map, account_id')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, date, category_code')
+      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code')
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin.from('envelope_movements')
@@ -117,14 +120,23 @@ export default async function ProgresoPage() {
 
   const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
 
-  // Last 12-month averages
-  const recent = (txs ?? []).filter(tx => tx.date && tx.date >= cutoffDate)
+  // Strictly last 12 complete months
+  const recent = (txs ?? []).filter(tx =>
+    tx.date && tx.date >= rolling12StartStr && tx.date < rolling12EndStr
+  )
 
   const avgMonthlyExpenses = recent
     .filter(tx =>
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
       tx.expense_group !== 'objetivos_financieros' &&
       !isValuation(tx.concept)
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  const avgMonthlySurvivalExpenses = recent
+    .filter(tx =>
+      tx.is_survival_expense &&
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
@@ -136,8 +148,13 @@ export default async function ProgresoPage() {
     .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
-  const realizedReturnRate = totalInvested > 0 && passiveIncome12m > 0
-    ? passiveIncome12m / totalInvested
+  // Yield: passive income / avg invested (last 12 snapshots) — avoids point-in-time outliers
+  const last12Snapshots = (snapshotRows ?? []).slice(-12)
+  const avgInvestedCrc = last12Snapshots.length > 0
+    ? last12Snapshots.reduce((s, r) => s + Number(r.invested_crc ?? 0), 0) / last12Snapshots.length
+    : 0
+  const realizedReturnRate = avgInvestedCrc > 0 && passiveIncome12m > 0
+    ? passiveIncome12m / avgInvestedCrc
     : null
 
   // FIRE metrics
@@ -177,6 +194,7 @@ export default async function ProgresoPage() {
         fireProgress={fireProgress}
         runway={runway}
         avgMonthlyExpenses={avgMonthlyExpenses}
+        avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         avgMonthlyIncome={avgMonthlyIncome}
         passiveIncome12m={passiveIncome12m}
         realizedReturnRate={realizedReturnRate}
