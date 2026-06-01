@@ -174,8 +174,8 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
         <span className="flex-1 text-[11px] text-zinc-400 truncate min-w-0">{sub.name}</span>
         <div className="shrink-0 flex flex-col items-end gap-0.5">
           <span className={`text-[11px] font-black tabular-nums ${
-            sub.balance > 0 ? 'text-zinc-300' : 'text-zinc-600'
-          }`}>{fmtCRC(sub.balance)}</span>
+            (sub.balance + sub.interest) > 0 ? 'text-zinc-300' : 'text-zinc-600'
+          }`}>{fmtCRC(sub.balance + sub.interest)}</span>
           {sub.interest > 0 && (
             <span className="text-[8px] tabular-nums text-amber-500/50">
               +{fmtCRC(sub.interest)} int.
