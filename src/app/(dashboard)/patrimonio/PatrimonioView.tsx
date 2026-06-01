@@ -810,7 +810,7 @@ export function PatrimonioView({
           <ComposicionDetallada
             items={netWorthItems}
             fmt={fmt}
-            computedValues={{ liquidez: dispLiq, inversiones: dispInv }}
+            computedValues={{ liquidez: liquidBalance, inversiones: totalInvested }}
             liquidezBreakdown={envelopeBreakdown}
             inversionesBreakdown={bucketBreakdown}
           />
