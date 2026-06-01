@@ -9,6 +9,7 @@ type Props = {
   liquidBalance: number
   totalInvested: number
   fireNumber: number
+  leanFireNumber: number
   fireProgress: number
   runway: number
   avgMonthlyExpenses: number
@@ -35,7 +36,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
-  fireNumber, fireProgress, runway,
+  fireNumber, leanFireNumber, fireProgress, runway,
   avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
@@ -45,15 +46,13 @@ export function ProgresoView({
   const rate = exchangeRate.sell
   const fmt  = (v: number) => fmtAmt(v, currency, rate)
 
-  const savingsRate   = avgMonthlyIncome > 0
+  const savingsRate    = avgMonthlyIncome > 0
     ? Math.max(0, (avgMonthlyIncome - avgMonthlyExpenses) / avgMonthlyIncome)
     : 0
   const monthlySavings = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
 
   const passiveMonthlyAvg = passiveIncome12m / 12
-  // Financial Independence: passive covers what % of total expenses
   const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
-  // Financial Security: passive covers what % of survival-only expenses
   const fsRatio = avgMonthlySurvivalExpenses > 0 ? passiveMonthlyAvg / avgMonthlySurvivalExpenses : 0
 
   const runwayColor =
@@ -63,6 +62,23 @@ export function ProgresoView({
   const yearsToFire = forecastYears.length > 1
     ? forecastYears.find(p => p.balance >= fireNumber)?.year ?? null
     : null
+
+  // Alert signals
+  const alerts: { level: 'danger' | 'warning'; msg: string }[] = []
+  if (runway < runwayYellow && avgMonthlyExpenses > 0) {
+    alerts.push({ level: 'danger', msg: `Runway crítico: ${runway.toFixed(1)} meses de liquidez` })
+  } else if (runway < runwayGreen && avgMonthlyExpenses > 0) {
+    alerts.push({ level: 'warning', msg: `Runway bajo: ${runway.toFixed(1)} meses — meta: ${runwayGreen}m` })
+  }
+  if (realizedReturnRate !== null && realizedReturnRate < fireConfig.inflation) {
+    alerts.push({
+      level: 'warning',
+      msg: `Rendimiento (${(realizedReturnRate * 100).toFixed(1)}%) por debajo de inflación (${(fireConfig.inflation * 100).toFixed(0)}%)`,
+    })
+  }
+  if (savingsRate < 0.05 && avgMonthlyIncome > 0) {
+    alerts.push({ level: 'warning', msg: `Tasa de ahorro muy baja: ${(savingsRate * 100).toFixed(0)}%` })
+  }
 
   // No FIRE number set yet
   if (fireNumber === 0) {
@@ -106,6 +122,22 @@ export function ProgresoView({
           ))}
         </div>
       </div>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          {alerts.map((a, i) => (
+            <div key={i} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs border ${
+              a.level === 'danger'
+                ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+            }`}>
+              <span className="shrink-0">{a.level === 'danger' ? '⚠' : '⚡'}</span>
+              <span>{a.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Hero card: radial progress + numbers */}
       <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 sm:p-7">
@@ -164,6 +196,16 @@ export function ProgresoView({
         </div>
       </div>
 
+      {/* FIRE milestones */}
+      <MilestoneStrip
+        activosInvertibles={activosInvertibles}
+        liquidBalance={liquidBalance}
+        fireNumber={fireNumber}
+        leanFireNumber={leanFireNumber}
+        avgMonthlyExpenses={avgMonthlyExpenses}
+        fmt={fmt}
+      />
+
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
 
@@ -179,10 +221,15 @@ export function ProgresoView({
           label="Rendimiento real"
           value={realizedReturnRate !== null ? `${(realizedReturnRate * 100).toFixed(1)}%` : '—'}
           unit={realizedReturnRate !== null ? '/ año' : 'sin datos'}
-          sub={`${(fireConfig.expReturn * 100).toFixed(0)}% esperado`}
+          sub={
+            realizedReturnRate !== null
+              ? `vs ${(fireConfig.inflation * 100).toFixed(0)}% inflación · ${(fireConfig.expReturn * 100).toFixed(0)}% meta`
+              : `meta: ${(fireConfig.expReturn * 100).toFixed(0)}%`
+          }
           color={
             realizedReturnRate === null ? '#71717a' :
-            realizedReturnRate >= fireConfig.expReturn ? '#a3e635' : '#f59e0b'
+            realizedReturnRate >= fireConfig.expReturn ? '#a3e635' :
+            realizedReturnRate >= fireConfig.inflation ? '#f59e0b' : '#f43f5e'
           }
         />
 
@@ -190,7 +237,7 @@ export function ProgresoView({
           label="Tasa de ahorro"
           value={`${(savingsRate * 100).toFixed(0)}%`}
           unit="últimos 12m"
-          sub={`${fmt(monthlySavings)}/mes`}
+          sub={`${fmt(monthlySavings)}/mes aportado`}
           color="#60a5fa"
         />
 
@@ -214,21 +261,20 @@ export function ProgresoView({
           label="Seguridad (FS)"
           value={avgMonthlySurvivalExpenses > 0 ? `${(fsRatio * 100).toFixed(0)}%` : '—'}
           unit="pasivo / gastos básicos"
-          sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'sin gastos básicos'}
+          sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'marcá gastos básicos'}
           color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
         />
       </div>
 
-      {/* Forecast chart */}
-      {forecastYears.length >= 2 && (
-        <ForecastChart
-          forecast={forecastYears}
-          fireNumber={fireNumber}
-          snapshots={snapshots}
-          currency={currency}
-          rate={rate}
-        />
-      )}
+      {/* Combined historical + forecast chart */}
+      <CombinedChart
+        snapshots={snapshots}
+        forecast={forecastYears}
+        fireNumber={fireNumber}
+        leanFireNumber={leanFireNumber}
+        currency={currency}
+        rate={rate}
+      />
 
       {/* Footer hint */}
       <p className="text-[10px] text-zinc-700 text-center pb-2">
@@ -255,145 +301,342 @@ function KpiCard({ label, value, unit, sub, color }: {
   )
 }
 
-function ForecastChart({
-  forecast, fireNumber, snapshots, currency, rate,
+function MilestoneStrip({
+  activosInvertibles, liquidBalance, fireNumber, leanFireNumber,
+  avgMonthlyExpenses, fmt,
 }: {
+  activosInvertibles: number
+  liquidBalance: number
+  fireNumber: number
+  leanFireNumber: number
+  avgMonthlyExpenses: number
+  fmt: (v: number) => string
+}) {
+  const fuTarget = avgMonthlyExpenses * 12
+
+  const milestones = [
+    {
+      label: 'FU Money',
+      desc: '12m líquido',
+      target: fuTarget,
+      current: liquidBalance,
+      color: '#f59e0b',
+    },
+    leanFireNumber > 0 ? {
+      label: 'Lean FI',
+      desc: 'gastos básicos',
+      target: leanFireNumber,
+      current: activosInvertibles,
+      color: '#22d3ee',
+    } : null,
+    {
+      label: 'Half FI',
+      desc: '50% del FIRE',
+      target: fireNumber * 0.5,
+      current: activosInvertibles,
+      color: '#60a5fa',
+    },
+    {
+      label: 'Full FI',
+      desc: '100% FIRE',
+      target: fireNumber,
+      current: activosInvertibles,
+      color: '#a3e635',
+    },
+  ].filter((m): m is NonNullable<typeof m> => m !== null && m.target > 0)
+
+  return (
+    <div>
+      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-3">Hitos FIRE</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {milestones.map(m => {
+          const pct     = Math.min(m.current / m.target, 1)
+          const achieved = pct >= 1
+          return (
+            <div
+              key={m.label}
+              className={`bg-white/[0.03] rounded-xl border p-4 ${
+                achieved ? 'border-[#a3e635]/25' : 'border-white/[0.06]'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.1em]">{m.label}</p>
+                {achieved && (
+                  <span className="text-[8px] font-bold text-[#a3e635] bg-[#a3e635]/10 px-1.5 py-0.5 rounded-full">✓</span>
+                )}
+              </div>
+              <p className="text-[9px] text-zinc-600 mb-3">{m.desc}</p>
+
+              {/* Progress bar */}
+              <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden mb-2">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${pct * 100}%`,
+                    backgroundColor: achieved ? '#a3e635' : m.color,
+                  }}
+                />
+              </div>
+
+              <p className="text-sm font-black leading-none" style={{ color: achieved ? '#a3e635' : m.color }}>
+                {(pct * 100).toFixed(0)}%
+              </p>
+              {!achieved ? (
+                <p className="text-[9px] text-zinc-600 mt-0.5">falta {fmt(m.target - m.current)}</p>
+              ) : (
+                <p className="text-[9px] text-[#a3e635]/60 mt-0.5">alcanzado</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function CombinedChart({
+  snapshots, forecast, fireNumber, leanFireNumber, currency, rate,
+}: {
+  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number }[]
   forecast: { year: number; balance: number }[]
   fireNumber: number
-  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number }[]
+  leanFireNumber: number
   currency: 'CRC' | 'USD'
   rate: number
 }) {
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const [hoverMs, setHoverMs] = useState<number | null>(null)
 
-  const W = 800, H = 220
-  const padL = 56, padR = 16, padT = 14, padB = 36
+  const W = 800, H = 260
+  const padL = 60, padR = 20, padT = 16, padB = 40
   const chartW = W - padL - padR
   const chartH = H - padT - padB
 
-  const convert = (v: number) => currency === 'CRC' ? v : v / rate
-  const sym = currency === 'CRC' ? '₡' : '$'
-
-  const fmtY = (v: number) => {
+  const convert  = (v: number) => currency === 'CRC' ? v : v / rate
+  const sym      = currency === 'CRC' ? '₡' : '$'
+  const fmtV     = (v: number) => {
     const val = convert(v)
-    if (Math.abs(val) >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(0)}M`
-    if (Math.abs(val) >= 1_000)     return `${sym}${(val / 1_000).toFixed(0)}K`
+    const abs = Math.abs(val)
+    if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(1)}M`
+    if (abs >= 1_000)     return `${sym}${(val / 1_000).toFixed(0)}K`
     return `${sym}${Math.round(val)}`
   }
 
-  const maxY   = Math.max(...forecast.map(p => p.balance), fireNumber) * 1.08
-  const maxYear = forecast[forecast.length - 1].year
+  const now = new Date()
 
-  const xOf = (year: number) => padL + (year / Math.max(maxYear, 1)) * chartW
-  const yOf = (val: number)  => padT + chartH - (Math.max(val, 0) / maxY) * chartH
+  // Historical points
+  const histPoints = snapshots
+    .filter(s => s.invested_crc > 0)
+    .map(s => ({ ms: new Date(s.snapshot_date + 'T12:00:00').getTime(), val: s.invested_crc }))
+    .sort((a, b) => a.ms - b.ms)
 
-  const linePath = forecast
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(p.year).toFixed(1)},${yOf(p.balance).toFixed(1)}`)
-    .join(' ')
+  // Forecast points — anchor year 0 at today
+  const forecastPoints = forecast.map(p => ({
+    ms: new Date(now.getFullYear() + p.year, now.getMonth(), 15).getTime(),
+    val: p.balance,
+  }))
 
-  const fireY  = yOf(fireNumber)
-  const fireHitIdx = forecast.findIndex(p => p.balance >= fireNumber)
-  const fireHitX   = fireHitIdx > 0 ? xOf(forecast[fireHitIdx].year) : null
+  const allMs = [...histPoints.map(p => p.ms), ...forecastPoints.map(p => p.ms)]
+  if (allMs.length < 2) return null
 
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxY)
+  const minMs    = Math.min(...allMs)
+  const maxMs    = Math.max(...allMs)
+  const msRange  = maxMs - minMs
 
-  // X labels: year 0, every 5 years, last point
-  const xLabels = forecast.filter((p, i) =>
-    i === 0 || p.year % 5 === 0 || i === forecast.length - 1
+  const maxVal = Math.max(
+    ...histPoints.map(p => p.val),
+    ...forecastPoints.map(p => p.val),
+    fireNumber,
+  ) * 1.1
+
+  const xOf = (ms: number)  => padL + ((ms - minMs) / msRange) * chartW
+  const yOf = (val: number) => padT + chartH - (Math.max(val, 0) / maxVal) * chartH
+
+  const nowX = xOf(now.getTime())
+
+  // SVG paths
+  const histPath = histPoints.length >= 2
+    ? histPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(p.ms).toFixed(1)},${yOf(p.val).toFixed(1)}`).join(' ')
+    : null
+
+  const fcPath = forecastPoints.length >= 2
+    ? forecastPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(p.ms).toFixed(1)},${yOf(p.val).toFixed(1)}`).join(' ')
+    : null
+
+  // Y grid ticks
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(t * maxVal))
+
+  // X labels: year marks in historical, +Ny marks in forecast
+  const xLabels: { x: number; label: string }[] = []
+  const startYear = new Date(minMs).getFullYear()
+  for (let y = startYear + 1; y <= now.getFullYear(); y++) {
+    const ms = new Date(y, 0, 1).getTime()
+    if (ms >= minMs && ms <= now.getTime()) {
+      xLabels.push({ x: xOf(ms), label: String(y) })
+    }
+  }
+  forecast
+    .filter(p => p.year > 0 && p.year % 5 === 0)
+    .forEach(p => {
+      const ms = new Date(now.getFullYear() + p.year, now.getMonth(), 15).getTime()
+      if (ms <= maxMs) xLabels.push({ x: xOf(ms), label: `+${p.year}a` })
+    })
+
+  // Milestone horizontal lines
+  const mLines = [
+    leanFireNumber > 0 ? { val: leanFireNumber, label: 'Lean FI', color: '#22d3ee' } : null,
+    { val: fireNumber, label: 'Full FI', color: '#a3e635' },
+  ].filter((m): m is { val: number; label: string; color: string } =>
+    m !== null && m.val > 0 && m.val <= maxVal * 1.02
   )
+
+  const fireHitFc = forecastPoints.find(p => p.val >= fireNumber)
+
+  // Hover: find closest point across hist + forecast
+  const allPoints = [...histPoints, ...forecastPoints]
+  const hoveredPt = hoverMs !== null
+    ? allPoints.reduce((best, p) =>
+        Math.abs(p.ms - hoverMs) < Math.abs(best.ms - hoverMs) ? p : best
+      )
+    : null
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
     const svgX = ((e.clientX - rect.left) / rect.width) * W
-    let closest = 0, minDist = Infinity
-    forecast.forEach((p, i) => {
-      const dist = Math.abs(xOf(p.year) - svgX)
-      if (dist < minDist) { minDist = dist; closest = i }
-    })
-    setHoverIdx(closest)
+    const targetMs = minMs + ((svgX - padL) / chartW) * msRange
+    setHoverMs(targetMs)
   }
 
-  const hovered = hoverIdx !== null ? forecast[hoverIdx] : null
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms)
+    return `${d.toLocaleString('es', { month: 'short' })} ${d.getFullYear()}`
+  }
 
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Proyección a FIRE</p>
-        {hovered && (
-          <p className="text-[10px] text-zinc-400">
-            Año {hovered.year}: <span className="font-bold text-[#a3e635]">{fmtY(hovered.balance)}</span>
-          </p>
-        )}
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Histórico + Proyección</p>
+        <div className="flex items-center gap-4 text-[9px] text-zinc-500">
+          {histPoints.length >= 2 && (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-0.5 rounded bg-[#22d3ee]" />Real
+            </span>
+          )}
+          {forecastPoints.length >= 2 && (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 border-t-2 border-dashed border-[#84cc16]" />Proyección
+            </span>
+          )}
+          {hoveredPt && (
+            <span className="text-zinc-300">
+              {fmtDate(hoveredPt.ms)}: <span className="font-bold text-[#a3e635]">{fmtV(hoveredPt.val)}</span>
+            </span>
+          )}
+        </div>
       </div>
 
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
-        style={{ height: 220 }}
+        style={{ height: 240 }}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverIdx(null)}
+        onMouseLeave={() => setHoverMs(null)}
       >
-        {/* Grid + Y labels */}
+        {/* Grid */}
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)}
               stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
             <text x={padL - 5} y={yOf(v) + 4} textAnchor="end" fontSize={9} fill="#52525b">
-              {fmtY(v)}
+              {fmtV(v)}
             </text>
           </g>
         ))}
 
-        {/* FIRE target line */}
-        <line x1={padL} x2={W - padR} y1={fireY} y2={fireY}
-          stroke="#a3e635" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.45} />
-        <text x={W - padR - 2} y={fireY - 5} textAnchor="end" fontSize={9} fill="#a3e635" opacity={0.7}>
-          FIRE {fmtY(fireNumber)}
-        </text>
+        {/* Milestone lines */}
+        {mLines.map(m => (
+          <g key={m.label}>
+            <line x1={padL} x2={W - padR} y1={yOf(m.val)} y2={yOf(m.val)}
+              stroke={m.color} strokeWidth={1} strokeDasharray="6 4" opacity={0.4} />
+            <text x={W - padR - 2} y={yOf(m.val) - 4} textAnchor="end" fontSize={8} fill={m.color} opacity={0.65}>
+              {m.label}
+            </text>
+          </g>
+        ))}
 
-        {/* Area fill under forecast line */}
+        {/* Defs */}
         <defs>
-          <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#84cc16" stopOpacity="0.15" />
+          <linearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.14" />
+            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="fg2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#84cc16" stopOpacity="0.1" />
             <stop offset="100%" stopColor="#84cc16" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path
-          d={`${linePath} L${xOf(maxYear)},${padT + chartH} L${padL},${padT + chartH} Z`}
-          fill="url(#fg)"
-        />
 
-        {/* Forecast line */}
-        <path d={linePath} fill="none" stroke="#84cc16" strokeWidth={2.5}
-          strokeLinecap="round" strokeLinejoin="round" />
+        {/* Historical area + line */}
+        {histPath && (
+          <>
+            <path
+              d={`${histPath} L${xOf(histPoints[histPoints.length - 1].ms).toFixed(1)},${padT + chartH} L${padL},${padT + chartH} Z`}
+              fill="url(#hg)"
+            />
+            <path d={histPath} fill="none" stroke="#22d3ee" strokeWidth={2.5}
+              strokeLinecap="round" strokeLinejoin="round" />
+          </>
+        )}
 
-        {/* FIRE hit dot */}
-        {fireHitX !== null && fireHitIdx > 0 && (
+        {/* Forecast area + dashed line */}
+        {fcPath && (
+          <>
+            <path
+              d={`${fcPath} L${xOf(forecastPoints[forecastPoints.length - 1].ms).toFixed(1)},${padT + chartH} L${xOf(forecastPoints[0].ms).toFixed(1)},${padT + chartH} Z`}
+              fill="url(#fg2)"
+            />
+            <path d={fcPath} fill="none" stroke="#84cc16" strokeWidth={2} strokeDasharray="8 4"
+              strokeLinecap="round" strokeLinejoin="round" opacity={0.8} />
+          </>
+        )}
+
+        {/* TODAY separator */}
+        {nowX >= padL && nowX <= W - padR && (
+          <>
+            <line x1={nowX} x2={nowX} y1={padT} y2={padT + chartH}
+              stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="3 3" />
+            <text x={nowX + 3} y={padT + 11} fontSize={8} fill="#52525b">Hoy</text>
+          </>
+        )}
+
+        {/* FIRE hit marker */}
+        {fireHitFc && (
           <g>
-            <circle cx={fireHitX} cy={fireY} r={6} fill="#080c08" stroke="#a3e635" strokeWidth={2.5} />
-            <text x={fireHitX} y={fireY - 12} textAnchor="middle" fontSize={9} fill="#a3e635" fontWeight="bold">
-              Año {forecast[fireHitIdx].year} 🎯
+            <circle cx={xOf(fireHitFc.ms)} cy={yOf(fireHitFc.val)} r={6}
+              fill="#080c08" stroke="#a3e635" strokeWidth={2.5} />
+            <text x={xOf(fireHitFc.ms)} y={yOf(fireHitFc.val) - 11}
+              textAnchor="middle" fontSize={8} fill="#a3e635" fontWeight="bold">
+              FIRE 🎯
             </text>
           </g>
         )}
 
         {/* Hover crosshair */}
-        {hovered && (
+        {hoveredPt && (
           <g>
-            <line x1={xOf(hovered.year)} x2={xOf(hovered.year)} y1={padT} y2={padT + chartH}
-              stroke="rgba(255,255,255,0.12)" strokeWidth={1} />
-            <circle cx={xOf(hovered.year)} cy={yOf(hovered.balance)} r={4}
+            <line x1={xOf(hoveredPt.ms)} x2={xOf(hoveredPt.ms)} y1={padT} y2={padT + chartH}
+              stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+            <circle cx={xOf(hoveredPt.ms)} cy={yOf(hoveredPt.val)} r={4}
               fill="#a3e635" stroke="#080c08" strokeWidth={2} />
           </g>
         )}
 
         {/* X labels */}
-        {xLabels.map(p => (
-          <text key={p.year} x={xOf(p.year)} y={H - padB + 20} textAnchor="middle" fontSize={9} fill="#52525b">
-            {p.year === 0 ? 'Hoy' : `Año ${p.year}`}
+        {xLabels.map((l, i) => (
+          <text key={i} x={l.x} y={H - padB + 20} textAnchor="middle" fontSize={9} fill="#52525b">
+            {l.label}
           </text>
         ))}
       </svg>

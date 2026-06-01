@@ -166,6 +166,10 @@ export default async function ProgresoPage() {
   const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
   const runway     = avgMonthlyExpenses > 0 ? liquidBalance / avgMonthlyExpenses : 0
 
+  const leanFireNumber = avgMonthlySurvivalExpenses > 0
+    ? (avgMonthlySurvivalExpenses * 12) / swr
+    : 0
+
   // Year-by-year forecast
   const monthlyReturn      = Math.pow(1 + expReturn, 1 / 12) - 1
   const avgMonthlySavings  = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
@@ -191,6 +195,7 @@ export default async function ProgresoPage() {
         liquidBalance={liquidBalance}
         totalInvested={totalInvested}
         fireNumber={fireNumber}
+        leanFireNumber={leanFireNumber}
         fireProgress={fireProgress}
         runway={runway}
         avgMonthlyExpenses={avgMonthlyExpenses}
