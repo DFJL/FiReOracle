@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import { ChevronUp } from 'lucide-react'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -247,9 +248,11 @@ function flowPath(flow: SankeyFlow, leftX2: number, rightX1: number): string {
 export function SankeyDiagram({
   transactions,
   fmtAmt,
+  onCollapse,
 }: {
   transactions: TxClient[]
   fmtAmt: (n: number) => string
+  onCollapse?: () => void
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverFlow, setHoverFlow] = useState<{ fromKey: string; toKey: string } | null>(null)
@@ -396,9 +399,14 @@ export function SankeyDiagram({
 
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
-      <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
-        Flujo de ingresos
-      </p>
+      <div className="flex items-start justify-between mb-1">
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Flujo de ingresos</p>
+        {onCollapse && (
+          <button onClick={onCollapse} className="text-zinc-600 hover:text-zinc-400 transition-colors -mt-0.5 -mr-1 p-1" title="Colapsar">
+            <ChevronUp size={14} />
+          </button>
+        )}
+      </div>
       <p className="text-xs text-zinc-500 mb-4">
         Cómo se distribuyen tus ingresos en el período
       </p>

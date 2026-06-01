@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
@@ -583,6 +584,9 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
   const [currency, setCurrency]     = useState<'CRC' | 'USD'>(defaultCurrency ?? 'USD')
+  const [showTrend, setShowTrend]   = useState(true)
+  const [showSankey, setShowSankey] = useState(false)
+  const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
   const toUSD  = (crc: number) => crc / tcSell
@@ -824,10 +828,10 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
         ))}
       </div>
 
-      {/* ── Content tabs ──────────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-5">
+      {/* ── Content tabs + collapse toggle ────────────────────────────────── */}
+      <div className="flex items-center gap-1 mb-5">
         {TABS.map(t => (
-          <button key={t.key} onClick={() => selectTab(t.key)}
+          <button key={t.key} onClick={() => { selectTab(t.key); setShowDetail(true) }}
             className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
               tab === t.key
                 ? t.key === 'gastos'
@@ -838,66 +842,93 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
             {t.label}
           </button>
         ))}
+        <button onClick={() => setShowDetail(v => !v)}
+          className="ml-auto flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors">
+          <span className="text-[9px] font-black uppercase tracking-wider">{showDetail ? 'Ocultar' : 'Ver detalle'}</span>
+          <ChevronDown size={12} className={`transition-transform ${showDetail ? 'rotate-180' : ''}`} />
+        </button>
       </div>
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 mb-4">
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
-          Tendencia mensual
-        </p>
-        <p className="text-xs text-zinc-500 mb-3">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>
-        {trendPoints.length > 1
-          ? <MultiTrendChart points={trendPoints} />
-          : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
-        }
-      </div>
-
-      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
-      <div className="mb-4">
-        <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} />
-      </div>
-
-      {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
-      {tab === 'ingresos' && (
-        <div className="flex gap-1 mb-4 ml-1">
-          {([
-            { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · freelance · trabajo' },
-            { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Alquiler · rendimientos · crypto' },
-          ]).map(s => (
-            <button key={s.key} onClick={() => selectIncomeSub(s.key)}
-              className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
-                incomeSubtab === s.key
-                  ? 'bg-[#a3e635]/10 border-[#a3e635]/30'
-                  : 'border-transparent hover:bg-white/[0.03]'
-              }`}>
-              <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${incomeSubtab === s.key ? 'text-[#a3e635]' : 'text-zinc-500'}`}>{s.label}</span>
-              <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* L1 + L2 side by side on desktop */}
-      <div className="flex gap-4 items-start">
-        <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
-          <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
-        </div>
-        {selCat && (
-          <div className="hidden md:block flex-1 min-w-0">
-            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
+      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] mb-4 overflow-hidden">
+        <button onClick={() => setShowTrend(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+          <div>
+            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] text-left">Tendencia mensual</p>
+            {showTrend && <p className="text-xs text-zinc-500 mt-0.5 text-left">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>}
+          </div>
+          <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showTrend ? 'rotate-180' : ''}`} />
+        </button>
+        {showTrend && (
+          <div className="px-4 pb-4">
+            {trendPoints.length > 1
+              ? <MultiTrendChart points={trendPoints} />
+              : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
+            }
           </div>
         )}
       </div>
 
-      {/* L2 mobile — below L1 */}
-      {selCat && (
-        <div className="md:hidden">
-          <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
-        </div>
-      )}
+      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
+      <div className="mb-4">
+        {showSankey
+          ? <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
+          : (
+            <button onClick={() => setShowSankey(true)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] hover:bg-white/[0.02] transition-colors">
+              <div>
+                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] text-left">Flujo de ingresos</p>
+                <p className="text-xs text-zinc-500 mt-0.5 text-left">Cómo se distribuyen tus ingresos en el período</p>
+              </div>
+              <ChevronDown size={14} className="text-zinc-600" />
+            </button>
+          )
+        }
+      </div>
 
-      {/* L3 — full width */}
-      <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} />
+      {showDetail && (<>
+        {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
+        {tab === 'ingresos' && (
+          <div className="flex gap-1 mb-4 ml-1">
+            {([
+              { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · freelance · trabajo' },
+              { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Alquiler · rendimientos · crypto' },
+            ]).map(s => (
+              <button key={s.key} onClick={() => selectIncomeSub(s.key)}
+                className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
+                  incomeSubtab === s.key
+                    ? 'bg-[#a3e635]/10 border-[#a3e635]/30'
+                    : 'border-transparent hover:bg-white/[0.03]'
+                }`}>
+                <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${incomeSubtab === s.key ? 'text-[#a3e635]' : 'text-zinc-500'}`}>{s.label}</span>
+                <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* L1 + L2 side by side on desktop */}
+        <div className="flex gap-4 items-start">
+          <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
+            <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
+          </div>
+          {selCat && (
+            <div className="hidden md:block flex-1 min-w-0">
+              <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
+            </div>
+          )}
+        </div>
+
+        {/* L2 mobile — below L1 */}
+        {selCat && (
+          <div className="md:hidden">
+            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
+          </div>
+        )}
+
+        {/* L3 — full width */}
+        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} />
+      </>)}
     </div>
   )
 }
