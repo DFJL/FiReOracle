@@ -806,6 +806,48 @@ export type Database = {
         }
         Relationships: []
       }
+      investment_yield_history: {
+        Row: {
+          id: string
+          user_id: string
+          bucket_id: string | null
+          product_name: string
+          year_month: string
+          yield_usd: number
+          invested_usd: number
+          yield_pct: number
+          exchange_rate: number
+          source: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          bucket_id?: string | null
+          product_name: string
+          year_month: string
+          yield_usd?: number
+          invested_usd?: number
+          yield_pct?: number
+          exchange_rate?: number
+          source?: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          bucket_id?: string | null
+          product_name?: string
+          year_month?: string
+          yield_usd?: number
+          invested_usd?: number
+          yield_pct?: number
+          exchange_rate?: number
+          source?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       net_worth_snapshots: {
         Row: {
           created_at: string | null
