@@ -187,10 +187,15 @@ export default async function OraclePage() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
 
-  // Savings/investment breakdown
+  // Savings/investment breakdown — concept-first to avoid vendor-map noise
+  function resolveSavingsCat(tx: Tx): string {
+    if (tx.category_code && !BUCKET_ONLY.has(tx.category_code)) return displayCategory(tx.category_code)
+    // For savings, concept is more reliable than vendor (e.g. "Regimen de pensión voluntaria" on vendor BAC)
+    return displayCategory(inferCategory(tx.vendor, tx.concept, null))
+  }
   const savingsCatMap: Record<string, number> = {}
   for (const tx of savings) {
-    const cat = resolveDisplayCat(tx, vMap, cMap)
+    const cat = resolveSavingsCat(tx)
     savingsCatMap[cat] = (savingsCatMap[cat] ?? 0) + Number(tx.amount ?? 0)
   }
   const topSavings = Object.entries(savingsCatMap)
