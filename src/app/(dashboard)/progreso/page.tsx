@@ -159,7 +159,8 @@ export default async function ProgresoPage() {
 
   // FIRE metrics
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  const targetExp  = fireConfig?.fire_target_monthly_exp ?? 0
+  // Fall back to actual 12m average if user hasn't configured a target
+  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
