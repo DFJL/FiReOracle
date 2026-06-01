@@ -29,7 +29,6 @@ export default async function PatrimonioPage() {
     { data: liabilityRows },
     { data: snapshotRows },
     { data: itemRows },
-    { data: yieldRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
       .select('id, name, bucket_type, vendors, concept_map, account_id')
@@ -64,10 +63,6 @@ export default async function PatrimonioPage() {
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: false })
       .limit(100),
-    admin.from('investment_yield_history')
-      .select('product_name, year_month, yield_usd, invested_usd, yield_pct, exchange_rate')
-      .eq('user_id', user.id)
-      .order('year_month', { ascending: true }),
   ])
 
   // Snapshot bucket balances (fetch in parallel for all snapshot buckets)
@@ -270,14 +265,6 @@ export default async function PatrimonioPage() {
         netWorthItems={netWorthItems}
         envelopeBreakdown={envelopeBreakdown}
         bucketBreakdown={bucketBreakdown}
-        yieldHistory={(yieldRows ?? []).map(r => ({
-          product_name: r.product_name as string,
-          year_month:   r.year_month   as string,
-          yield_usd:    Number(r.yield_usd),
-          invested_usd: Number(r.invested_usd),
-          yield_pct:    Number(r.yield_pct),
-          exchange_rate: Number(r.exchange_rate),
-        }))}
       />
     </div>
   )

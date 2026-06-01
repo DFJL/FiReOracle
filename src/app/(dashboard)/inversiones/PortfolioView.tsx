@@ -102,7 +102,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   liquidBreakdown: CustodioGroup[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
-  const [currency, setCurrency] = useState<'CRC' | 'USD'>('CRC')
+  const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
 
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate

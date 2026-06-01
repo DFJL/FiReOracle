@@ -49,7 +49,7 @@ export function PortfolioHistory({
 }) {
   const [rangeMonths, setRangeMonths] = useState<number>(12)
   const [visible, setVisible]         = useState<Set<string>>(new Set([TOTAL_KEY]))
-  const [currency, setCurrency]       = useState<'CRC' | 'USD'>('CRC')
+  const [currency, setCurrency]       = useState<'CRC' | 'USD'>('USD')
   const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
   const svgRef                        = useRef<SVGSVGElement>(null)
 

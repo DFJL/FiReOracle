@@ -3,8 +3,12 @@
 import { useState, useTransition } from 'react'
 import { upsertFinancialConfig, type FinancialConfigData } from '@/app/actions/financialConfig'
 
+type ExistingConfig = Omit<FinancialConfigData, 'preferred_currency'> & {
+  preferred_currency?: string | null
+}
+
 type Props = {
-  existing: FinancialConfigData | null
+  existing: ExistingConfig | null
 }
 
 function pct(val: number) { return (val * 100).toFixed(1) }
@@ -21,6 +25,7 @@ export function FireConfigManager({ existing }: Props) {
     savings_rate_green:     existing?.savings_rate_green     ?? 0.30,
     savings_rate_yellow:    existing?.savings_rate_yellow    ?? 0.15,
     fcf_target_ratio:       existing?.fcf_target_ratio       ?? 0.20,
+    preferred_currency:     (existing?.preferred_currency as 'CRC' | 'USD' | undefined) ?? 'USD',
   }
 
   const [withdrawal, setWithdrawal]         = useState(pct(defaults.fire_withdrawal_rate))
@@ -32,6 +37,7 @@ export function FireConfigManager({ existing }: Props) {
   const [srGreen, setSrGreen]               = useState(pct(defaults.savings_rate_green))
   const [srYellow, setSrYellow]             = useState(pct(defaults.savings_rate_yellow))
   const [fcfTarget, setFcfTarget]           = useState(pct(defaults.fcf_target_ratio))
+  const [currency, setCurrency]             = useState<'CRC' | 'USD'>(defaults.preferred_currency ?? 'USD')
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -51,6 +57,7 @@ export function FireConfigManager({ existing }: Props) {
       savings_rate_green:      parseFloat(srGreen) / 100,
       savings_rate_yellow:     parseFloat(srYellow) / 100,
       fcf_target_ratio:        parseFloat(fcfTarget) / 100,
+      preferred_currency:      currency,
     }
 
     startTransition(async () => {
@@ -143,6 +150,27 @@ export function FireConfigManager({ existing }: Props) {
           <label className={labelCls}>FCF / Ingresos objetivo (%)</label>
           <input type="number" step="1" min="0" max="100" value={fcfTarget}
             onChange={e => setFcfTarget(e.target.value)} className={inputCls} />
+        </div>
+      </div>
+
+      {/* Currency preference */}
+      <div className="space-y-3">
+        <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">Moneda predeterminada</p>
+        <div className="flex gap-3">
+          {(['USD', 'CRC'] as const).map(c => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCurrency(c)}
+              className={`px-4 py-2 rounded-lg text-sm font-black transition-colors border ${
+                currency === c
+                  ? 'bg-[#a3e635] text-black border-[#a3e635]'
+                  : 'bg-white/[0.04] text-zinc-400 border-white/[0.08] hover:border-white/20'
+              }`}
+            >
+              {c === 'USD' ? '$ USD' : '₡ CRC'}
+            </button>
+          ))}
         </div>
       </div>
 

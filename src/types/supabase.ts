@@ -1596,6 +1596,7 @@ export type Database = {
           fire_target_monthly_exp: number | null
           fire_withdrawal_rate: number
           goal_funding_alert_ratio: number
+          preferred_currency: string | null
           runway_green_months: number
           runway_yellow_months: number
           savings_rate_green: number
@@ -1613,6 +1614,7 @@ export type Database = {
           fire_target_monthly_exp?: number | null
           fire_withdrawal_rate?: number
           goal_funding_alert_ratio?: number
+          preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
           savings_rate_green?: number
@@ -1630,6 +1632,7 @@ export type Database = {
           fire_target_monthly_exp?: number | null
           fire_withdrawal_rate?: number
           goal_funding_alert_ratio?: number
+          preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
           savings_rate_green?: number

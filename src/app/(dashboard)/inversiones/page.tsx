@@ -5,6 +5,7 @@ import type { BucketData } from './buckets'
 import { PortfolioView } from './PortfolioView'
 import { PortfolioHistory } from './PortfolioHistory'
 import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
+import { PortfolioYield } from './PortfolioYield'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 const LIQUID_KEY = '__liquidez__'
@@ -23,7 +24,14 @@ export default async function InversionesPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: bucketRows }, { data: txs }, { data: movements }, { data: envelopes }] = await Promise.all([
+  const [
+    { data: bucketRows },
+    { data: txs },
+    { data: movements },
+    { data: envelopes },
+    { data: yieldRows },
+    { data: fireConfig },
+  ] = await Promise.all([
     admin
       .from('user_investment_buckets')
       .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')
@@ -45,6 +53,16 @@ export default async function InversionesPage() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
+    admin
+      .from('investment_yield_history')
+      .select('product_name, year_month, yield_usd, invested_usd, yield_pct, exchange_rate')
+      .eq('user_id', user.id)
+      .order('year_month', { ascending: true }),
+    admin
+      .from('user_financial_config')
+      .select('preferred_currency')
+      .eq('user_id', user.id)
+      .maybeSingle(),
   ])
 
   // Fetch snapshot balances for snapshot_based buckets
@@ -265,6 +283,18 @@ export default async function InversionesPage() {
         points={historyPoints}
         series={historySeries}
         exchangeRate={exchangeRate}
+      />
+      <PortfolioYield
+        rows={(yieldRows ?? []).map(r => ({
+          product_name: r.product_name as string,
+          year_month:   r.year_month as string,
+          yield_usd:    Number(r.yield_usd),
+          invested_usd: Number(r.invested_usd),
+          yield_pct:    Number(r.yield_pct),
+          exchange_rate: Number(r.exchange_rate),
+        }))}
+        exchangeRate={exchangeRate}
+        defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
       />
     </div>
   )
