@@ -23,17 +23,35 @@ Eres directo, preciso y accionable. Usas números reales para respaldar tus obse
 CONTEXTO FINANCIERO ACTUAL DEL USUARIO:
 ${context}
 
-INSTRUCCIONES:
+INSTRUCCIONES GENERALES:
 - Responde en español (Costa Rica)
 - Usa ₡ para colones y $ para dólares
 - Cuando hagas cálculos, muéstralos brevemente
 - Sé conciso pero completo
 - Si algo parece una oportunidad o riesgo, señálalo claramente
-- No inventes datos — solo usa los que están en el contexto`
+- No inventes datos — solo usa los que están en el contexto
+- Podés usar markdown: **negrita**, tablas, listas, encabezados ##
+
+GRÁFICOS (solo cuando el usuario los pide explícitamente o cuando una visualización aportaría mucho valor):
+Para insertar un gráfico de barras usa exactamente este formato:
+<chart type="bar" title="Título aquí">
+[{"label":"Etiqueta 1","value":123456},{"label":"Etiqueta 2","value":78900}]
+</chart>
+
+Para un gráfico de línea (series temporales):
+<chart type="line" title="Título aquí">
+[{"label":"Ene 24","value":150000},{"label":"Feb 24","value":180000}]
+</chart>
+
+Reglas de gráficos:
+- Valores siempre como número sin formato (sin ₡, sin comas)
+- Máximo 12 puntos por gráfico
+- Solo tipos "bar" o "line"
+- El gráfico se inserta en el flujo del texto donde lo coloques`
 
   const stream = await anthropic.messages.stream({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: systemPrompt,
     messages,
   })
