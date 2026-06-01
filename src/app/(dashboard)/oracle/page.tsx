@@ -187,6 +187,16 @@ export default async function OraclePage() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
 
+  // Savings/investment breakdown
+  const savingsCatMap: Record<string, number> = {}
+  for (const tx of savings) {
+    const cat = resolveDisplayCat(tx, vMap, cMap)
+    savingsCatMap[cat] = (savingsCatMap[cat] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const topSavings = Object.entries(savingsCatMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+
   // FIRE metrics
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
   const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
@@ -235,6 +245,9 @@ ${nwTrend.length >= 2 ? `Patrimonio neto reciente: ${nwTrend.map(s => `${s.date}
 
 ── TOP CATEGORÍAS DE GASTO (últimos 12m) ──
 ${topCats.map(c => `${c.name.padEnd(26)} ${fmtCRC(c.amt).padStart(14)}  (${c.pct.toFixed(0)}%)`).join('\n')}
+
+── AHORRO E INVERSIÓN (últimos 12m) ──
+${topSavings.map(([k, v]) => `${k.padEnd(26)} ${fmtCRC(v).padStart(14)}  (${totalSavings > 0 ? ((v / totalSavings) * 100).toFixed(0) : 0}%)`).join('\n') || 'Sin aportes registrados'}
 
 ── INGRESOS PASIVOS (últimos 12m) ──
 ${topPassive.map(([k, v]) => `${k.padEnd(26)} ${fmtCRC(v)}`).join('\n') || 'Sin ingresos pasivos registrados'}`
