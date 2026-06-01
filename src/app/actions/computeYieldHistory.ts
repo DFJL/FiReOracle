@@ -162,7 +162,7 @@ function computeYieldRows(
     const { income_crc, delta_crc } = byMonth.get(ym)!
 
     if (income_crc > 0) {
-      const yieldPct = balance > 0 ? income_crc / balance : 0
+      const yieldPct = balance > 0 ? (income_crc / balance) * 100 : 0
       rows.push({
         user_id: userId,
         bucket_id: bucket.id,

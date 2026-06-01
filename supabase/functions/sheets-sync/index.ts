@@ -274,7 +274,6 @@ async function logSync(
   if (DRY_RUN) return
   await supabase.from('sheets_sync_log').insert({
     config_id: configId,
-    last_row_synced: lastRow,
     rows_inserted: inserted,
     rows_skipped: skipped,
     status,
