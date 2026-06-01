@@ -108,6 +108,7 @@ export function TransactionEntryFAB({
   const [aiError, setAiError]         = useState<string | null>(null)
   const [aiPrefilled, setAiPrefilled] = useState(false)
   const imgInputRef                   = useRef<HTMLInputElement>(null)
+  const galleryInputRef               = useRef<HTMLInputElement>(null)
   const pdfInputRef                   = useRef<HTMLInputElement>(null)
 
   // Leaf-only envelopes; parents only used for display label
@@ -426,19 +427,22 @@ export function TransactionEntryFAB({
                 {!aiQuestion && (
                   <div>
                     <label className={lbl}>O subí un archivo</label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button type="button"
                         onClick={() => imgInputRef.current?.click()}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors">
-                        <Camera size={13} /> Foto de recibo
+                        <Camera size={13} /> Tomar foto
                       </button>
                       <button type="button"
-                        onClick={() => pdfInputRef.current?.click()}
+                        onClick={() => galleryInputRef.current?.click()}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors">
-                        <FileText size={13} /> PDF / Factura
+                        <FileText size={13} /> Galería / PDF
                       </button>
-                      <input ref={imgInputRef} type="file" accept="image/*" className="hidden"
+                      {/* capture="environment" opens rear camera directly on mobile */}
+                      <input ref={imgInputRef} type="file" accept="image/*" capture="environment" className="hidden"
                         onChange={e => handleFileSelect(e.target.files?.[0], 'image')} />
+                      <input ref={galleryInputRef} type="file" accept="image/*,.pdf,application/pdf" className="hidden"
+                        onChange={e => handleFileSelect(e.target.files?.[0], e.target.files?.[0]?.type === 'application/pdf' ? 'pdf' : 'image')} />
                       <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" className="hidden"
                         onChange={e => handleFileSelect(e.target.files?.[0], 'pdf')} />
                     </div>
