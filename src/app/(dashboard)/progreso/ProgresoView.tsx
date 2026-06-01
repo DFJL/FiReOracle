@@ -198,10 +198,10 @@ export function ProgresoView({
       {fireNumber > 0 && (
         <MilestoneStrip
           activosInvertibles={activosInvertibles}
-          liquidBalance={liquidBalance}
           fireNumber={fireNumber}
           leanFireNumber={leanFireNumber}
           avgMonthlyExpenses={avgMonthlyExpenses}
+          forecastYears={forecastYears}
           fmt={fmt}
         />
       )}
@@ -315,26 +315,27 @@ function KpiCard({ label, value, unit, sub, color }: {
 }
 
 function MilestoneStrip({
-  activosInvertibles, liquidBalance, fireNumber, leanFireNumber,
-  avgMonthlyExpenses, fmt,
+  activosInvertibles, fireNumber, leanFireNumber,
+  avgMonthlyExpenses, forecastYears, fmt,
 }: {
   activosInvertibles: number
-  liquidBalance: number
   fireNumber: number
   leanFireNumber: number
   avgMonthlyExpenses: number
+  forecastYears: { year: number; balance: number }[]
   fmt: (v: number) => string
 }) {
-  const fuTarget = avgMonthlyExpenses * 12
+  const fuTarget  = avgMonthlyExpenses * 12
+  const nowYear   = new Date().getFullYear()
 
   const milestones = [
-    {
+    fuTarget > 0 ? {
       label: 'FU Money',
-      desc: '12m líquido',
+      desc: '12m de gastos',
       target: fuTarget,
-      current: liquidBalance,
+      current: activosInvertibles,
       color: '#f59e0b',
-    },
+    } : null,
     leanFireNumber > 0 ? {
       label: 'Lean FI',
       desc: 'gastos básicos',
@@ -363,8 +364,13 @@ function MilestoneStrip({
       <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-3">Hitos FIRE</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {milestones.map(m => {
-          const pct     = Math.min(m.current / m.target, 1)
+          const pct      = Math.min(m.current / m.target, 1)
           const achieved = pct >= 1
+          const hitPoint = !achieved
+            ? forecastYears.find(p => p.balance >= m.target)
+            : null
+          const estYear  = hitPoint ? nowYear + hitPoint.year : null
+
           return (
             <div
               key={m.label}
@@ -394,10 +400,14 @@ function MilestoneStrip({
               <p className="text-sm font-black leading-none" style={{ color: achieved ? '#a3e635' : m.color }}>
                 {(pct * 100).toFixed(0)}%
               </p>
-              {!achieved ? (
-                <p className="text-[9px] text-zinc-600 mt-0.5">falta {fmt(m.target - m.current)}</p>
-              ) : (
+              {achieved ? (
                 <p className="text-[9px] text-[#a3e635]/60 mt-0.5">alcanzado</p>
+              ) : estYear !== null ? (
+                <p className="text-[9px] mt-0.5" style={{ color: m.color, opacity: 0.7 }}>
+                  ~{estYear} · falta {fmt(m.target - m.current)}
+                </p>
+              ) : (
+                <p className="text-[9px] text-zinc-600 mt-0.5">falta {fmt(m.target - m.current)}</p>
               )}
             </div>
           )
