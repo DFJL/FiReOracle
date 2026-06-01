@@ -28,6 +28,7 @@ export interface AccountSummary {
 
 type TabKey        = 'gastos' | 'ingresos'
 type IncomeSubtab  = 'activo' | 'pasivo'
+type EgresosSubtab = 'gastos' | 'ahorros' | 'inversiones'
 type PeriodKey     = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -170,6 +171,10 @@ function isSavings(tx: TxClient) {
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
   return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
 }
+
+const INVEST_CODES = new Set(['SAVINGS_INVESTMENT'])
+const isInvestment = (tx: TxClient) =>
+  INVEST_CODES.has(tx.category_code ?? inferCategory(tx.vendor, tx.concept, null))
 
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:   isOutflow,
@@ -568,7 +573,7 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
 ]
 
 const TABS: { key: TabKey; label: string; color: string }[] = [
-  { key: 'gastos',   label: 'Gastos',   color: 'rgb(251 113 133)' },
+  { key: 'gastos',   label: 'Egresos',  color: 'rgb(251 113 133)' },
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
@@ -580,7 +585,8 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
 }) {
   const [period, setPeriod]         = useState<PeriodKey>('all')
   const [tab, setTab]               = useState<TabKey>('gastos')
-  const [incomeSubtab, setIncomeSub] = useState<IncomeSubtab>('activo')
+  const [incomeSubtab, setIncomeSub]     = useState<IncomeSubtab>('activo')
+  const [egresosSubtab, setEgresosSub]   = useState<EgresosSubtab>('gastos')
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
   const [currency, setCurrency]     = useState<'CRC' | 'USD'>(defaultCurrency ?? 'USD')
@@ -605,7 +611,8 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
   }
 
   function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
-  function selectIncomeSub(s: IncomeSubtab) { setIncomeSub(s); setSelCat(null); setSelSub(null) }
+  function selectIncomeSub(s: IncomeSubtab)    { setIncomeSub(s); setSelCat(null); setSelSub(null) }
+  function selectEgresosSub(s: EgresosSubtab)  { setEgresosSub(s); setSelCat(null); setSelSub(null) }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
 
   // Build learning maps from ALL transactions (full history, not period-filtered)
@@ -619,15 +626,19 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
     cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions,
   [transactions, cutoff])
 
-  // Tab filter — ingresos further split by subtab
-  const tabFilter = TAB_FILTER[tab]
+  // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
   const tabTxs = useMemo(() => {
-    const base = periodTxs.filter(tabFilter)
-    if (tab !== 'ingresos') return base
+    if (tab === 'gastos') {
+      if (egresosSubtab === 'gastos')     return periodTxs.filter(isOutflow)
+      const savTxs = periodTxs.filter(isSavings)
+      if (egresosSubtab === 'inversiones') return savTxs.filter(isInvestment)
+      return savTxs.filter(tx => !isInvestment(tx))  // ahorros
+    }
+    const base = periodTxs.filter(TAB_FILTER['ingresos'])
     return incomeSubtab === 'activo'
       ? base.filter(tx => isLiquidIncome(tx) && !tx.is_passive_income)
       : base.filter(tx => (tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement) || isPatrimonialIncome(tx))
-  }, [periodTxs, tab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [periodTxs, tab, egresosSubtab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Monthly trend — all series from periodTxs, independent of tab
   const trendPoints = useMemo((): SeriesPoint[] => {
@@ -710,7 +721,8 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
     ? (cats.find(c => c.category === selCat)?.amount ?? 0)
     : cats.reduce((s, c) => s + c.amount, 0)
 
-  const tableTitle = selSub || selCat || TABS.find(t => t.key === tab)!.label
+  const egresosSubtabLabel: Record<EgresosSubtab, string> = { gastos: 'Gastos', ahorros: 'Ahorros', inversiones: 'Inversiones' }
+  const tableTitle = selSub || selCat || (tab === 'gastos' ? egresosSubtabLabel[egresosSubtab] : 'Ingresos')
 
   // KPIs for current period
   const kpis = useMemo(() => {
@@ -887,6 +899,27 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
       </div>
 
       {showDetail && (<>
+        {/* ── Egresos subtabs ──────────────────────────────────────────────── */}
+        {tab === 'gastos' && (
+          <div className="flex gap-1 mb-4 ml-1">
+            {([
+              { key: 'gastos'     as EgresosSubtab, label: 'Gastos',     desc: 'Consumo · compras · servicios' },
+              { key: 'ahorros'    as EgresosSubtab, label: 'Ahorros',    desc: 'Pensión · fondo emergencia' },
+              { key: 'inversiones' as EgresosSubtab, label: 'Inversiones', desc: 'Fondos · acciones · crypto' },
+            ]).map(s => (
+              <button key={s.key} onClick={() => selectEgresosSub(s.key)}
+                className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
+                  egresosSubtab === s.key
+                    ? 'bg-rose-500/10 border-rose-500/30'
+                    : 'border-transparent hover:bg-white/[0.03]'
+                }`}>
+                <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${egresosSubtab === s.key ? 'text-rose-400' : 'text-zinc-500'}`}>{s.label}</span>
+                <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
         {tab === 'ingresos' && (
           <div className="flex gap-1 mb-4 ml-1">
