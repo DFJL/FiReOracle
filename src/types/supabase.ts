@@ -731,6 +731,56 @@ export type Database = {
           },
         ]
       }
+      investment_yield_history: {
+        Row: {
+          bucket_id: string | null
+          created_at: string | null
+          exchange_rate: number
+          id: string
+          invested_usd: number
+          product_name: string
+          source: string
+          user_id: string
+          year_month: string
+          yield_pct: number
+          yield_usd: number
+        }
+        Insert: {
+          bucket_id?: string | null
+          created_at?: string | null
+          exchange_rate?: number
+          id?: string
+          invested_usd?: number
+          product_name: string
+          source?: string
+          user_id: string
+          year_month: string
+          yield_pct?: number
+          yield_usd?: number
+        }
+        Update: {
+          bucket_id?: string | null
+          created_at?: string | null
+          exchange_rate?: number
+          id?: string
+          invested_usd?: number
+          product_name?: string
+          source?: string
+          user_id?: string
+          year_month?: string
+          yield_pct?: number
+          yield_usd?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investment_yield_history_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "user_investment_buckets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       liabilities: {
         Row: {
           as_of_date: string
@@ -775,76 +825,34 @@ export type Database = {
       }
       net_worth_items: {
         Row: {
-          id: string
-          user_id: string
-          snapshot_date: string
           category: string
-          item_name: string
-          value_crc: number
-          sort_order: number
           created_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          snapshot_date: string
-          category: string
-          item_name: string
-          value_crc: number
-          sort_order?: number
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          snapshot_date?: string
-          category?: string
-          item_name?: string
-          value_crc?: number
-          sort_order?: number
-          created_at?: string
-        }
-        Relationships: []
-      }
-      investment_yield_history: {
-        Row: {
           id: string
+          item_name: string
+          snapshot_date: string
+          sort_order: number
           user_id: string
-          bucket_id: string | null
-          product_name: string
-          year_month: string
-          yield_usd: number
-          invested_usd: number
-          yield_pct: number
-          exchange_rate: number
-          source: string
-          created_at: string | null
+          value_crc: number
         }
         Insert: {
+          category: string
+          created_at?: string
           id?: string
+          item_name: string
+          snapshot_date: string
+          sort_order?: number
           user_id: string
-          bucket_id?: string | null
-          product_name: string
-          year_month: string
-          yield_usd?: number
-          invested_usd?: number
-          yield_pct?: number
-          exchange_rate?: number
-          source?: string
-          created_at?: string | null
+          value_crc?: number
         }
         Update: {
+          category?: string
+          created_at?: string
           id?: string
+          item_name?: string
+          snapshot_date?: string
+          sort_order?: number
           user_id?: string
-          bucket_id?: string | null
-          product_name?: string
-          year_month?: string
-          yield_usd?: number
-          invested_usd?: number
-          yield_pct?: number
-          exchange_rate?: number
-          source?: string
-          created_at?: string | null
+          value_crc?: number
         }
         Relationships: []
       }
@@ -1422,6 +1430,7 @@ export type Database = {
           group_gasto: string | null
           is_active: boolean
           is_passive_income: boolean
+          is_settlement: boolean
           is_survival_expense: boolean
           name: string
           parent_code: string | null
@@ -1434,6 +1443,7 @@ export type Database = {
           group_gasto?: string | null
           is_active?: boolean
           is_passive_income?: boolean
+          is_settlement?: boolean
           is_survival_expense?: boolean
           name: string
           parent_code?: string | null
@@ -1446,6 +1456,7 @@ export type Database = {
           group_gasto?: string | null
           is_active?: boolean
           is_passive_income?: boolean
+          is_settlement?: boolean
           is_survival_expense?: boolean
           name?: string
           parent_code?: string | null

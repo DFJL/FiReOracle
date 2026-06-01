@@ -18,7 +18,7 @@ export async function TransactionEntryWrapper() {
       .order('sort_order'),
     admin
       .from('transaction_categories')
-      .select('code, name, parent_code, category_type, group_gasto, is_passive_income')
+      .select('code, name, parent_code, category_type, group_gasto, is_passive_income, is_survival_expense, is_settlement')
       .eq('is_active', true)
       .order('sort_order'),
   ])

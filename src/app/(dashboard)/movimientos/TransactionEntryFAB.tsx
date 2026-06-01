@@ -7,7 +7,8 @@ import { createTransaction, type TxEntryType } from '@/app/actions/transactions'
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type Category = {
   code: string; name: string; parent_code: string | null
-  category_type: string; group_gasto: string | null; is_passive_income: boolean
+  category_type: string; group_gasto: string | null
+  is_passive_income: boolean; is_survival_expense: boolean; is_settlement: boolean
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -97,12 +98,18 @@ export function TransactionEntryFAB({
   const parentIds = new Set(envelopes.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
   const leafEnvelopes = envelopes.filter(e => !parentIds.has(e.id))
 
-  // Auto-derive expense_group from selected category
+  // Auto-derive all classification flags from selected category
   useEffect(() => {
-    if (!categoryCode) return
+    if (!categoryCode) {
+      setIsPassive(false); setIsSettlement(false); setIsSurvival(false)
+      return
+    }
     const cat = categories.find(c => c.code === categoryCode)
-    if (cat?.group_gasto && cat.group_gasto !== 'na') setExpenseGroup(cat.group_gasto)
-    if (cat?.is_passive_income) setIsPassive(true)
+    if (!cat) return
+    if (cat.group_gasto && cat.group_gasto !== 'na') setExpenseGroup(cat.group_gasto)
+    setIsPassive(cat.is_passive_income)
+    setIsSettlement(cat.is_settlement)
+    setIsSurvival(cat.is_survival_expense)
   }, [categoryCode, categories])
 
   function reset() {
@@ -249,13 +256,6 @@ export function TransactionEntryFAB({
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
-  const toggle = (checked: boolean, onChange: (v: boolean) => void, label: string) => (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
-        className="w-3.5 h-3.5 rounded accent-[#a3e635]" />
-      <span className="text-xs text-zinc-400">{label}</span>
-    </label>
-  )
 
   return (
     <>
@@ -377,10 +377,12 @@ export function TransactionEntryFAB({
                       </select>
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-4">
-                    {toggle(isSettlement, setIsSettlement, 'Liquidación de inversión (is_settlement)')}
-                    {toggle(isSurvival, setIsSurvival, 'Gasto de supervivencia')}
-                  </div>
+                  {(isSettlement || isSurvival) && (
+                    <div className="flex flex-wrap gap-2">
+                      {isSurvival  && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20">Gasto de supervivencia</span>}
+                      {isSettlement && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 border border-blue-400/20">Liquidación de inversión</span>}
+                    </div>
+                  )}
                 </>
               )}
 
@@ -402,13 +404,15 @@ export function TransactionEntryFAB({
                   <div>
                     <label className={lbl}>Categoría</label>
                     <CategorySelect categories={categories} value={categoryCode}
-                      onChange={v => { setCategoryCode(v); const c = categories.find(x => x.code === v); if (c?.is_passive_income) setIsPassive(true) }}
+                      onChange={v => setCategoryCode(v)}
                       typeFilter="income" className={inputCls} />
                   </div>
-                  <div className="flex flex-wrap gap-4">
-                    {toggle(isPassive, setIsPassive, 'Ingreso pasivo (dividendo, rendimiento, alquiler…)')}
-                    {toggle(isSettlement, setIsSettlement, 'Liquidación de inversión (excluir de ingreso real)')}
-                  </div>
+                  {(isPassive || isSettlement) && (
+                    <div className="flex flex-wrap gap-2">
+                      {isPassive    && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">Ingreso pasivo</span>}
+                      {isSettlement && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 border border-blue-400/20">Liquidación de inversión</span>}
+                    </div>
+                  )}
                 </>
               )}
 
