@@ -15,6 +15,7 @@ import {
   BarChart2,
   Settings,
   Wallet,
+  Target,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: '/liquidez',     label: 'Liquidez',      icon: <Wallet size={16} /> },
   { href: '/prestamos',    label: 'Préstamos',     icon: <Users size={16} /> },
   { href: '/patrimonio',   label: 'Patrimonio',    icon: <Landmark size={16} /> },
+  { href: '/progreso',     label: 'Progreso FIRE', icon: <Target size={16} /> },
   { href: '/oracle',       label: 'Oracle',        icon: <Sparkles size={16} /> },
 ]
 
@@ -33,7 +35,7 @@ const NAV_ITEMS = [
 const BOTTOM_NAV = [
   { href: '/resumen',    label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
   { href: '/patrimonio', label: 'Patrimonio', icon: <Landmark size={20} /> },
-  { href: '/flujo',      label: 'Flujo',      icon: <BarChart2 size={20} /> },
+  { href: '/progreso',   label: 'FIRE',       icon: <Target size={20} /> },
   { href: '/inversiones', label: 'Portafolio', icon: <TrendingUp size={20} /> },
   { href: '/liquidez',   label: 'Liquidez',   icon: <Wallet size={20} /> },
 ]

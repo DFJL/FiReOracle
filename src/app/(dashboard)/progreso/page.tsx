@@ -1,0 +1,198 @@
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { ProgresoView } from './ProgresoView'
+
+type ConceptMap = {
+  depositConcepts: string[]
+  rendimientosConcepts: string[]
+  valorizacionConcepts: string[]
+  liquidacionConcepts: string[]
+}
+
+function isValuation(concept: string | null) {
+  return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
+}
+
+export default async function ProgresoPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const admin = createAdminClient()
+
+  const cutoff = new Date()
+  cutoff.setMonth(cutoff.getMonth() - 14)
+  const cutoffDate = cutoff.toISOString().slice(0, 10)
+
+  const [
+    { data: fireConfig },
+    { data: bucketRows },
+    { data: txs },
+    { data: movements },
+    { data: envelopes },
+    { data: assetRows },
+    { data: snapshotRows },
+  ] = await Promise.all([
+    admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
+    admin.from('user_investment_buckets')
+      .select('id, name, bucket_type, vendors, concept_map, account_id')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('transactions')
+      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, date, category_code')
+      .eq('user_id', user.id)
+      .not('amount', 'is', null),
+    admin.from('envelope_movements')
+      .select('amount, movement_type, envelope_id')
+      .eq('user_id', user.id),
+    admin.from('savings_envelopes')
+      .select('id, parent_envelope_id')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('assets')
+      .select('value_crc, is_investable')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('net_worth_snapshots')
+      .select('snapshot_date, net_worth_crc, invested_crc')
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: true }),
+  ])
+
+  // Snapshot-based bucket balances
+  const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
+  const snapshotResults = await Promise.all(
+    snapshotBuckets.map(async b => {
+      const { data } = await admin
+        .from('account_balance_snapshots')
+        .select('real_balance')
+        .eq('account_id', b.account_id!)
+        .order('snapshot_date', { ascending: false })
+        .limit(1).maybeSingle()
+      return { id: b.id, balance: data?.real_balance ? Number(data.real_balance) : 0 }
+    })
+  )
+  const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
+
+  // Liquid balance (leaf envelopes only)
+  const parentEnvelopeIds = new Set(
+    (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
+  )
+  const liquidBalance = (movements ?? [])
+    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
+    .reduce((s, m) => s + Number(m.amount), 0)
+
+  // Total invested (same logic as patrimonio page)
+  let totalInvested = 0
+  for (const def of bucketRows ?? []) {
+    if (def.bucket_type === 'snapshot_based') {
+      totalInvested += snapshotBalances[def.id] ?? 0
+      continue
+    }
+    let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0
+    for (const tx of txs ?? []) {
+      const amt = Number(tx.amount ?? 0)
+      if (def.bucket_type === 'concept_based' && def.concept_map) {
+        const cm = def.concept_map as unknown as ConceptMap
+        const c = tx.concept ?? ''
+        if (cm.depositConcepts.includes(c))           deposits += amt
+        else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
+        else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
+        else if (cm.liquidacionConcepts.includes(c))   liquidaciones += amt
+      } else if (def.bucket_type === 'vendor_based') {
+        const txVendor = (tx.vendor ?? '').toLowerCase().trim()
+        const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
+        if (!vendors.includes(txVendor)) continue
+        if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
+        else if (tx.is_settlement)                                               liquidaciones += amt
+        else if (tx.is_passive_income && tx.movement_type === 'income')          rendimientos += amt
+        else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
+      }
+    }
+    totalInvested += deposits + passiveValuation + rendimientos - liquidaciones
+  }
+
+  const iliquidInvestable = (assetRows ?? [])
+    .filter(a => a.is_investable)
+    .reduce((s, a) => s + Number(a.value_crc), 0)
+
+  const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
+
+  // Last 12-month averages
+  const recent = (txs ?? []).filter(tx => tx.date && tx.date >= cutoffDate)
+
+  const avgMonthlyExpenses = recent
+    .filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      tx.expense_group !== 'objetivos_financieros' &&
+      !isValuation(tx.concept)
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  const avgMonthlyIncome = recent
+    .filter(tx => tx.movement_type === 'income' && !tx.is_settlement && !tx.is_passive_income)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  const passiveIncome12m = recent
+    .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+  const realizedReturnRate = totalInvested > 0 && passiveIncome12m > 0
+    ? passiveIncome12m / totalInvested
+    : null
+
+  // FIRE metrics
+  const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
+  const targetExp  = fireConfig?.fire_target_monthly_exp ?? 0
+  const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
+  const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
+  const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
+  const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
+  const runway     = avgMonthlyExpenses > 0 ? liquidBalance / avgMonthlyExpenses : 0
+
+  // Year-by-year forecast
+  const monthlyReturn      = Math.pow(1 + expReturn, 1 / 12) - 1
+  const avgMonthlySavings  = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
+  const forecastYears: { year: number; balance: number }[] = []
+
+  if (fireNumber > 0) {
+    let balance = activosInvertibles
+    for (let y = 0; y <= 40; y++) {
+      forecastYears.push({ year: y, balance })
+      if (balance >= fireNumber && y > 0) break
+      for (let m = 0; m < 12; m++) {
+        balance = balance * (1 + monthlyReturn) + avgMonthlySavings
+      }
+    }
+  }
+
+  const exchangeRate = await fetchExchangeRate()
+
+  return (
+    <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
+      <ProgresoView
+        activosInvertibles={activosInvertibles}
+        liquidBalance={liquidBalance}
+        totalInvested={totalInvested}
+        fireNumber={fireNumber}
+        fireProgress={fireProgress}
+        runway={runway}
+        avgMonthlyExpenses={avgMonthlyExpenses}
+        avgMonthlyIncome={avgMonthlyIncome}
+        passiveIncome12m={passiveIncome12m}
+        realizedReturnRate={realizedReturnRate}
+        forecastYears={forecastYears}
+        snapshots={(snapshotRows ?? []).map(s => ({
+          snapshot_date: s.snapshot_date,
+          net_worth_crc: Number(s.net_worth_crc),
+          invested_crc:  Number(s.invested_crc ?? 0),
+        }))}
+        exchangeRate={exchangeRate}
+        fireConfig={{
+          swr, targetExp, expReturn, inflation,
+        }}
+        runwayGreen={fireConfig?.runway_green_months  ?? 6}
+        runwayYellow={fireConfig?.runway_yellow_months ?? 3}
+      />
+    </div>
+  )
+}
