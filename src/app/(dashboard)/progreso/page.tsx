@@ -56,7 +56,7 @@ export default async function ProgresoPage() {
       .select('value_crc, is_investable')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('net_worth_snapshots')
-      .select('snapshot_date, net_worth_crc, invested_crc')
+      .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true }),
   ])
@@ -140,8 +140,15 @@ export default async function ProgresoPage() {
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
+  // Include settlement income — salary may be tagged as settlement in some setups
   const avgMonthlyIncome = recent
-    .filter(tx => tx.movement_type === 'income' && !tx.is_settlement && !tx.is_passive_income)
+    .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  // Actual investment deposits — used as monthly savings for forecast & savings rate
+  const avgMonthlyDeposits = recent
+    .filter(tx => tx.expense_group === 'objetivos_financieros' && !tx.is_settlement &&
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal'))
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
   const passiveIncome12m = recent
@@ -172,8 +179,8 @@ export default async function ProgresoPage() {
     : 0
 
   // Year-by-year forecast
-  const monthlyReturn      = Math.pow(1 + expReturn, 1 / 12) - 1
-  const avgMonthlySavings  = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
+  const monthlyReturn     = Math.pow(1 + expReturn, 1 / 12) - 1
+  const avgMonthlySavings = avgMonthlyDeposits
   const forecastYears: { year: number; balance: number }[] = []
 
   if (fireNumber > 0) {
@@ -202,6 +209,7 @@ export default async function ProgresoPage() {
         avgMonthlyExpenses={avgMonthlyExpenses}
         avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         avgMonthlyIncome={avgMonthlyIncome}
+        avgMonthlyDeposits={avgMonthlyDeposits}
         passiveIncome12m={passiveIncome12m}
         realizedReturnRate={realizedReturnRate}
         forecastYears={forecastYears}
@@ -209,6 +217,7 @@ export default async function ProgresoPage() {
           snapshot_date: s.snapshot_date,
           net_worth_crc: Number(s.net_worth_crc),
           invested_crc:  Number(s.invested_crc ?? 0),
+          liquid_crc:    Number((s as { liquid_crc?: number | null }).liquid_crc ?? 0),
         }))}
         exchangeRate={exchangeRate}
         fireConfig={{

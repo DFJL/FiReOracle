@@ -15,10 +15,11 @@ type Props = {
   avgMonthlyExpenses: number
   avgMonthlySurvivalExpenses: number
   avgMonthlyIncome: number
+  avgMonthlyDeposits: number
   passiveIncome12m: number
   realizedReturnRate: number | null
   forecastYears: { year: number; balance: number }[]
-  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number }[]
+  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
   exchangeRate: ExchangeRate
   fireConfig: { swr: number; targetExp: number; expReturn: number; inflation: number }
   runwayGreen: number
@@ -37,7 +38,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
   fireNumber, leanFireNumber, fireProgress, runway,
-  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome,
+  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
   fireConfig, runwayGreen, runwayYellow,
@@ -46,10 +47,9 @@ export function ProgresoView({
   const rate = exchangeRate.sell
   const fmt  = (v: number) => fmtAmt(v, currency, rate)
 
-  const savingsRate    = avgMonthlyIncome > 0
-    ? Math.max(0, (avgMonthlyIncome - avgMonthlyExpenses) / avgMonthlyIncome)
-    : 0
-  const monthlySavings = Math.max(0, avgMonthlyIncome - avgMonthlyExpenses)
+  // Savings rate = investment deposits / total income
+  const savingsRate    = avgMonthlyIncome > 0 ? Math.min(avgMonthlyDeposits / avgMonthlyIncome, 1) : 0
+  const monthlySavings = avgMonthlyDeposits
 
   const passiveMonthlyAvg = passiveIncome12m / 12
   const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
@@ -277,11 +277,21 @@ export function ProgresoView({
         rate={rate}
       />
 
+      {/* FU Money chart */}
+      <FuMoneyChart
+        snapshots={snapshots}
+        avgMonthlyExpenses={avgMonthlyExpenses}
+        runwayGreen={runwayGreen}
+        runwayYellow={runwayYellow}
+        currency={currency}
+        rate={rate}
+      />
+
       {/* Footer hint */}
       {fireNumber > 0 && (
         <p className="text-[10px] text-zinc-700 text-center pb-2">
           Proyección: {(fireConfig.expReturn * 100).toFixed(0)}% retorno anual ·{' '}
-          {fmt(monthlySavings)}/mes aporte ·{' '}
+          {fmt(monthlySavings)}/mes aportado ·{' '}
           <Link href="/configuracion" className="underline hover:text-zinc-500 transition-colors">
             ajustar parámetros
           </Link>
@@ -397,10 +407,176 @@ function MilestoneStrip({
   )
 }
 
+function FuMoneyChart({
+  snapshots, avgMonthlyExpenses, runwayGreen, runwayYellow, currency, rate,
+}: {
+  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
+  avgMonthlyExpenses: number
+  runwayGreen: number
+  runwayYellow: number
+  currency: 'CRC' | 'USD'
+  rate: number
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  if (avgMonthlyExpenses <= 0) return null
+
+  const points = snapshots
+    .filter(s => s.liquid_crc > 0)
+    .map(s => ({
+      ms: new Date(s.snapshot_date + 'T12:00:00').getTime(),
+      months: s.liquid_crc / avgMonthlyExpenses,
+      liquid: s.liquid_crc,
+    }))
+    .sort((a, b) => a.ms - b.ms)
+
+  if (points.length < 2) return null
+
+  const W = 800, H = 160
+  const padL = 44, padR = 20, padT = 16, padB = 36
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+
+  const minMs   = points[0].ms
+  const maxMs   = points[points.length - 1].ms
+  const msRange = maxMs - minMs
+
+  const maxMonths = Math.max(...points.map(p => p.months), runwayGreen + 2)
+  const xOf = (ms: number)     => padL + ((ms - minMs) / msRange) * chartW
+  const yOf = (v: number)      => padT + chartH - (Math.min(v, maxMonths * 1.1) / (maxMonths * 1.1)) * chartH
+
+  const linePath = points.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${xOf(p.ms).toFixed(1)},${yOf(p.months).toFixed(1)}`
+  ).join(' ')
+
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms)
+    return `${d.toLocaleString('es', { month: 'short' })} ${d.getFullYear()}`
+  }
+
+  const sym = currency === 'CRC' ? '₡' : '$'
+  const fmtLiquid = (v: number) => {
+    const val = currency === 'CRC' ? v : v / rate
+    const abs = Math.abs(val)
+    if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(1)}M`
+    if (abs >= 1_000)     return `${sym}${(val / 1_000).toFixed(0)}K`
+    return `${sym}${Math.round(val)}`
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const svgX = ((e.clientX - rect.left) / rect.width) * W
+    const targetMs = minMs + ((svgX - padL) / chartW) * msRange
+    let best = 0
+    points.forEach((p, i) => {
+      if (Math.abs(p.ms - targetMs) < Math.abs(points[best].ms - targetMs)) best = i
+    })
+    setHoverIdx(best)
+  }
+
+  const startYear = new Date(minMs).getFullYear()
+  const endYear   = new Date(maxMs).getFullYear()
+  const xLabels: { x: number; label: string }[] = []
+  for (let y = startYear + 1; y <= endYear; y++) {
+    const ms = new Date(y, 0, 1).getTime()
+    if (ms >= minMs && ms <= maxMs) xLabels.push({ x: xOf(ms), label: String(y) })
+  }
+
+  const hovered = hoverIdx !== null ? points[hoverIdx] : null
+
+  return (
+    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">Liquidez / gasto mensual promedio — histórico</p>
+        </div>
+        {hovered && (
+          <span className="text-[10px] text-zinc-300">
+            {fmtDate(hovered.ms)}:{' '}
+            <span className="font-bold" style={{
+              color: hovered.months >= runwayGreen ? '#a3e635' :
+                     hovered.months >= runwayYellow ? '#f59e0b' : '#f43f5e'
+            }}>
+              {hovered.months.toFixed(1)}m
+            </span>
+            <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.liquid)})</span>
+          </span>
+        )}
+      </div>
+
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        style={{ height: 140 }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        {/* Threshold lines */}
+        {[
+          { v: runwayGreen,  color: '#a3e635', label: `${runwayGreen}m verde` },
+          { v: runwayYellow, color: '#f59e0b', label: `${runwayYellow}m amarillo` },
+        ].filter(t => t.v <= maxMonths * 1.1).map(t => (
+          <g key={t.label}>
+            <line x1={padL} x2={W - padR} y1={yOf(t.v)} y2={yOf(t.v)}
+              stroke={t.color} strokeWidth={1} strokeDasharray="5 3" opacity={0.35} />
+            <text x={W - padR - 2} y={yOf(t.v) - 3} textAnchor="end" fontSize={8} fill={t.color} opacity={0.6}>
+              {t.label}
+            </text>
+          </g>
+        ))}
+
+        {/* Y ticks */}
+        {[0, Math.round(maxMonths * 0.5), Math.round(maxMonths)].map(v => (
+          <text key={v} x={padL - 5} y={yOf(v) + 4} textAnchor="end" fontSize={8} fill="#52525b">
+            {v}m
+          </text>
+        ))}
+
+        {/* Area fill */}
+        <defs>
+          <linearGradient id="fu-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path
+          d={`${linePath} L${xOf(maxMs).toFixed(1)},${padT + chartH} L${padL},${padT + chartH} Z`}
+          fill="url(#fu-grad)"
+        />
+
+        {/* Line — color by current threshold */}
+        <path d={linePath} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Hover crosshair */}
+        {hovered && (
+          <g>
+            <line x1={xOf(hovered.ms)} x2={xOf(hovered.ms)} y1={padT} y2={padT + chartH}
+              stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
+            <circle cx={xOf(hovered.ms)} cy={yOf(hovered.months)} r={4}
+              fill={hovered.months >= runwayGreen ? '#a3e635' : hovered.months >= runwayYellow ? '#f59e0b' : '#f43f5e'}
+              stroke="#080c08" strokeWidth={2} />
+          </g>
+        )}
+
+        {/* X labels */}
+        {xLabels.map((l, i) => (
+          <text key={i} x={l.x} y={H - padB + 20} textAnchor="middle" fontSize={9} fill="#52525b">
+            {l.label}
+          </text>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
 function CombinedChart({
   snapshots, forecast, fireNumber, leanFireNumber, currency, rate,
 }: {
-  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number }[]
+  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
   forecast: { year: number; balance: number }[]
   fireNumber: number
   leanFireNumber: number
@@ -427,10 +603,10 @@ function CombinedChart({
 
   const now = new Date()
 
-  // Historical points
+  // Historical points — use net_worth_crc so scale matches the forecast
   const histPoints = snapshots
-    .filter(s => s.invested_crc > 0)
-    .map(s => ({ ms: new Date(s.snapshot_date + 'T12:00:00').getTime(), val: s.invested_crc }))
+    .filter(s => s.net_worth_crc > 0)
+    .map(s => ({ ms: new Date(s.snapshot_date + 'T12:00:00').getTime(), val: s.net_worth_crc }))
     .sort((a, b) => a.ms - b.ms)
 
   // Forecast points — anchor year 0 at today
@@ -519,11 +695,11 @@ function CombinedChart({
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Histórico + Proyección</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Patrimonio histórico + Proyección FIRE</p>
         <div className="flex items-center gap-4 text-[9px] text-zinc-500">
           {histPoints.length >= 2 && (
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-0.5 rounded bg-[#22d3ee]" />Real
+              <span className="inline-block w-3 h-0.5 rounded bg-[#22d3ee]" />Patrimonio neto
             </span>
           )}
           {forecastPoints.length >= 2 && (
