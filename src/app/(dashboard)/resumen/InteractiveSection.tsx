@@ -828,27 +828,6 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
         ))}
       </div>
 
-      {/* ── Content tabs + collapse toggle ────────────────────────────────── */}
-      <div className="flex items-center gap-1 mb-5">
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => { selectTab(t.key); setShowDetail(true) }}
-            className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
-              tab === t.key
-                ? t.key === 'gastos'
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  : 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
-                : 'border-transparent text-zinc-600 hover:text-zinc-400'
-            }`}>
-            {t.label}
-          </button>
-        ))}
-        <button onClick={() => setShowDetail(v => !v)}
-          className="ml-auto flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors">
-          <span className="text-[9px] font-black uppercase tracking-wider">{showDetail ? 'Ocultar' : 'Ver detalle'}</span>
-          <ChevronDown size={12} className={`transition-transform ${showDetail ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
-
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] mb-4 overflow-hidden">
         <button onClick={() => setShowTrend(v => !v)}
@@ -884,6 +863,27 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
             </button>
           )
         }
+      </div>
+
+      {/* ── Content tabs ──────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 mb-4">
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => { selectTab(t.key); setShowDetail(true) }}
+            className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
+              tab === t.key
+                ? t.key === 'gastos'
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  : 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+        <button onClick={() => setShowDetail(v => !v)}
+          className="ml-auto flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors">
+          <span className="text-[9px] font-black uppercase tracking-wider">{showDetail ? 'Ocultar' : 'Ver detalle'}</span>
+          <ChevronDown size={12} className={`transition-transform ${showDetail ? 'rotate-180' : ''}`} />
+        </button>
       </div>
 
       {showDetail && (<>
