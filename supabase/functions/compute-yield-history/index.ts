@@ -228,16 +228,30 @@ async function processUser(
 
   if (allRows.length === 0) return 0
 
+  // Protect imported rows — skip months already covered by manual imports
+  const { data: importedRows } = await supabase
+    .from('investment_yield_history')
+    .select('product_name, year_month')
+    .eq('user_id', userId)
+    .eq('source', 'imported')
+
+  const importedKeys = new Set(
+    (importedRows ?? []).map((r: { product_name: string; year_month: string }) => `${r.product_name}|${r.year_month}`)
+  )
+  const rowsToUpsert = allRows.filter(r => !importedKeys.has(`${r.product_name}|${r.year_month}`))
+
+  if (rowsToUpsert.length === 0) return 0
+
   const { error: upsertErr } = await supabase
     .from('investment_yield_history')
-    .upsert(allRows, { onConflict: 'user_id,product_name,year_month' })
+    .upsert(rowsToUpsert, { onConflict: 'user_id,product_name,year_month' })
 
   if (upsertErr) {
     console.error(`[${userId}] upsert error:`, upsertErr.message)
     return 0
   }
 
-  return allRows.length
+  return rowsToUpsert.length
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

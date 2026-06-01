@@ -246,10 +246,26 @@ export async function computeYieldHistory(): Promise<{
     return { error: null, rows: 0 }
   }
 
-  // 6. Upsert computed rows
+  // 6. Protect imported rows — only upsert months not already covered by manual imports
+  const { data: importedRows } = await admin
+    .from('investment_yield_history')
+    .select('product_name, year_month')
+    .eq('user_id', user.id)
+    .eq('source', 'imported')
+
+  const importedKeys = new Set(
+    (importedRows ?? []).map((r: { product_name: string; year_month: string }) => `${r.product_name}|${r.year_month}`)
+  )
+  const rowsToUpsert = allRows.filter(r => !importedKeys.has(`${r.product_name}|${r.year_month}`))
+
+  if (rowsToUpsert.length === 0) {
+    revalidatePath('/inversiones')
+    return { error: null, rows: 0 }
+  }
+
   const { error: upsertErr } = await admin
     .from('investment_yield_history')
-    .upsert(allRows, { onConflict: 'user_id,product_name,year_month' })
+    .upsert(rowsToUpsert, { onConflict: 'user_id,product_name,year_month' })
 
   if (upsertErr) return { error: upsertErr.message, rows: 0 }
 

@@ -53,7 +53,6 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
 
   const filtered = rows.filter(r => r.year_month >= cutoff)
   const months   = [...new Set(filtered.map(r => r.year_month))].sort()
-  const products = [...new Set(rows.map(r => r.product_name))]
 
   // Per-product lookup for chart: product → month → yield_pct
   const lookup: Record<string, Record<string, number>> = {}
@@ -62,19 +61,21 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
     lookup[r.product_name][r.year_month] = r.yield_pct
   }
 
-  // 12-month summary
-  const cutoff12 = new Date(now.getFullYear(), now.getMonth() - 12, 1).toISOString().slice(0, 10)
-  const recent12 = rows.filter(r => r.year_month >= cutoff12)
+  const rangeLabel = rangeMonths === 0 ? 'todo' : `${rangeMonths}m`
 
-  const summaries = products.map(name => {
-    const pr      = recent12.filter(r => r.product_name === name)
+  // Summary cards — only products with yield data in the selected range
+  const summaries = [...new Set(filtered.map(r => r.product_name))].map(name => {
+    const pr      = filtered.filter(r => r.product_name === name)
     const nonZero = pr.filter(r => r.yield_pct > 0)
     const avg     = nonZero.length > 0 ? nonZero.reduce((s, r) => s + r.yield_pct, 0) / nonZero.length : 0
     const ann     = (Math.pow(1 + avg / 100, 12) - 1) * 100
     const totalUsd = pr.reduce((s, r) => s + r.yield_usd, 0)
     const lastRow  = [...pr].reverse().find(r => r.invested_usd > 0)
     return { name, avg, ann, totalUsd, lastInvestedUsd: lastRow?.invested_usd ?? 0, months: nonZero.length }
-  }).sort((a, b) => b.ann - a.ann)
+  }).filter(s => s.months > 0)
+    .sort((a, b) => b.ann - a.ann)
+
+  const products = summaries.map(s => s.name)
 
   const fmtUsd = (v: number) => {
     const val = currency === 'CRC' ? v * liveRate : v
@@ -197,7 +198,7 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
               <p className="text-xl font-black leading-none" style={{ color }}>
                 {s.ann.toFixed(2)}%
               </p>
-              <p className="text-[9px] text-zinc-500 mt-0.5">anualizado (12m)</p>
+              <p className="text-[9px] text-zinc-500 mt-0.5">anualizado ({rangeLabel})</p>
               <div className="mt-2 pt-2 border-t border-white/[0.04] space-y-0.5">
                 <p className="text-[9px] text-zinc-600">{s.avg.toFixed(3)}%/mes · {s.months} meses</p>
                 <p className="text-[9px] text-zinc-600">{fmtUsd(s.totalUsd)} yield 12m</p>
