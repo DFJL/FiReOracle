@@ -40,7 +40,7 @@ export function inferCategory(
   if (/millas|puntos\s*(de\s*)?banco|cashback|bonificaci[oó]n\s*banco/i.test(c)) return 'BANK_FEE'
   if (/salario|sueldo/i.test(c)) return 'SALARY'
   if (/aguinaldo/i.test(c)) return 'AGUINALDO'
-  if (/alquiler\s*ingreso|ingreso\s*alquiler|renta\s*mensual/i.test(c)) return 'RENTAL_INCOME'
+  if (/alquiler\s*(ingreso|casa|propiedad|mensual|departamento|depto|apartamento|local\b|oficina)|ingreso\s*alquiler|renta\s*mensual/i.test(c)) return 'RENTAL_INCOME'
 
   // ── Abarrotes (tiendas locales, mercado) — concepto-level, solo cuando category_code es null
   if (/^abarrotes/i.test(c)) return 'FOOD_ABARROTES'
@@ -92,6 +92,7 @@ export function inferCategory(
   if (/electricidad|cne\b|ice\b|aya\b|acueducto|agua\b|internet\b|claro\b|movistar|tel[eé]fono|cable\b|fibra\s*[oó]ptic/i.test(t)) return 'SERVICES'
 
   // ── Hogar ────────────────────────────────────────────────────────────────────
+  if (/gastos?\s*(de\s*)?casa\s*(de\s*)?alquiler|gastos?\s*(de\s*)?propiedad\s*(en\s*)?alquiler/i.test(c)) return 'RENTAL_EXPENSE'
   if (/limpieza\s*de\s*casa|servicio\s*dom[eé]stico|empleada|sita\b/i.test(c)) return 'HOME_SERVICE'
   if (/ferreteri[ao]|home\s*depot|materiales|construcci|muebles|electrodom/i.test(t)) return 'HOME'
 
@@ -144,7 +145,7 @@ export function displayCategory(raw: string): string {
     // Income
     SALARY:               'Salario',
     AGUINALDO:            'Aguinaldo',
-    RENTAL_INCOME:        'Alquiler ingreso',
+    RENTAL_INCOME:        'Ingreso por alquiler',
     INCOME:               'Ingresos varios',
     PASSIVE_INCOME:       'Ingreso pasivo',
     INVESTMENT_RETURN:    'Rendimientos',
@@ -155,6 +156,7 @@ export function displayCategory(raw: string): string {
     SAVINGS_INVESTMENT:   'Fondos de inversión',
     SAVINGS_TRAVEL:       'Viajes / vacaciones',
     SAVINGS_PENSION:      'Pensión voluntaria',
+    RENTAL_EXPENSE:       'Gastos propiedad alquiler',
     CRYPTO:               'Criptomonedas',
     LOAN_PAYMENT:         'Préstamos',
     LOANS:                'Préstamos',
