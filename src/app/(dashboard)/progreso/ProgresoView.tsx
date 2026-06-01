@@ -54,6 +54,9 @@ export function ProgresoView({
   const passiveMonthlyAvg = passiveIncome12m / 12
   const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
   const fsRatio = avgMonthlySurvivalExpenses > 0 ? passiveMonthlyAvg / avgMonthlySurvivalExpenses : 0
+  const passiveCoverage = avgMonthlyExpenses > 0
+    ? (passiveIncome12m / (avgMonthlyExpenses * 12)) * 100
+    : 0
 
   const runwayColor =
     runway >= runwayGreen  ? '#a3e635' :
@@ -264,6 +267,27 @@ export function ProgresoView({
           sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'marcá gastos básicos'}
           color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
         />
+
+        {/* Cobertura pasiva */}
+        <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-4">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-2">Cobertura pasiva</p>
+          <p className={`text-3xl font-black leading-none tabular-nums ${
+            passiveCoverage >= 100 ? 'text-[#a3e635]'
+            : passiveCoverage >= 50 ? 'text-cyan-400'
+            : passiveCoverage >= 25 ? 'text-amber-400'
+            : 'text-zinc-400'
+          }`}>{passiveCoverage.toFixed(1)}%</p>
+          <p className="text-[9px] text-zinc-600 mt-1">de gastos cubierto por ingresos pasivos</p>
+          {passiveCoverage >= 100 && (
+            <p className="text-[9px] text-[#a3e635] mt-1 font-black">Independencia financiera alcanzada</p>
+          )}
+          <div className="mt-2 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${passiveCoverage >= 100 ? 'bg-[#a3e635]/60' : 'bg-cyan-400/50'}`}
+              style={{ width: `${Math.min(passiveCoverage, 100).toFixed(1)}%` }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Combined historical + forecast chart */}

@@ -48,12 +48,19 @@ export default async function ResumenPage() {
   const accounts: AccountSummary = { liquidBalance, savingsBalance }
   const exchangeRate = await fetchExchangeRate()
 
+  const { data: fireConfig } = await admin
+    .from('user_financial_config')
+    .select('preferred_currency')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <InteractiveSection
         transactions={(rawTx ?? []) as TxClient[]}
         accounts={accounts}
         exchangeRate={exchangeRate}
+        defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
       />
     </div>
   )

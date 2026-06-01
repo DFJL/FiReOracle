@@ -183,7 +183,7 @@ function getTxConcept(tx: TxClient): string {
 
 // ── SVG trend chart — 3 series with hover tooltip ────────────────────────────
 
-interface SeriesPoint { month: string; income: number; expenses: number; balance: number }
+interface SeriesPoint { month: string; income: number; passive: number; expenses: number; balance: number }
 
 function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
@@ -194,7 +194,7 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
   const chartW = W - px * 2
 
   // Shared scale across all series so they're visually comparable
-  const allVals = points.flatMap(p => [p.income, p.expenses, p.balance])
+  const allVals = points.flatMap(p => [p.income, p.passive, p.expenses, p.balance])
   const minV = Math.min(...allVals, 0)
   const maxV = Math.max(...allVals, 1)
   const range = maxV - minV || 1
@@ -214,6 +214,7 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
   }
 
   const inc  = makePath(points.map(p => p.income))
+  const pas  = makePath(points.map(p => p.passive))
   const exp  = makePath(points.map(p => p.expenses))
   const bal  = makePath(points.map(p => p.balance))
   const zeroY = minV < 0 ? toY(0) : null
@@ -245,6 +246,12 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
                 <span className="text-[#a3e635]/70">Ingresos</span>
                 <span className="font-black text-[#a3e635] tabular-nums">{fmt(points[hi].income)}</span>
               </div>
+              {points[hi].passive > 0 && (
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <span className="text-[9px] text-cyan-400/60">↳ Pasivo</span>
+                  <span className="font-black text-cyan-400 tabular-nums text-[9px]">{fmt(points[hi].passive)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-4">
                 <span className="text-rose-400/70">Gastos</span>
                 <span className="font-black text-rose-400 tabular-nums">{fmt(points[hi].expenses)}</span>
@@ -271,12 +278,14 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
           fill="url(#grad-inc)" />
         {/* Lines */}
         <path d={exp.d} fill="none" stroke="rgb(251 113 133)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" />
+        <path d={pas.d} fill="none" stroke="rgb(34 211 238)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" strokeDasharray="5 3" />
         <path d={bal.d} fill="none" stroke="rgb(96 165 250)"  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" strokeDasharray="5 3" />
         <path d={inc.d} fill="none" stroke="#a3e635"           strokeWidth="2"   strokeLinecap="round" strokeLinejoin="round" />
         {/* Hover crosshair + dots */}
         {hi !== null && hx !== null && <>
           <line x1={hx} y1={pt} x2={hx} y2={pt + chartH} stroke="white" strokeWidth="1" strokeDasharray="3 2" opacity="0.15" />
           <circle cx={hx} cy={inc.ys[hi]} r="3.5" fill="#a3e635"          stroke="#0d120d" strokeWidth="2" />
+          <circle cx={hx} cy={pas.ys[hi]} r="3" fill="rgb(34 211 238)" stroke="#0d120d" strokeWidth="2" />
           <circle cx={hx} cy={exp.ys[hi]} r="3.5" fill="rgb(251 113 133)" stroke="#0d120d" strokeWidth="2" />
           <circle cx={hx} cy={bal.ys[hi]} r="3.5" fill="rgb(96 165 250)"  stroke="#0d120d" strokeWidth="2" />
         </>}
@@ -293,6 +302,7 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
       <div className="flex gap-4 mt-1 px-1">
         {[
           { color: '#a3e635',          label: 'Ingresos' },
+          { color: 'rgb(34 211 238)',  label: 'Ing. pasivo', dashed: true },
           { color: 'rgb(251 113 133)', label: 'Gastos' },
           { color: 'rgb(96 165 250)',  label: 'Balance', dashed: true },
         ].map(s => (
@@ -534,17 +544,18 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, accounts, exchangeRate }: {
+export function InteractiveSection({ transactions, accounts, exchangeRate, defaultCurrency }: {
   transactions: TxClient[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
+  defaultCurrency?: 'CRC' | 'USD'
 }) {
   const [period, setPeriod]         = useState<PeriodKey>('all')
   const [tab, setTab]               = useState<TabKey>('gastos')
   const [incomeSubtab, setIncomeSub] = useState<IncomeSubtab>('activo')
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
-  const [currency, setCurrency]     = useState<'CRC' | 'USD'>('CRC')
+  const [currency, setCurrency]     = useState<'CRC' | 'USD'>(defaultCurrency ?? 'USD')
 
   const tcSell = exchangeRate?.sell ?? 515
   const toUSD  = (crc: number) => crc / tcSell
@@ -587,22 +598,27 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
       : base.filter(tx => (tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement) || isPatrimonialIncome(tx))
   }, [periodTxs, tab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Monthly trend — all 3 series from periodTxs, independent of tab
+  // Monthly trend — all series from periodTxs, independent of tab
   const trendPoints = useMemo((): SeriesPoint[] => {
     const inc: Record<string, number> = {}
+    const pas: Record<string, number> = {}
     const exp: Record<string, number> = {}
     for (const tx of periodTxs) {
       if (!tx.date) continue
       const k = tx.date.slice(0, 7)
       const amt = Number(tx.amount ?? 0)
-      if (isLiquidIncome(tx)) inc[k] = (inc[k] ?? 0) + amt
-      if (isOutflow(tx))      exp[k] = (exp[k] ?? 0) + amt
+      if (isLiquidIncome(tx)) {
+        inc[k] = (inc[k] ?? 0) + amt
+        if (tx.is_passive_income) pas[k] = (pas[k] ?? 0) + amt
+      }
+      if (isOutflow(tx)) exp[k] = (exp[k] ?? 0) + amt
     }
     const months = Array.from(new Set([...Object.keys(inc), ...Object.keys(exp)])).sort()
     return months.map(month => {
       const income   = inc[month] ?? 0
+      const passive  = pas[month] ?? 0
       const expenses = exp[month] ?? 0
-      return { month, income, expenses, balance: income - expenses }
+      return { month, income, passive, expenses, balance: income - expenses }
     })
   }, [periodTxs])
 
@@ -667,26 +683,28 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
 
   // KPIs for current period
   const kpis = useMemo(() => {
-    let income = 0, rendimientos = 0, expenses = 0, invested = 0
+    let income = 0, passiveIncome = 0, rendimientos = 0, expenses = 0, invested = 0
     for (const tx of periodTxs) {
       const amt = Number(tx.amount ?? 0)
-      if (isLiquidIncome(tx))       income += amt
-      else if (isPatrimonialIncome(tx)) rendimientos += amt
+      if (isLiquidIncome(tx)) {
+        income += amt
+        if (tx.is_passive_income) passiveIncome += amt
+      } else if (isPatrimonialIncome(tx)) rendimientos += amt
       else if (isOutflow(tx))       expenses += amt
       else if (isSavings(tx))       invested += amt
     }
     const net = income - expenses
     // Tasa de ahorro FIRE: lo que realmente fue a ahorros/inversión vs ingresos activos
-    const savingsRate = income > 0 ? (invested / income) * 100 : 0
+    const savingsRate    = income > 0 ? (invested / income) * 100 : 0
     // Margen neto: lo que sobra después de gastos (puede ser negativo)
-    const netMargin   = income > 0 ? (net / income) * 100 : 0
-    return { income, rendimientos, expenses, invested, net, savingsRate, netMargin }
+    const netMargin      = income > 0 ? (net / income) * 100 : 0
+    const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
+    return { income, passiveIncome, rendimientos, expenses, invested, net, savingsRate, netMargin, coverage }
   }, [periodTxs])
 
   const now = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
   const savingsRate = Math.round(kpis.savingsRate)
-  const netMargin   = Math.round(kpis.netMargin)
 
   return (
     <div className="space-y-0">
@@ -746,11 +764,11 @@ export function InteractiveSection({ transactions, accounts, exchangeRate }: {
               sub: kpis.invested > 0 ? `${fmtAmt(kpis.invested)} invertido` : null,
             },
             {
-              label: 'Margen neto',
-              display: `${netMargin >= 0 ? '+' : ''}${netMargin}%`,
-              color: netMargin >= 20 ? 'text-blue-400' : netMargin >= 0 ? 'text-amber-400' : 'text-rose-400',
-              secondary: null,
-              sub: `${fmtAmt(kpis.net)} libre`,
+              label: 'Cobertura pasiva',
+              display: `${Math.round(kpis.coverage)}%`,
+              color: kpis.coverage >= 100 ? 'text-[#a3e635]' : kpis.coverage >= 50 ? 'text-cyan-400' : kpis.coverage >= 25 ? 'text-amber-400' : 'text-zinc-400',
+              secondary: kpis.passiveIncome > 0 ? fmtAmt(kpis.passiveIncome) : null as string | null,
+              sub: kpis.coverage >= 100 ? '🟢 independencia financiera' : `gastos: ${fmtAmt(kpis.expenses)}`,
             },
           ].map(k => (
             <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1">
