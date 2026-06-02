@@ -3,8 +3,15 @@
 import { useState, useTransition } from 'react'
 import { runAudit } from '@/app/actions/audit'
 import { addMovement } from '@/app/(dashboard)/liquidez/actions'
+import {
+  deleteTransactions,
+  fixPassiveIncomeFlag,
+  fixMovementType,
+  fixAllNullMovementType,
+  fixExpenseGroup,
+} from '@/app/actions/audit-fix'
 import type { AuditReport, AuditCheck, AuditSeverity } from '@/app/actions/audit'
-import type { CustodioInfo, FlowData, RecentIncome } from './page'
+import type { CustodioInfo, FlowData } from './page'
 
 function fmtCRC(n: number) {
   const abs = Math.abs(n)
@@ -188,7 +195,6 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
 
   return (
     <div className="divide-y divide-white/[0.04]">
-      {/* Ledger breakdown */}
       <div className="px-4 py-1">
         {[
           { label: 'Ingresos regulares', sub: 'salario, alquiler, otros', val: incomeRegular, color: 'text-[#a3e635]' },
@@ -206,13 +212,11 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
         ))}
       </div>
 
-      {/* Saldo neto del ledger */}
       <div className="px-4 py-3 flex items-center justify-between bg-white/[0.02]">
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Saldo neto del ledger</p>
         <span className={`text-sm font-black tabular-nums ${ledgerNet >= 0 ? 'text-zinc-200' : 'text-rose-400'}`}>{fmtCRC(ledgerNet)}</span>
       </div>
 
-      {/* Saldo en sobres */}
       <div className="px-4 py-3 flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Saldo en sobres</p>
@@ -221,7 +225,6 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
         <span className="text-sm font-black tabular-nums text-amber-400">{fmtCRC(envelopeTotal)}</span>
       </div>
 
-      {/* Gap */}
       <div className={`mx-4 my-3 rounded-xl border px-4 py-3 space-y-1 ${gapBg}`}>
         <div className="flex items-center justify-between">
           <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">Brecha</p>
@@ -230,7 +233,6 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
         <p className="text-[10px] text-zinc-500">{gapDetail}</p>
       </div>
 
-      {/* Recent income toggle */}
       <button onClick={() => setShowIncome(v => !v)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors text-left">
         <div>
@@ -263,6 +265,30 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
   )
 }
 
+// ── Fix types ──────────────────────────────────────────────────────────────
+
+type FixVariant = 'lime' | 'rose' | 'amber' | 'zinc'
+
+type FixAction = {
+  label: string
+  value: string
+  variant?: FixVariant
+}
+
+type FixConfig = {
+  actions: FixAction[]
+  onApply: (action: string, ids: string[]) => Promise<{ error?: string }>
+  onFixAll?: (action: string) => Promise<{ error?: string }>
+  fixAllLabel?: string
+}
+
+const VARIANT_CLS: Record<FixVariant, string> = {
+  lime:  'bg-lime-500/20  text-lime-400  hover:bg-lime-500/30',
+  rose:  'bg-rose-500/20  text-rose-400  hover:bg-rose-500/30',
+  amber: 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30',
+  zinc:  'bg-white/[0.08] text-zinc-300  hover:bg-white/[0.12]',
+}
+
 // ── Audit check card ───────────────────────────────────────────────────────
 
 const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: string; head: string }> = {
@@ -272,9 +298,51 @@ const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: stri
   ok:      { dot: 'bg-lime-400',  badge: 'bg-lime-500/15 text-lime-400',    border: 'border-white/[0.06]', head: 'bg-white/[0.02]'     },
 }
 
-function CheckCard({ check }: { check: AuditCheck }) {
-  const [open, setOpen] = useState(check.severity !== 'ok' && check.count > 0)
-  const m = SEV_META[check.severity]
+function CheckCard({
+  check, fix, onFixed,
+}: {
+  check: AuditCheck
+  fix?: FixConfig
+  onFixed?: () => void
+}) {
+  const [open, setOpen]         = useState(check.severity !== 'ok' && check.count > 0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [applying, startApply]  = useTransition()
+  const [fixError, setFixError] = useState('')
+
+  const m          = SEV_META[check.severity]
+  const allChecked = check.issues.length > 0 && selected.size === check.issues.length
+
+  function toggle(id: string) {
+    setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }
+
+  function toggleAll() {
+    setSelected(allChecked ? new Set() : new Set(check.issues.map(i => i.id)))
+  }
+
+  function applyFix(action: string, ids: string[]) {
+    if (!ids.length || !fix) return
+    setFixError('')
+    startApply(async () => {
+      const r = await fix.onApply(action, ids)
+      if (r?.error) { setFixError(r.error); return }
+      setSelected(new Set())
+      onFixed?.()
+    })
+  }
+
+  function applyFixAll(action: string) {
+    if (!fix?.onFixAll) return
+    setFixError('')
+    startApply(async () => {
+      const r = await fix.onFixAll!(action)
+      if (r?.error) { setFixError(r.error); return }
+      setSelected(new Set())
+      onFixed?.()
+    })
+  }
+
   return (
     <div className={`rounded-xl border ${m.border} overflow-hidden`}>
       <button onClick={() => setOpen(v => !v)}
@@ -294,26 +362,98 @@ function CheckCard({ check }: { check: AuditCheck }) {
           <span className="text-zinc-600 text-[10px]">{open ? '−' : '+'}</span>
         </div>
       </button>
+
       {open && check.issues.length > 0 && (
         <div className="border-t border-white/[0.04]">
+
+          {fix && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-white/[0.02] border-b border-white/[0.04]">
+              <input
+                type="checkbox"
+                checked={allChecked}
+                onChange={toggleAll}
+                className="w-3.5 h-3.5 rounded accent-[#a3e635] cursor-pointer"
+              />
+              <span className="text-[10px] text-zinc-500 select-none">
+                {selected.size > 0
+                  ? `${selected.size} de ${check.issues.length} seleccionados`
+                  : `Seleccionar los ${check.issues.length} mostrados`}
+              </span>
+            </div>
+          )}
+
           {check.issues.map((issue, i) => (
-            <div key={issue.id + i} className="px-4 py-2.5 border-b border-white/[0.03] last:border-0">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] text-zinc-300">{issue.description}</p>
-                  {issue.action && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
-                </div>
-                <div className="shrink-0 text-right">
-                  {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
-                  {issue.amount !== undefined && issue.amount !== 0 && (
-                    <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
-                  )}
-                </div>
+            <div key={issue.id + i}
+              className="flex items-start gap-3 px-4 py-2.5 border-b border-white/[0.03] last:border-0">
+              {fix && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(issue.id)}
+                  onChange={() => toggle(issue.id)}
+                  className="mt-0.5 w-3.5 h-3.5 rounded accent-[#a3e635] cursor-pointer shrink-0"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] text-zinc-300">{issue.description}</p>
+                {issue.action && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
+              </div>
+              <div className="shrink-0 text-right">
+                {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
+                {issue.amount !== undefined && issue.amount !== 0 && (
+                  <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
+                )}
               </div>
             </div>
           ))}
+
+          {fix && selected.size > 0 && (
+            <div className="flex items-center flex-wrap gap-2 px-4 py-3 bg-white/[0.04] border-t border-white/[0.06]">
+              <span className="text-[10px] text-zinc-400 mr-auto">
+                {selected.size} seleccionado{selected.size !== 1 ? 's' : ''}
+              </span>
+              {fix.actions.map(a => (
+                <button
+                  key={a.value}
+                  onClick={() => applyFix(a.value, [...selected])}
+                  disabled={applying}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors disabled:opacity-40 ${VARIANT_CLS[a.variant ?? 'zinc']}`}
+                >
+                  {applying ? '…' : a.label}
+                </button>
+              ))}
+              <button onClick={() => setSelected(new Set())}
+                className="px-2 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+                Limpiar
+              </button>
+            </div>
+          )}
+
+          {fix?.onFixAll && (
+            <div className="flex items-center flex-wrap gap-2 px-4 py-2.5 bg-black/20 border-t border-white/[0.04]">
+              <span className="text-[9px] text-zinc-600 mr-auto">
+                {fix.fixAllLabel ?? 'Corregir todos (incluye no mostrados)'}
+              </span>
+              {fix.actions.map(a => (
+                <button
+                  key={a.value}
+                  onClick={() => applyFixAll(a.value)}
+                  disabled={applying}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors disabled:opacity-40 ${VARIANT_CLS[a.variant ?? 'zinc']}`}
+                >
+                  {applying ? '…' : `Todos → ${a.label}`}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {fixError && (
+            <p className="px-4 py-2 text-[10px] text-rose-400 border-t border-rose-500/10 bg-rose-500/[0.04]">
+              {fixError}
+            </p>
+          )}
         </div>
       )}
+
       {open && check.count === 0 && check.severity === 'ok' && (
         <div className="px-4 py-2.5 border-t border-white/[0.04]">
           <p className="text-[10px] text-lime-600">Sin problemas encontrados.</p>
@@ -343,6 +483,56 @@ export function AuditView({ custodios, flowData }: {
     })
   }
 
+  const fixConfigs: Record<string, FixConfig> = {
+    duplicates: {
+      actions: [{ label: 'Eliminar duplicado', value: 'delete', variant: 'rose' }],
+      onApply: async (_, ids) => {
+        const r = await deleteTransactions(ids)
+        return 'error' in r ? r : {}
+      },
+    },
+    uncategorized_expenses: {
+      actions: [
+        { label: 'Personal',    value: 'personal',              variant: 'zinc' },
+        { label: 'Necesario',   value: 'necesario',             variant: 'zinc' },
+        { label: 'Objetivos',   value: 'objetivos_financieros', variant: 'lime' },
+      ],
+      onApply: async (action, ids) => {
+        const r = await fixExpenseGroup(ids, action)
+        return 'error' in r ? r : {}
+      },
+    },
+    passive_income_flag: {
+      actions: [{ label: 'Marcar como pasivo', value: 'mark', variant: 'lime' }],
+      onApply: async (_, ids) => {
+        const r = await fixPassiveIncomeFlag(ids)
+        return 'error' in r ? r : {}
+      },
+    },
+    null_movement_type: {
+      actions: [
+        { label: 'Ingreso', value: 'income',  variant: 'lime' },
+        { label: 'Gasto',   value: 'expense', variant: 'rose' },
+      ],
+      onApply: async (action, ids) => {
+        const r = await fixMovementType(ids, action)
+        return 'error' in r ? r : {}
+      },
+      onFixAll: async (action) => {
+        const r = await fixAllNullMovementType(action)
+        return 'error' in r ? r : {}
+      },
+      fixAllLabel: 'Corregir todos los que tienen tipo nulo',
+    },
+    zero_amount: {
+      actions: [{ label: 'Eliminar', value: 'delete', variant: 'rose' }],
+      onApply: async (_, ids) => {
+        const r = await deleteTransactions(ids)
+        return 'error' in r ? r : {}
+      },
+    },
+  }
+
   const reconcilingInfo = custodios.find(c => c.name === reconciling)
 
   const errorChecks   = report?.checks.filter(c => c.severity === 'error'   && c.count > 0) ?? []
@@ -353,19 +543,16 @@ export function AuditView({ custodios, flowData }: {
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-6">
 
-      {/* Header */}
       <div>
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em]">Fire Oracle</p>
         <h1 className="text-2xl font-black text-white mt-0.5">Auditoría & Cuadre</h1>
         <p className="text-xs text-zinc-500 mt-1">Cuadre de flujos · Cuadre por cuenta · Auditoría de datos</p>
       </div>
 
-      {/* ── 1. Cuadre de flujos ── */}
       <Section title="Cuadre de flujos" subtitle="Ledger de transacciones vs saldo en sobres">
         <FlowSection flowData={flowData} />
       </Section>
 
-      {/* ── 2. Cuadre por cuenta ── */}
       <Section title="Cuadre por cuenta" subtitle="Compará el saldo de cada custodio contra tu banco">
         <div className="p-4 space-y-2">
           {custodios.length === 0 ? (
@@ -385,7 +572,6 @@ export function AuditView({ custodios, flowData }: {
         </div>
       </Section>
 
-      {/* ── 3. Auditoría de datos ── */}
       <Section title="Auditoría de datos" subtitle="10 verificaciones automáticas de calidad" defaultOpen={false}>
         <div className="p-4 space-y-4">
           <button onClick={runAuditAction} disabled={isPending}
@@ -422,19 +608,25 @@ export function AuditView({ custodios, flowData }: {
                 {errorChecks.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-rose-400/70 uppercase tracking-[0.16em]">Errores</p>
-                    {errorChecks.map(c => <CheckCard key={c.id} check={c} />)}
+                    {errorChecks.map(c => (
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                    ))}
                   </div>
                 )}
                 {warningChecks.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-[0.16em]">Advertencias</p>
-                    {warningChecks.map(c => <CheckCard key={c.id} check={c} />)}
+                    {warningChecks.map(c => (
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                    ))}
                   </div>
                 )}
                 {infoChecks.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-blue-400/70 uppercase tracking-[0.16em]">Informativo</p>
-                    {infoChecks.map(c => <CheckCard key={c.id} check={c} />)}
+                    {infoChecks.map(c => (
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                    ))}
                   </div>
                 )}
                 {okChecks.length > 0 && (
@@ -459,7 +651,6 @@ export function AuditView({ custodios, flowData }: {
         </div>
       </Section>
 
-      {/* Reconcile modal */}
       {reconcilingInfo && (
         <ReconcileModal
           custodio={reconcilingInfo.name}
