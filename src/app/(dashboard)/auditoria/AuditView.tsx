@@ -646,15 +646,23 @@ function TxDetailPanel({
     if (!fix?.selectAction || selOptions !== null) return
     fix.selectAction.loadOptions().then(opts => {
       setSelOptions(opts)
-      // Auto-suggest: match vendor or concept against option label
-      const vendorLower   = (tx?.vendor  ?? '').toLowerCase()
-      const conceptLower  = (tx?.concept ?? '').toLowerCase()
-      const match = opts.find(o => {
+      const text = `${tx?.vendor ?? ''} ${tx?.concept ?? ''} ${tx?.notes ?? ''}`.toLowerCase()
+      // Keyword-based suggestion first
+      const keyword = (
+        /liquidaci[oó]n/.test(text)   ? opts.find(o => o.value === 'INVESTMENT_LIQUIDATION') :
+        /rendimiento|farming|yield/.test(text) ? opts.find(o => o.value === 'INVESTMENT_RETURN') :
+        /salario|sueldo/.test(text)   ? opts.find(o => o.value === 'SALARY') :
+        /alquiler|renta/.test(text)   ? opts.find(o => o.value === 'RENTAL_INCOME') :
+        /inter[eé]s/.test(text)       ? opts.find(o => o.value === 'INTEREST') :
+        /aguinaldo/.test(text)        ? opts.find(o => o.value === 'AGUINALDO') :
+        null
+      )
+      // Fallback: substring match on label
+      const fallback = keyword ?? opts.find(o => {
         const lbl = o.label.toLowerCase()
-        return (vendorLower  && (lbl.includes(vendorLower)  || vendorLower.includes(lbl)))
-            || (conceptLower && (lbl.includes(conceptLower) || conceptLower.includes(lbl)))
+        return text.split(' ').some(w => w.length > 3 && lbl.includes(w))
       })
-      setSelValue(match?.value ?? opts[0]?.value ?? '')
+      setSelValue(fallback?.value ?? opts[0]?.value ?? '')
     })
   }
 
