@@ -142,22 +142,34 @@ export function ComposicionDetallada({
     })
   }
 
-  const portfolioTotal = [...PORTFOLIO_CATS, ...STANDALONE_CATS.filter(c => c !== 'pasivo')]
-    .flatMap(cat => items.filter(i => i.category === cat))
-    .reduce((s, i) => {
-      const k = i.item_name.toLowerCase()
-      return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
-    }, 0)
+  const portfolioTotal = (() => {
+    let total = 0
+    for (const cat of [...PORTFOLIO_CATS, ...STANDALONE_CATS.filter(c => c !== 'pasivo')]) {
+      const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : null
+      if (ck !== null && ck in computedValues) {
+        total += computedValues[ck]
+      } else {
+        for (const item of items.filter(i => i.category === cat)) {
+          const k = item.item_name.toLowerCase()
+          total += k in computedValues ? computedValues[k] : Number(item.value_crc)
+        }
+      }
+    }
+    return total
+  })()
 
   const activeSheet = editSheet !== null || addSheet !== null
 
   function renderCatCard(cat: Category) {
     const catItems = [...items.filter(i => i.category === cat)]
       .sort((a, b) => a.sort_order - b.sort_order)
-    const total = catItems.reduce((s, i) => {
-      const k = i.item_name.toLowerCase()
-      return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
-    }, 0)
+    const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : null
+    const total = (ck !== null && ck in computedValues)
+      ? computedValues[ck]
+      : catItems.reduce((s, i) => {
+          const k = i.item_name.toLowerCase()
+          return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
+        }, 0)
     const m = CAT_META[cat]
     const isOpen = expanded.has(cat)
     // Live drilldown rows for auto-computed categories

@@ -15,6 +15,7 @@ import {
   Settings,
   Wallet,
   Target,
+  ShieldCheck,
 } from 'lucide-react'
 
 type NavGroup = {
@@ -43,8 +44,14 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'FIRE',
     items: [
-      { href: '/progreso', label: 'Progreso', icon: <Target size={16} /> },
-      { href: '/oracle',   label: 'Oracle',   icon: <Sparkles size={16} /> },
+      { href: '/progreso', label: 'Progreso',  icon: <Target size={16} /> },
+      { href: '/oracle',   label: 'Oracle',    icon: <Sparkles size={16} /> },
+    ],
+  },
+  {
+    label: 'Herramientas',
+    items: [
+      { href: '/auditoria', label: 'Auditoría', icon: <ShieldCheck size={16} /> },
     ],
   },
 ]
@@ -53,9 +60,9 @@ const NAV_GROUPS: NavGroup[] = [
 const BOTTOM_NAV = [
   { href: '/resumen',     label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
   { href: '/inversiones', label: 'Portafolio', icon: <TrendingUp size={20} /> },
+  { href: '/liquidez',    label: 'Liquidez',   icon: <Wallet size={20} /> },
   { href: '/patrimonio',  label: 'Patrimonio', icon: <Landmark size={20} /> },
   { href: '/progreso',    label: 'FIRE',       icon: <Target size={20} /> },
-  { href: '/oracle',      label: 'Oracle',     icon: <Sparkles size={20} /> },
 ]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {

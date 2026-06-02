@@ -3,6 +3,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { EnvelopeSection } from './EnvelopeSection'
 import { SelfLoansSection } from './SelfLoansSection'
+import { FlowReconciliation } from './FlowReconciliation'
+
+export type RecentIncome = {
+  id: string
+  date: string
+  amount: number
+  concept: string | null
+  vendor: string | null
+  is_settlement: boolean
+}
 
 export type SubEnvelope = {
   id: string
@@ -54,6 +64,8 @@ export default async function LiquidezPage() {
     { data: envelopes },
     { data: movements },
     { data: loans },
+    { data: txRows },
+    { data: recentIncomeRaw },
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
@@ -70,6 +82,17 @@ export default async function LiquidezPage() {
       .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, notes')
       .eq('user_id', user.id)
       .order('loan_date', { ascending: false }),
+    admin
+      .from('transactions')
+      .select('movement_type, is_settlement, amount')
+      .eq('user_id', user.id),
+    admin
+      .from('transactions')
+      .select('id, date, amount, concept, vendor, is_settlement')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .order('date', { ascending: false })
+      .limit(30),
   ])
 
   // Own balance from movements — exclude interes type (reference only)
@@ -137,6 +160,33 @@ export default async function LiquidezPage() {
   const envelopeNameMap: Record<string, string> = {}
   for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
 
+  // Ledger totals from transactions
+  let incomeRegular = 0, incomeSettlement = 0, expenseTotal = 0, cashWithdrawals = 0
+  for (const tx of txRows ?? []) {
+    const amt = Number(tx.amount ?? 0)
+    if (tx.movement_type === 'income' && !tx.is_settlement) incomeRegular += amt
+    else if (tx.movement_type === 'income' && tx.is_settlement)  incomeSettlement += amt
+    else if (tx.movement_type === 'expense')                      expenseTotal += amt
+    else if (tx.movement_type === 'cash_withdrawal')              cashWithdrawals += amt
+  }
+  const ledgerNet = incomeRegular + incomeSettlement - expenseTotal - cashWithdrawals
+
+  // Envelope total: sum of all non-interes movements (principal cash tracked in envelopes)
+  const envelopeTotal = (movements ?? [])
+    .filter(m => m.movement_type !== 'interes')
+    .reduce((s, m) => s + Number(m.amount), 0)
+
+  const recentIncome: RecentIncome[] = (recentIncomeRaw ?? [])
+    .filter(r => r.date !== null)
+    .map(r => ({
+      id: r.id,
+      date: r.date as string,
+      amount: Number(r.amount),
+      concept: r.concept,
+      vendor: r.vendor,
+      is_settlement: r.is_settlement ?? false,
+    }))
+
   const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => ({
     id: l.id,
     description: l.description,
@@ -149,28 +199,20 @@ export default async function LiquidezPage() {
     notes: l.notes,
   }))
 
-  if (rootEnvelopes.length === 0) {
-    return (
-      <div className="p-4 md:p-8 max-w-3xl mx-auto">
-        <div className="mb-8">
-          <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">Fire Oracle</p>
-          <p className="text-3xl font-black text-white tracking-tight leading-none">Liquidez</p>
-        </div>
-        <div className="rounded-2xl border border-dashed border-[#a3e635]/[0.15] p-10 text-center space-y-3">
-          <p className="text-zinc-400 text-sm font-semibold">Sin sobres configurados</p>
-          <p className="text-zinc-600 text-xs">Creá tus sobres de ahorro en Configuración para empezar.</p>
-          <a href="/configuracion"
-            className="inline-block mt-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-xs font-black hover:bg-[#a3e635]/20 transition-all">
-            Ir a Configuración
-          </a>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
       <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} />
+      <div className="border-t border-white/[0.06] pt-8">
+        <FlowReconciliation
+          incomeRegular={incomeRegular}
+          incomeSettlement={incomeSettlement}
+          expenseTotal={expenseTotal}
+          cashWithdrawals={cashWithdrawals}
+          ledgerNet={ledgerNet}
+          envelopeTotal={envelopeTotal}
+          recentIncome={recentIncome}
+        />
+      </div>
       <div className="border-t border-white/[0.06] pt-8">
         <SelfLoansSection loans={enrichedLoans} envelopes={leafEnvelopes as Envelope[]} />
       </div>
