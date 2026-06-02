@@ -143,14 +143,20 @@ export default async function InversionesPage() {
 
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
-        const c = tx.concept ?? ''
+        const c = (tx.concept ?? '').toLowerCase()
+        const ciIncludes = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
         if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
           if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
           else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-        } else if (cm.depositConcepts.includes(c))          deposits += amt
-        else if (cm.rendimientosConcepts.includes(c)) rendimientos += amt
-        else if (cm.valorizacionConcepts.includes(c)) passiveValuation += amt
-        else if (cm.liquidacionConcepts.includes(c))  liquidaciones += amt
+          else if (tx.is_passive_income && tx.movement_type === 'income') {
+            if (tx.category_code === 'APPRECIATION') passiveValuation += amt
+            else rendimientos += amt
+          }
+          else if (tx.is_passive_income && !tx.movement_type) passiveValuation += amt
+        } else if (ciIncludes(cm.depositConcepts))       deposits += amt
+        else if (ciIncludes(cm.rendimientosConcepts))    rendimientos += amt
+        else if (ciIncludes(cm.valorizacionConcepts))    passiveValuation += amt
+        else if (ciIncludes(cm.liquidacionConcepts))     liquidaciones += amt
       } else if (def.bucket_type === 'vendor_based') {
         const txVendor = (tx.vendor ?? '').toLowerCase().trim()
         const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
@@ -197,11 +203,16 @@ export default async function InversionesPage() {
 
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
-        const c = tx.concept ?? ''
-        if (cm.depositConcepts.includes(c))          delta = amt
-        else if (cm.rendimientosConcepts.includes(c)) delta = amt
-        else if (cm.valorizacionConcepts.includes(c)) delta = amt
-        else if (cm.liquidacionConcepts.includes(c))  delta = -amt
+        const c = (tx.concept ?? '').toLowerCase()
+        const ciIncludes = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
+        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
+          if (tx.movement_type === 'income' && tx.is_settlement) delta = -amt
+          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) delta = amt
+          else if (tx.is_passive_income) delta = amt
+        } else if (ciIncludes(cm.depositConcepts))       delta = amt
+        else if (ciIncludes(cm.rendimientosConcepts))    delta = amt
+        else if (ciIncludes(cm.valorizacionConcepts))    delta = amt
+        else if (ciIncludes(cm.liquidacionConcepts))     delta = -amt
       } else if (def.bucket_type === 'vendor_based') {
         const txVendor = (tx.vendor ?? '').toLowerCase().trim()
         const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
