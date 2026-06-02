@@ -9,6 +9,8 @@ import {
   fixMovementType,
   fixAllNullMovementType,
   fixIsSettlement,
+  fixInvestmentBucket,
+  getInvestmentBuckets,
   clearMovementType,
   clearAllUncategorizedIncome,
   fixExpenseGroup,
@@ -350,11 +352,19 @@ type FixAction = {
   variant?: FixVariant
 }
 
+type SelectAction = {
+  label: string
+  placeholder: string
+  loadOptions: () => Promise<{ value: string; label: string }[]>
+  onApply: (value: string, ids: string[]) => Promise<{ error?: string }>
+}
+
 type FixConfig = {
   actions: FixAction[]
   onApply: (action: string, ids: string[]) => Promise<{ error?: string }>
   onFixAll?: (action: string) => Promise<{ error?: string }>
   fixAllLabel?: string
+  selectAction?: SelectAction
 }
 
 const VARIANT_CLS: Record<FixVariant, string> = {
@@ -613,8 +623,10 @@ function TxDetailPanel({
   onFixed?: () => void
   onIgnore?: () => void
 }) {
-  const [applying, start] = useTransition()
-  const [err, setErr]     = useState('')
+  const [applying, start]   = useTransition()
+  const [err, setErr]       = useState('')
+  const [selOptions, setSelOptions] = useState<{ value: string; label: string }[] | null>(null)
+  const [selValue, setSelValue]     = useState('')
   const tx = issue.txData
   if (!tx) return null
 
@@ -623,6 +635,21 @@ function TxDetailPanel({
     setErr('')
     start(async () => {
       const r = await fix.onApply(action, [issue.id])
+      if (r?.error) { setErr(r.error); return }
+      onFixed?.()
+    })
+  }
+
+  function openSelect() {
+    if (!fix?.selectAction || selOptions !== null) return
+    fix.selectAction.loadOptions().then(opts => { setSelOptions(opts); if (opts[0]) setSelValue(opts[0].value) })
+  }
+
+  function applySelect() {
+    if (!fix?.selectAction || !selValue) return
+    setErr('')
+    start(async () => {
+      const r = await fix.selectAction!.onApply(selValue, [issue.id])
       if (r?.error) { setErr(r.error); return }
       onFixed?.()
     })
@@ -660,6 +687,30 @@ function TxDetailPanel({
               {applying ? '…' : a.label}
             </button>
           ))}
+          {fix?.selectAction && (
+            selOptions === null ? (
+              <button onClick={openSelect}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-lime-500/20 text-lime-400 hover:bg-lime-500/30 transition-colors">
+                {fix.selectAction.label}
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <select value={selValue} onChange={e => setSelValue(e.target.value)}
+                  className="bg-white/[0.06] border border-white/[0.12] rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:border-white/30">
+                  {selOptions.length === 0
+                    ? <option value="">Sin buckets</option>
+                    : selOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)
+                  }
+                </select>
+                <button onClick={applySelect} disabled={applying || !selValue}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-lime-500/20 text-lime-400 hover:bg-lime-500/30 disabled:opacity-40 transition-colors">
+                  {applying ? '…' : 'Asignar'}
+                </button>
+                <button onClick={() => setSelOptions(null)}
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
+              </div>
+            )
+          )}
           {onIgnore && (
             <button onClick={onIgnore}
               className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-white/[0.05] text-zinc-500 hover:text-zinc-300 transition-colors ml-auto">
@@ -989,7 +1040,7 @@ export function AuditView({ custodios, flowData }: {
   function runAuditAction() {
     setAuditError(null)
     start(async () => {
-      const res = await runAudit()
+      const res = await runAudit([...ignoredTxIds])
       if ('error' in res) { setAuditError(res.error); return }
       setReport(res)
     })
@@ -1116,6 +1167,18 @@ export function AuditView({ custodios, flowData }: {
       onApply: async (action, ids) => {
         if (action === 'unsettle') { const r = await fixIsSettlement(ids, false); return 'error' in r ? r : {} }
         return {}
+      },
+      selectAction: {
+        label: 'Asignar bucket',
+        placeholder: 'Seleccioná un bucket…',
+        loadOptions: async () => {
+          const buckets = await getInvestmentBuckets()
+          return buckets.map(b => ({ value: b.id, label: b.name }))
+        },
+        onApply: async (bucketId, ids) => {
+          const r = await fixInvestmentBucket(ids, bucketId)
+          return 'error' in r ? r : {}
+        },
       },
     },
   }
