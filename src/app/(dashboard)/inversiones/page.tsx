@@ -117,7 +117,12 @@ export default async function InversionesPage() {
     })
   }
   const liquidBreakdown: CustodioGroup[] = Object.values(custodioMap)
-    .map(g => ({ ...g, envelopes: g.envelopes.sort((a, b) => b.balance - a.balance) }))
+    .map(g => ({
+      ...g,
+      envelopes: g.envelopes
+        .filter(e => Math.round(e.balance) !== 0)
+        .sort((a, b) => b.balance - a.balance),
+    }))
     .sort((a, b) => b.total - a.total)
 
   // Compute bucket balances (current)
