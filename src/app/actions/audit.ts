@@ -52,7 +52,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
     const dupes: AuditIssue[] = []
 
     for (const tx of rows) {
-      const key = `${tx.date}|${tx.amount}|${(tx.vendor ?? '').toLowerCase().trim()}|${tx.movement_type}`
+      const key = `${tx.date}|${tx.amount}|${(tx.vendor ?? '').toLowerCase().trim()}|${(tx.concept ?? '').toLowerCase().trim()}|${tx.movement_type}`
       if (seen.has(key)) {
         const orig = seen.get(key)!
         dupes.push({
@@ -67,10 +67,15 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       }
     }
 
+    const dupeTotal = dupes.reduce((s, d) => s + (d.amount ?? 0), 0)
+    const fmtK = (n: number) => n >= 1_000_000 ? `₡${(n / 1_000_000).toFixed(1)}M` : `₡${Math.round(n / 1_000)}K`
+
     checks.push({
       id: 'duplicates',
       label: 'Transacciones duplicadas',
-      description: 'Mismo monto + vendedor + fecha + tipo. Revisión visual requerida.',
+      description: dupes.length > 0
+        ? `Mismo monto + vendedor + concepto + fecha + tipo. ${dupes.length} posibles duplicados · ${fmtK(dupeTotal)} en total. Revisión visual requerida.`
+        : 'Mismo monto + vendedor + concepto + fecha + tipo.',
       severity: dupes.length > 0 ? 'error' : 'ok',
       count: dupes.length,
       issues: dupes.slice(0, 20),
