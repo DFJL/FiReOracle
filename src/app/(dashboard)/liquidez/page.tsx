@@ -139,10 +139,21 @@ export default async function LiquidezPage() {
   for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
 
   const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => {
-    const rawSplit = l.envelope_split as { envelope_id: string; amount: number }[] | null
-    const split = rawSplit
-      ? rawSplit.map(s => ({ ...s, name: envelopeNameMap[s.envelope_id] ?? '?' }))
-      : null
+    const rawSplit = l.envelope_split
+    let split: { envelope_id: string; name: string; amount: number }[] | null = null
+    if (Array.isArray(rawSplit)) {
+      split = (rawSplit as { envelope_id: string; amount: number }[]).map(s => ({
+        envelope_id: s.envelope_id,
+        amount: Number(s.amount),
+        name: envelopeNameMap[s.envelope_id] ?? '?',
+      }))
+    } else if (rawSplit && typeof rawSplit === 'object') {
+      split = Object.entries(rawSplit as Record<string, number>).map(([envelope_id, amount]) => ({
+        envelope_id,
+        amount: Number(amount),
+        name: envelopeNameMap[envelope_id] ?? '?',
+      }))
+    }
     return {
       id: l.id,
       description: l.description,
