@@ -5,6 +5,7 @@ import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
+type InvestmentBucket = { id: string; name: string }
 type Category = {
   code: string; name: string; parent_code: string | null
   category_type: string; group_gasto: string | null
@@ -62,9 +63,9 @@ const TYPE_OPTIONS: { value: TxEntryType; label: string; desc: string; color: st
 type Loan = { id: string; description: string; original_amount: number | string; amount_repaid: number | string; status: string }
 
 export function TransactionEntryFAB({
-  envelopes, categories, loans,
+  envelopes, categories, buckets, loans,
 }: {
-  envelopes: Envelope[]; categories: Category[]; loans: Loan[]
+  envelopes: Envelope[]; categories: Category[]; buckets: InvestmentBucket[]; loans: Loan[]
 }) {
   const [open, setOpen]               = useState(false)
   const [type, setType]               = useState<TxEntryType>('gasto')
@@ -86,9 +87,11 @@ export function TransactionEntryFAB({
   const [isSettlement, setIsSettlement] = useState(false)
   const [isSurvival, setIsSurvival]   = useState(false)
   // envelopes
-  const [envelopeId, setEnvelopeId]           = useState('')
-  const [fromEnvelopeId, setFromEnvelopeId]   = useState('')
-  const [toEnvelopeId, setToEnvelopeId]       = useState('')
+  const [envelopeId, setEnvelopeId]               = useState('')
+  const [fromEnvelopeId, setFromEnvelopeId]       = useState('')
+  const [toEnvelopeId, setToEnvelopeId]           = useState('')
+  // investment bucket for liquidation income
+  const [investmentBucketId, setInvestmentBucketId] = useState('')
   // ahorro extras
   const [ahorroVendor, setAhorroVendor] = useState('')
   const [ahorroConcepto, setAhorroConcepto] = useState('')
@@ -165,6 +168,7 @@ export function TransactionEntryFAB({
     setVendor(''); setConcept(''); setCategoryCode(''); setExpenseGroup('personal')
     setIsPassive(false); setIsSettlement(false); setIsSurvival(false)
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
+    setInvestmentBucketId('')
     setAhorroVendor(''); setAhorroConcepto('')
     setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc('')
     setError(null)
@@ -313,6 +317,7 @@ export function TransactionEntryFAB({
           category_code: categoryCode || undefined,
           is_passive_income: isPassive,
           is_settlement: isSettlement,
+          investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
@@ -378,6 +383,7 @@ export function TransactionEntryFAB({
           category_code: categoryCode || undefined,
           is_passive_income: isPassive,
           is_settlement: isSettlement,
+          investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
@@ -665,6 +671,15 @@ export function TransactionEntryFAB({
                       onChange={v => setCategoryCode(v)}
                       typeFilter="income" className={inputCls} />
                   </div>
+                  {isSettlement && buckets.length > 0 && (
+                    <div>
+                      <label className={lbl}>¿Reduce bucket de inversión? <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                      <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
+                        <option value="">Sin bucket (solo liquidez)</option>
+                        {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                  )}
                   {(isPassive || isSettlement) && (
                     <div className="flex flex-wrap gap-2">
                       {isPassive    && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">Ingreso pasivo</span>}

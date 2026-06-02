@@ -1246,6 +1246,7 @@ export type Database = {
           currency_code: string
           description: string
           due_date: string | null
+          envelope_split: Json | null
           id: string
           linked_transaction_id: string | null
           loan_date: string
@@ -1264,6 +1265,7 @@ export type Database = {
           currency_code: string
           description: string
           due_date?: string | null
+          envelope_split?: Json | null
           id?: string
           linked_transaction_id?: string | null
           loan_date: string
@@ -1282,6 +1284,7 @@ export type Database = {
           currency_code?: string
           description?: string
           due_date?: string | null
+          envelope_split?: Json | null
           id?: string
           linked_transaction_id?: string | null
           loan_date?: string
@@ -1491,6 +1494,7 @@ export type Database = {
           expense_group: string | null
           external_id: string | null
           id: string
+          investment_bucket_id: string | null
           is_passive_income: boolean
           is_settlement: boolean
           is_survival_expense: boolean
@@ -1524,6 +1528,7 @@ export type Database = {
           expense_group?: string | null
           external_id?: string | null
           id?: string
+          investment_bucket_id?: string | null
           is_passive_income?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
@@ -1557,6 +1562,7 @@ export type Database = {
           expense_group?: string | null
           external_id?: string | null
           id?: string
+          investment_bucket_id?: string | null
           is_passive_income?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
@@ -1593,6 +1599,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "currencies"
             referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "transactions_investment_bucket_id_fkey"
+            columns: ["investment_bucket_id"]
+            isOneToOne: false
+            referencedRelation: "user_investment_buckets"
+            referencedColumns: ["id"]
           },
         ]
       }

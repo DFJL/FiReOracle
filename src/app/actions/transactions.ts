@@ -92,6 +92,7 @@ export type CreateTransactionInput =
       category_code?: string
       is_passive_income: boolean
       is_settlement?: boolean    // true = liquidación de inversión (no cuenta como ingreso real)
+      investment_bucket_id?: string  // optional: which bucket this liquidation reduces
       notes?: string
     } & CurrencyFields & SideEffects)
   | {
@@ -240,6 +241,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       concept: input.concept.trim() || null,
       expense_group: 'na',
       category_code: input.category_code ?? null,
+      investment_bucket_id: input.investment_bucket_id ?? null,
       movement_type: 'income',
       is_passive_income: input.is_passive_income,
       is_settlement: input.is_settlement ?? false,
@@ -320,5 +322,61 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   revalidatePath('/resumen')
   revalidatePath('/flujo')
+  return { error: null }
+}
+
+export type UpdateTransactionInput = {
+  date?: string
+  amount?: number
+  vendor?: string | null
+  concept?: string | null
+  category_code?: string | null
+  expense_group?: string
+  notes?: string | null
+  is_passive_income?: boolean
+  is_settlement?: boolean
+  is_survival_expense?: boolean
+  investment_bucket_id?: string | null
+}
+
+export async function updateTransaction(id: string, input: UpdateTransactionInput) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('transactions')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', user.id)
+  if (error) return { error: error.message }
+
+  revalidatePath('/resumen')
+  revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
+  return { error: null }
+}
+
+export async function deleteTransaction(id: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('transactions')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+  if (error) return { error: error.message }
+
+  revalidatePath('/resumen')
+  revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
   return { error: null }
 }
