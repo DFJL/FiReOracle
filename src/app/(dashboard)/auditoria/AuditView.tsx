@@ -9,6 +9,7 @@ import {
   fixMovementType,
   fixAllNullMovementType,
   clearMovementType,
+  clearAllUncategorizedIncome,
   fixExpenseGroup,
   addAdjustmentTransaction,
   getAuditLog,
@@ -889,6 +890,15 @@ export function AuditView({ custodios, flowData }: {
         const r = await fixMovementType(ids, action)
         return 'error' in r ? r : {}
       },
+      onFixAll: async (action) => {
+        if (action === 'clear') {
+          const r = await clearAllUncategorizedIncome()
+          return 'error' in r ? r : {}
+        }
+        const r = await fixAllNullMovementType(action)
+        return 'error' in r ? r : {}
+      },
+      fixAllLabel: 'Aplica a todos los income sin categoría (incluye no mostrados)',
     },
     zero_amount: {
       actions: [{ label: 'Eliminar', value: 'delete', variant: 'rose' }],

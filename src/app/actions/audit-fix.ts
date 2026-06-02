@@ -210,6 +210,21 @@ export async function clearMovementType(ids: string[]) {
   return { ok: true }
 }
 
+export async function clearAllUncategorizedIncome() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  const { error } = await supabase
+    .from('transactions')
+    .update({ movement_type: null })
+    .eq('user_id', user.id)
+    .eq('movement_type', 'income')
+    .is('category_code', null)
+  if (error) return { error: error.message }
+  revalidate()
+  return { ok: true }
+}
+
 export async function fixExpenseGroup(ids: string[], expenseGroup: string) {
   if (!ids.length) return { ok: true }
   const valid = ['personal', 'necesario', 'objetivos_financieros', 'na']
