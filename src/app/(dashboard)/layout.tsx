@@ -133,9 +133,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
             <span className="text-xs font-black tracking-widest uppercase text-[#a3e635]">FiReOracle</span>
           </div>
-          <Link href="/configuracion" className="p-2 rounded-lg text-zinc-400 hover:text-[#a3e635] hover:bg-white/[0.04] transition-colors">
-            <Settings size={18} />
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link href="/auditoria" className="p-2 rounded-lg text-zinc-400 hover:text-[#a3e635] hover:bg-white/[0.04] transition-colors">
+              <ShieldCheck size={18} />
+            </Link>
+            <Link href="/configuracion" className="p-2 rounded-lg text-zinc-400 hover:text-[#a3e635] hover:bg-white/[0.04] transition-colors">
+              <Settings size={18} />
+            </Link>
+          </div>
         </header>
 
         {/* Onboarding banner */}
