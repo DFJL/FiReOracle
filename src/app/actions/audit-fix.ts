@@ -198,6 +198,18 @@ export async function revertAuditChange(logId: string): Promise<{ ok?: boolean; 
   return { ok: true }
 }
 
+export async function clearMovementType(ids: string[]) {
+  if (!ids.length) return { ok: true }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  const { error } = await supabase
+    .from('transactions').update({ movement_type: null }).in('id', ids).eq('user_id', user.id)
+  if (error) return { error: error.message }
+  revalidate()
+  return { ok: true }
+}
+
 export async function fixExpenseGroup(ids: string[], expenseGroup: string) {
   if (!ids.length) return { ok: true }
   const valid = ['personal', 'necesario', 'objetivos_financieros', 'na']

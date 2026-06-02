@@ -8,6 +8,7 @@ import {
   fixPassiveIncomeFlag,
   fixMovementType,
   fixAllNullMovementType,
+  clearMovementType,
   fixExpenseGroup,
   addAdjustmentTransaction,
   getAuditLog,
@@ -873,6 +874,21 @@ export function AuditView({ custodios, flowData }: {
         return 'error' in r ? r : {}
       },
       fixAllLabel: 'Corregir todos los que tienen tipo nulo',
+    },
+    uncategorized_income: {
+      actions: [
+        { label: 'Gasto',         value: 'expense',        variant: 'rose'  },
+        { label: 'Retiro',        value: 'cash_withdrawal', variant: 'amber' },
+        { label: 'Limpiar tipo',  value: 'clear',          variant: 'zinc'  },
+      ],
+      onApply: async (action, ids) => {
+        if (action === 'clear') {
+          const r = await clearMovementType(ids)
+          return 'error' in r ? r : {}
+        }
+        const r = await fixMovementType(ids, action)
+        return 'error' in r ? r : {}
+      },
     },
     zero_amount: {
       actions: [{ label: 'Eliminar', value: 'delete', variant: 'rose' }],
