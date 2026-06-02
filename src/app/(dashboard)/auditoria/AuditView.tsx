@@ -649,12 +649,27 @@ function TxDetailPanel({
       const text = `${tx?.vendor ?? ''} ${tx?.concept ?? ''} ${tx?.notes ?? ''}`.toLowerCase()
       // Keyword-based suggestion first
       const keyword = (
-        /liquidaci[oó]n/.test(text)   ? opts.find(o => o.value === 'INVESTMENT_LIQUIDATION') :
-        /rendimiento|farming|yield/.test(text) ? opts.find(o => o.value === 'INVESTMENT_RETURN') :
-        /salario|sueldo/.test(text)   ? opts.find(o => o.value === 'SALARY') :
-        /alquiler|renta/.test(text)   ? opts.find(o => o.value === 'RENTAL_INCOME') :
-        /inter[eé]s/.test(text)       ? opts.find(o => o.value === 'INTEREST') :
-        /aguinaldo/.test(text)        ? opts.find(o => o.value === 'AGUINALDO') :
+        // More-specific crypto/farming before generic investment
+        /farming|anchor|nodos|hodl/.test(text)                   ? opts.find(o => o.value === 'INVESTMENT_RETURN_CRYPTO') :
+        /miner[ií]a|mining|ethereum|gpu/.test(text)              ? opts.find(o => o.value === 'INVESTMENT_RETURN_MINING') :
+        // Liquidations — capital vs returns
+        /liquidaci[oó]n.*laboral|liquidaci[oó]n.*laboral/.test(text) ? opts.find(o => o.value === 'LABOR_SETTLEMENT') :
+        /liquidaci[oó]n.*ahorro|ahorro.*liquidaci[oó]n/.test(text)   ? opts.find(o => o.value === 'SAVINGS_LIQUIDATION') :
+        /liquidaci[oó]n/.test(text)                              ? opts.find(o => o.value === 'INVESTMENT_LIQUIDATION') :
+        // Rendimientos / returns
+        /rendimiento|yield/.test(text)                           ? opts.find(o => o.value === 'INVESTMENT_RETURN') :
+        // Interest / savings
+        /excedente/.test(text)                                   ? opts.find(o => o.value === 'SAVINGS_EXCEDENTES') :
+        /inter[eé]s.*ahorro|cdp|scotiabank/.test(text)          ? opts.find(o => o.value === 'SAVINGS_INTEREST') :
+        /inter[eé]s/.test(text)                                  ? opts.find(o => o.value === 'INTEREST') :
+        // Labor income
+        /salario|sueldo/.test(text)                              ? opts.find(o => o.value === 'SALARY') :
+        /aguinaldo/.test(text)                                   ? opts.find(o => o.value === 'AGUINALDO') :
+        /vi[aá]tico|fcl|bono|freelance/.test(text)              ? opts.find(o => o.value === 'WORK_OTHER') :
+        // Other
+        /reembolso/.test(text)                                   ? opts.find(o => o.value === 'REIMBURSEMENT') :
+        /alquiler|renta/.test(text)                              ? opts.find(o => o.value === 'RENTAL_INCOME') :
+        /pr[eé]stamo/.test(text)                                 ? opts.find(o => o.value === 'LOAN_RECEIVED') :
         null
       )
       // Fallback: substring match on label
