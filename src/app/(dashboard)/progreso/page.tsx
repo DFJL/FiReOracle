@@ -43,7 +43,7 @@ export default async function ProgresoPage() {
       .select('id, name, bucket_type, vendors, concept_map, account_id')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code')
+      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id')
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin.from('envelope_movements')
@@ -97,7 +97,10 @@ export default async function ProgresoPage() {
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
         const c = tx.concept ?? ''
-        if (cm.depositConcepts.includes(c))           deposits += amt
+        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
+          if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
+          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
+        } else if (cm.depositConcepts.includes(c))           deposits += amt
         else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
         else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
         else if (cm.liquidacionConcepts.includes(c))   liquidaciones += amt
