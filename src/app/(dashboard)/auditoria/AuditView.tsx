@@ -9,6 +9,7 @@ import {
   fixMovementType,
   fixAllNullMovementType,
   fixExpenseGroup,
+  addAdjustmentTransaction,
 } from '@/app/actions/audit-fix'
 import type { AuditReport, AuditCheck, AuditSeverity, DupeTxSnapshot } from '@/app/actions/audit'
 import type { CustodioInfo, FlowData } from './page'
@@ -173,7 +174,14 @@ function Section({ title, subtitle, children, defaultOpen = true }: {
 // ── Flow reconciliation section ────────────────────────────────────────────
 
 function FlowSection({ flowData }: { flowData: FlowData }) {
-  const [showIncome, setShowIncome] = useState(false)
+  const [showIncome, setShowIncome]   = useState(false)
+  const [showAdjust, setShowAdjust]   = useState(false)
+  const [adjDate, setAdjDate]         = useState(new Date().toISOString().slice(0, 10))
+  const [adjNotes, setAdjNotes]       = useState('')
+  const [adjDone, setAdjDone]         = useState(false)
+  const [adjError, setAdjError]       = useState('')
+  const [adjPending, startAdj]        = useTransition()
+
   const { incomeRegular, incomeSettlement, expenseTotal, cashWithdrawals, ledgerNet, envelopeTotal, recentIncome } = flowData
   const gap = envelopeTotal - ledgerNet
   const gapAbs = Math.abs(gap)
@@ -231,6 +239,67 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
           <span className={`text-sm font-black tabular-nums ${gapColor}`}>{gapLabel}</span>
         </div>
         <p className="text-[10px] text-zinc-500">{gapDetail}</p>
+
+        {gapAbs >= 1000 && !adjDone && (
+          showAdjust ? (
+            <div className="border-t border-white/[0.08] pt-3 mt-2 space-y-2">
+              <p className="text-[9px] font-black text-zinc-400 uppercase tracking-wide">
+                Ajuste: <span className="text-zinc-200">{gap > 0 ? 'Ingreso' : 'Egreso'} no identificado</span>
+                {' · '}<span className="tabular-nums">{fmtCRC(gapAbs)}</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1">Fecha</p>
+                  <input type="date" value={adjDate} onChange={e => setAdjDate(e.target.value)}
+                    className="w-full bg-white/[0.06] border border-white/[0.10] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-white/25" />
+                </div>
+                <div>
+                  <p className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1">Notas (opcional)</p>
+                  <input type="text" value={adjNotes} onChange={e => setAdjNotes(e.target.value)}
+                    placeholder="Ajuste de cuadre…"
+                    className="w-full bg-white/[0.06] border border-white/[0.10] rounded-lg px-2 py-1.5 text-[11px] text-white placeholder-zinc-700 focus:outline-none focus:border-white/25" />
+                </div>
+              </div>
+              {adjError && <p className="text-[10px] text-rose-400">{adjError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setAdjError('')
+                    startAdj(async () => {
+                      const r = await addAdjustmentTransaction({
+                        amount: gapAbs,
+                        movementType: gap > 0 ? 'income' : 'expense',
+                        date: adjDate,
+                        notes: adjNotes.trim() || undefined,
+                      })
+                      if ('error' in r && r.error) { setAdjError(r.error); return }
+                      setShowAdjust(false)
+                      setAdjDone(true)
+                    })
+                  }}
+                  disabled={adjPending}
+                  className="px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-[11px] font-black disabled:opacity-40 transition-opacity">
+                  {adjPending ? '…' : 'Crear ajuste'}
+                </button>
+                <button onClick={() => setShowAdjust(false)}
+                  className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-[11px] hover:text-zinc-200 transition-colors">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setShowAdjust(true)}
+              className="mt-1 text-[10px] font-black text-zinc-500 hover:text-zinc-300 transition-colors underline underline-offset-2 decoration-dotted">
+              + Registrar {gap > 0 ? 'ingreso' : 'egreso'} no identificado para cuadrar
+            </button>
+          )
+        )}
+
+        {adjDone && (
+          <p className="text-[10px] text-lime-400 mt-1 font-medium">
+            ✓ Ajuste creado — recargá la página para ver el cuadre actualizado
+          </p>
+        )}
       </div>
 
       <button onClick={() => setShowIncome(v => !v)}
