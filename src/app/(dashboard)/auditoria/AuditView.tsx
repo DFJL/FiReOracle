@@ -715,11 +715,11 @@ function TxDetailPanel({
                 {fix.selectAction.label}
               </button>
             ) : (
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <select value={selValue} onChange={e => setSelValue(e.target.value)}
-                  className="bg-white/[0.06] border border-white/[0.12] rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:border-white/30">
+                  className="bg-white/[0.06] border border-white/[0.12] rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:border-white/30 max-w-[200px]">
                   {selOptions.length === 0
-                    ? <option value="">Sin buckets</option>
+                    ? <option value="">Sin opciones</option>
                     : selOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)
                   }
                 </select>
@@ -729,6 +729,10 @@ function TxDetailPanel({
                 </button>
                 <button onClick={() => setSelOptions(null)}
                   className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
+                <a href="/configuracion" target="_blank"
+                  className="text-[9px] text-zinc-700 hover:text-zinc-400 transition-colors underline underline-offset-2 decoration-dotted ml-1">
+                  + crear bucket
+                </a>
               </div>
             )
           )}
