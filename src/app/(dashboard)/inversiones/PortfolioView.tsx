@@ -6,14 +6,12 @@ import type { ExchangeRate } from '@/lib/exchange-rate'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
-  if (Math.abs(n) >= 1_000)     return `₡${Math.round(n / 1_000)}K`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
 function fmtUSD(n: number) {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (Math.abs(n) >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`
-  return `$${Math.round(n).toLocaleString('en-US')}`
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function fmtPct(n: number) {

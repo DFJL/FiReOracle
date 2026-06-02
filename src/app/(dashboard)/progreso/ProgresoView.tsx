@@ -30,9 +30,8 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
   const val = curr === 'CRC' ? v : v / rate
   const sym = curr === 'CRC' ? '₡' : '$'
   const abs = Math.abs(val)
-  if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(1)}M`
-  if (abs >= 1_000)     return `${sym}${Math.round(val / 1_000)}K`
-  return `${sym}${Math.round(val).toLocaleString()}`
+  if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(2)}M`
+  return `${sym}${Math.round(val).toLocaleString('es-CR')}`
 }
 
 export function ProgresoView({
