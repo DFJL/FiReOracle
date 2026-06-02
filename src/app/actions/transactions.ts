@@ -134,6 +134,12 @@ async function applySideEffects(
   input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string },
 ): Promise<string | null> {
   if (input.debit_envelope_id) {
+    const balance = await getEnvelopeBalance(admin, userId, input.debit_envelope_id)
+    const debit = Math.abs(input.amount)
+    if (balance < debit) {
+      const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+      return `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})`
+    }
     const { error } = await admin.from('envelope_movements').insert({
       user_id: userId,
       envelope_id: input.debit_envelope_id,
