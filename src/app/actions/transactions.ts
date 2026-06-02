@@ -55,12 +55,19 @@ export async function checkDuplicateTransaction(input: {
   })
 }
 
-export type TxEntryType = 'gasto' | 'ingreso' | 'ahorro' | 'traslado' | 'autoprestamo'
+export type TxEntryType = 'gasto' | 'ingreso' | 'ahorro' | 'traslado'
 
 type CurrencyFields = {
   currency_code: 'CRC' | 'USD'
   exchange_rate_used?: number   // required when currency_code = 'USD'
   amount_usd?: number           // filled when currency_code = 'USD'
+}
+
+// Optional side-effects on gasto/ingreso
+type SideEffects = {
+  debit_envelope_id?: string    // retiro from this envelope
+  loan_id?: string              // add amount to this existing self_loan
+  new_loan_description?: string // create a new self_loan with this description
 }
 
 export type CreateTransactionInput =
@@ -75,7 +82,7 @@ export type CreateTransactionInput =
       is_settlement?: boolean
       is_survival_expense?: boolean
       notes?: string
-    } & CurrencyFields)
+    } & CurrencyFields & SideEffects)
   | ({
       type: 'ingreso'
       date: string
@@ -87,7 +94,7 @@ export type CreateTransactionInput =
       is_settlement?: boolean    // true = liquidación de inversión (no cuenta como ingreso real)
       investment_bucket_id?: string  // optional: which bucket this liquidation reduces
       notes?: string
-    } & CurrencyFields)
+    } & CurrencyFields & SideEffects)
   | {
       type: 'ahorro'
       date: string
@@ -121,6 +128,66 @@ async function getEnvelopeBalance(
     .reduce((sum: number, m: { amount: string | number }) => sum + Number(m.amount), 0)
 }
 
+async function applySideEffects(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string },
+): Promise<string | null> {
+  if (input.debit_envelope_id) {
+    const { error } = await admin.from('envelope_movements').insert({
+      user_id: userId,
+      envelope_id: input.debit_envelope_id,
+      movement_type: 'retiro',
+      amount: -Math.abs(input.amount),
+      date: input.date,
+      notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
+    })
+    if (error) return error.message
+    revalidatePath('/liquidez')
+  }
+
+  if (input.new_loan_description) {
+    const { data: acct } = await admin
+      .from('financial_accounts')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle()
+    if (!acct) return 'No hay cuentas financieras configuradas'
+
+    const { error } = await admin.from('self_loans').insert({
+      user_id: userId,
+      description: input.new_loan_description,
+      original_amount: input.amount,
+      loan_date: input.date,
+      source_account_id: acct.id,
+      source_envelope_id: input.debit_envelope_id ?? null,
+      currency_code: 'CRC',
+      status: 'pending',
+      notes: input.notes?.trim() || null,
+    })
+    if (error) return error.message
+    revalidatePath('/liquidez')
+  } else if (input.loan_id) {
+    const { data: loan } = await admin
+      .from('self_loans')
+      .select('original_amount')
+      .eq('id', input.loan_id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (!loan) return 'Autopréstamo no encontrado'
+
+    const { error } = await admin
+      .from('self_loans')
+      .update({ original_amount: Number(loan.original_amount) + input.amount })
+      .eq('id', input.loan_id)
+    if (error) return error.message
+    revalidatePath('/liquidez')
+  }
+
+  return null
+}
+
 export async function createTransaction(input: CreateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -149,6 +216,10 @@ export async function createTransaction(input: CreateTransactionInput) {
       notes: input.notes?.trim() || null,
     })
     if (error) return { error: error.message }
+    if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
+      const sideErr = await applySideEffects(admin, user.id, input)
+      if (sideErr) return { error: sideErr }
+    }
   }
 
   else if (input.type === 'ingreso') {
@@ -173,6 +244,10 @@ export async function createTransaction(input: CreateTransactionInput) {
       notes: input.notes?.trim() || null,
     })
     if (error) return { error: error.message }
+    if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
+      const sideErr = await applySideEffects(admin, user.id, input)
+      if (sideErr) return { error: sideErr }
+    }
   }
 
   else if (input.type === 'ahorro') {

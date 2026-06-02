@@ -9,7 +9,7 @@ export async function TransactionEntryWrapper() {
 
   const admin = createAdminClient()
 
-  const [{ data: envelopes }, { data: categories }, { data: buckets }] = await Promise.all([
+  const [{ data: envelopes }, { data: categories }, { data: buckets }, { data: loans }] = await Promise.all([
     admin
       .from('savings_envelopes')
       .select('id, name, custodio, parent_envelope_id')
@@ -27,6 +27,12 @@ export async function TransactionEntryWrapper() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),
+    admin
+      .from('self_loans')
+      .select('id, description, original_amount, amount_repaid, status')
+      .eq('user_id', user.id)
+      .in('status', ['pending', 'partial'])
+      .order('loan_date', { ascending: false }),
   ])
 
   return (
@@ -34,6 +40,7 @@ export async function TransactionEntryWrapper() {
       envelopes={envelopes ?? []}
       categories={categories ?? []}
       buckets={buckets ?? []}
+      loans={loans ?? []}
     />
   )
 }
