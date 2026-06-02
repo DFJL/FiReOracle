@@ -721,7 +721,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button onClick={() => setEditingTx(tx)}
                           className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.05] transition-colors">
                           <Pencil size={12} />
