@@ -11,6 +11,8 @@ import {
   fixIsSettlement,
   fixInvestmentBucket,
   getInvestmentBuckets,
+  fixCategoryCode,
+  getIncomeCategories,
   clearMovementType,
   clearAllUncategorizedIncome,
   fixExpenseGroup,
@@ -1092,9 +1094,9 @@ export function AuditView({ custodios, flowData }: {
     },
     uncategorized_income: {
       actions: [
-        { label: 'Gasto',         value: 'expense',        variant: 'rose'  },
+        { label: 'Gasto',         value: 'expense',         variant: 'rose'  },
         { label: 'Retiro',        value: 'cash_withdrawal', variant: 'amber' },
-        { label: 'Limpiar tipo',  value: 'clear',          variant: 'zinc'  },
+        { label: 'Limpiar tipo',  value: 'clear',           variant: 'zinc'  },
       ],
       onApply: async (action, ids) => {
         if (action === 'clear') {
@@ -1113,6 +1115,18 @@ export function AuditView({ custodios, flowData }: {
         return 'error' in r ? r : {}
       },
       fixAllLabel: 'Aplica a todos los income sin categoría (incluye no mostrados)',
+      selectAction: {
+        label: 'Asignar categoría',
+        placeholder: 'Seleccioná categoría…',
+        loadOptions: async () => {
+          const cats = await getIncomeCategories()
+          return cats.map(c => ({ value: c.code, label: c.name }))
+        },
+        onApply: async (code, ids) => {
+          const r = await fixCategoryCode(ids, code)
+          return 'error' in r ? r : {}
+        },
+      },
     },
     zero_amount: {
       actions: [{ label: 'Eliminar', value: 'delete', variant: 'rose' }],
