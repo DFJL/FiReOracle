@@ -3,7 +3,6 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
-import { createAutoprestamo } from '@/app/actions/selfLoans'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type Category = {
@@ -57,14 +56,15 @@ const TYPE_OPTIONS: { value: TxEntryType; label: string; desc: string; color: st
   { value: 'gasto',    label: 'Gasto',             desc: 'Solo en transacciones',                  color: 'text-rose-400' },
   { value: 'ingreso',  label: 'Ingreso',            desc: 'Solo en transacciones',                  color: 'text-[#a3e635]' },
   { value: 'ahorro',   label: 'Ahorro → Sobre',     desc: 'Transacción + movimiento de sobre',       color: 'text-blue-400' },
-  { value: 'traslado',     label: 'Traslado de sobres', desc: 'Solo movimientos internos, sin tx',          color: 'text-amber-400' },
-  { value: 'autoprestamo', label: 'Autopréstamo',       desc: 'Débito de sobre + registro de préstamo',    color: 'text-orange-400' },
+  { value: 'traslado', label: 'Traslado de sobres', desc: 'Solo movimientos internos, sin tx', color: 'text-amber-400' },
 ]
 
+type Loan = { id: string; description: string; original_amount: number | string; amount_repaid: number | string; status: string }
+
 export function TransactionEntryFAB({
-  envelopes, categories,
+  envelopes, categories, loans,
 }: {
-  envelopes: Envelope[]; categories: Category[]
+  envelopes: Envelope[]; categories: Category[]; loans: Loan[]
 }) {
   const [open, setOpen]               = useState(false)
   const [type, setType]               = useState<TxEntryType>('gasto')
@@ -95,6 +95,11 @@ export function TransactionEntryFAB({
 
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
+
+  // ── Side-effect fields (optional, gasto/ingreso only) ───────────────────────
+  const [debitEnvelopeId, setDebitEnvelope] = useState('')
+  const [loanMode, setLoanMode]             = useState<'' | 'new' | string>('')  // '' | 'new' | <loanId>
+  const [newLoanDesc, setNewLoanDesc]       = useState('')
 
   // ── Duplicate detection ──────────────────────────────────────────────────────
   const [dupHits, setDupHits]         = useState<DuplicateHit[]>([])
@@ -161,6 +166,7 @@ export function TransactionEntryFAB({
     setIsPassive(false); setIsSettlement(false); setIsSurvival(false)
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setAhorroVendor(''); setAhorroConcepto('')
+    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc('')
     setError(null)
     // reset AI state
     setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
@@ -293,6 +299,9 @@ export function TransactionEntryFAB({
           is_settlement: isSettlement,
           is_survival_expense: isSurvival,
           notes: notes || undefined,
+          debit_envelope_id: debitEnvelopeId || undefined,
+          loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
+          new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
         })
       } else if (type === 'ingreso') {
         result = await createTransaction({
@@ -305,6 +314,9 @@ export function TransactionEntryFAB({
           is_passive_income: isPassive,
           is_settlement: isSettlement,
           notes: notes || undefined,
+          debit_envelope_id: debitEnvelopeId || undefined,
+          loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
+          new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
         })
       } else if (type === 'ahorro') {
         if (!envelopeId) { setError('Seleccioná un sobre'); return }
@@ -323,18 +335,6 @@ export function TransactionEntryFAB({
           to_envelope_id: toEnvelopeId,
           notes: notes || undefined,
         })
-      } else if (type === 'autoprestamo') {
-        if (!envelopeId) { setError('Seleccioná el sobre fuente'); return }
-        if (!concept.trim()) { setError('Ingresá una descripción'); return }
-        const r = await createAutoprestamo({
-          description: concept.trim(),
-          amount: amtCRC,
-          date,
-          envelope_id: envelopeId,
-          notes: notes || undefined,
-        })
-        if (r?.error) { setError(r.error); return }
-        close(); return
       }
 
       if (result?.error) { setError(result.error); return }
@@ -364,6 +364,9 @@ export function TransactionEntryFAB({
           is_settlement: isSettlement,
           is_survival_expense: isSurvival,
           notes: notes || undefined,
+          debit_envelope_id: debitEnvelopeId || undefined,
+          loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
+          new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
         })
       } else if (type === 'ingreso') {
         result = await createTransaction({
@@ -376,6 +379,9 @@ export function TransactionEntryFAB({
           is_passive_income: isPassive,
           is_settlement: isSettlement,
           notes: notes || undefined,
+          debit_envelope_id: debitEnvelopeId || undefined,
+          loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
+          new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
         })
       } else if (type === 'ahorro') {
         if (!envelopeId) { setError('Seleccioná un sobre'); return }
@@ -394,18 +400,6 @@ export function TransactionEntryFAB({
           to_envelope_id: toEnvelopeId,
           notes: notes || undefined,
         })
-      } else if (type === 'autoprestamo') {
-        if (!envelopeId) { setError('Seleccioná el sobre fuente'); return }
-        if (!concept.trim()) { setError('Ingresá una descripción'); return }
-        const r = await createAutoprestamo({
-          description: concept.trim(),
-          amount: amtCRC,
-          date,
-          envelope_id: envelopeId,
-          notes: notes || undefined,
-        })
-        if (r?.error) { setError(r.error); return }
-        reset(); return
       }
 
       if (result?.error) { setError(result.error); return }
@@ -564,7 +558,7 @@ export function TransactionEntryFAB({
                   <label className={lbl}>Fecha</label>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
                 </div>
-                {type !== 'traslado' && type !== 'autoprestamo' && (
+                {type !== 'traslado' && (
                   <div>
                     <label className={lbl}>Moneda</label>
                     <div className="flex gap-1">
@@ -582,7 +576,7 @@ export function TransactionEntryFAB({
               </div>
 
               {/* Amount fields depend on currency */}
-              {(type === 'traslado' || type === 'autoprestamo' || currency === 'CRC') ? (
+              {(type === 'traslado' || currency === 'CRC') ? (
                 <div>
                   <label className={lbl}>Monto (₡ CRC)</label>
                   <input type="number" min="0" step="any" value={amount}
@@ -712,27 +706,42 @@ export function TransactionEntryFAB({
               )}
 
               {/* ── Autopréstamo fields ── */}
-              {type === 'autoprestamo' && (
-                <>
+              {/* ── Optional side-effects (gasto / ingreso only) ── */}
+              {(type === 'gasto' || type === 'ingreso') && (
+                <div className="space-y-2 rounded-xl bg-white/[0.03] border border-white/[0.06] p-3">
+                  <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.16em]">Opcionales</p>
                   <div>
-                    <label className={lbl}>Sobre fuente <span className="text-zinc-700 normal-case tracking-normal">(débito)</span></label>
-                    <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)}
-                      className={inputCls} required>
-                      <option value="">Seleccioná un sobre…</option>
+                    <label className={lbl}>Débito de sobre</label>
+                    <select value={debitEnvelopeId} onChange={e => setDebitEnvelope(e.target.value)} className={inputCls}>
+                      <option value="">— ninguno —</option>
                       {leafEnvelopes.map(env => (
                         <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className={lbl}>Descripción del préstamo</label>
-                    <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
-                      placeholder="Para qué es el préstamo…" className={inputCls} required />
+                    <label className={lbl}>Autopréstamo</label>
+                    <select value={loanMode} onChange={e => setLoanMode(e.target.value)} className={inputCls}>
+                      <option value="">— ninguno —</option>
+                      <option value="new">+ Crear nuevo</option>
+                      {loans.map(l => {
+                        const remaining = Number(l.original_amount) - Number(l.amount_repaid)
+                        return (
+                          <option key={l.id} value={l.id}>
+                            {l.description} · ₡{Math.round(remaining).toLocaleString('es-CR')} pendiente
+                          </option>
+                        )
+                      })}
+                    </select>
                   </div>
-                  <p className="text-[9px] text-zinc-600">
-                    Registra un retiro del sobre seleccionado y crea un autopréstamo en Liquidez para que puedas rastrear el pago.
-                  </p>
-                </>
+                  {loanMode === 'new' && (
+                    <div>
+                      <label className={lbl}>Nombre del nuevo autopréstamo</label>
+                      <input type="text" value={newLoanDesc} onChange={e => setNewLoanDesc(e.target.value)}
+                        placeholder="Dejar vacío para usar concepto/vendor…" className={inputCls} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* ── Traslado fields ── */}
