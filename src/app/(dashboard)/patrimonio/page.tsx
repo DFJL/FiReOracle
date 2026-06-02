@@ -62,7 +62,7 @@ export default async function PatrimonioPage() {
       .select('id, snapshot_date, category, item_name, value_crc, sort_order')
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: false })
-      .limit(100),
+      .limit(500),
   ])
 
   // Snapshot bucket balances (fetch in parallel for all snapshot buckets)
@@ -245,12 +245,17 @@ export default async function PatrimonioPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
-  // Latest snapshot's item breakdown
+  // Deduplicate by item_name: take the most recent entry per item (rows are already DESC by date)
   const allItems = (itemRows ?? []) as NetWorthItem[]
-  const latestItemDate = allItems[0]?.snapshot_date ?? null
-  const netWorthItems = latestItemDate
-    ? allItems.filter(r => r.snapshot_date === latestItemDate).sort((a, b) => a.sort_order - b.sort_order)
-    : []
+  const seenItemNames = new Set<string>()
+  const netWorthItems: NetWorthItem[] = []
+  for (const item of allItems) {
+    if (!seenItemNames.has(item.item_name)) {
+      seenItemNames.add(item.item_name)
+      netWorthItems.push(item)
+    }
+  }
+  netWorthItems.sort((a, b) => a.sort_order - b.sort_order)
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
