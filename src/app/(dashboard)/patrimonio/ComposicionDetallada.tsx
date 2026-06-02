@@ -68,7 +68,7 @@ export function ComposicionDetallada({
 
   if (items.length === 0) return null
 
-  const snapshotDate  = items[0]?.snapshot_date ?? new Date().toISOString().slice(0, 10)
+  const snapshotDate  = items.reduce((latest, i) => i.snapshot_date > latest ? i.snapshot_date : latest, items[0]?.snapshot_date ?? new Date().toISOString().slice(0, 10))
   const currentYYYYMM = new Date().toISOString().slice(0, 7)
 
   function showSaved(msg: string) {
@@ -77,7 +77,7 @@ export function ComposicionDetallada({
   }
 
   function openEdit(item: NetWorthItem) {
-    setEdit({ item, period: currentYYYYMM, value: String(item.value_crc) })
+    setEdit({ item, period: item.snapshot_date.slice(0, 7), value: String(item.value_crc) })
   }
 
   function commitEdit() {

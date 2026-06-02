@@ -725,16 +725,14 @@ export function PatrimonioView({
   const lastSnap = sorted[sorted.length - 1]
   const prevMonthSnap = sorted[sorted.length - 2]
 
-  // When snapshots exist, prefer them as the authoritative KPI source so the
-  // card values match the chart's most recent data point.
-  const dispNW     = lastSnap ? Number(lastSnap.net_worth_crc)   : patrimonioNeto
-  const dispActivos = lastSnap
-    ? Number(lastSnap.liquid_crc) + Number(lastSnap.invested_crc) + Number(lastSnap.iliquid_crc)
-    : totalActivos
-  const dispPasivos = lastSnap ? Number(lastSnap.liabilities_crc) : totalLiabilities
-  const dispLiq    = lastSnap ? Number(lastSnap.liquid_crc)       : liquidBalance
-  const dispInv    = lastSnap ? Number(lastSnap.invested_crc)     : totalInvested
-  const dispIliq   = lastSnap ? Number(lastSnap.iliquid_crc)      : iliquidTotal
+  // Liquidez and Inversiones are always live-computed from DB (reliable, no manual entry needed).
+  // Ilíquido and Pasivos use the latest snapshot when available (requires manual recording).
+  const dispLiq     = liquidBalance
+  const dispInv     = totalInvested
+  const dispIliq    = lastSnap ? Number(lastSnap.iliquid_crc)      : iliquidTotal
+  const dispPasivos = lastSnap ? Number(lastSnap.liabilities_crc)  : totalLiabilities
+  const dispActivos = dispLiq + dispInv + dispIliq
+  const dispNW      = dispActivos - dispPasivos
 
   const pnColor = dispNW >= 0 ? 'text-[#a3e635]' : 'text-rose-400'
   const yearAgoSnap   = sorted.find(s => {
