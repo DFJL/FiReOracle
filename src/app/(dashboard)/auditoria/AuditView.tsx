@@ -605,11 +605,12 @@ function AuditLogSection() {
 // ── Transaction detail panel ───────────────────────────────────────────────
 
 function TxDetailPanel({
-  issue, fix, onFixed,
+  issue, fix, onFixed, onIgnore,
 }: {
   issue: AuditIssue
   fix?: FixConfig
   onFixed?: () => void
+  onIgnore?: () => void
 }) {
   const [applying, start] = useTransition()
   const [err, setErr]     = useState('')
@@ -650,14 +651,20 @@ function TxDetailPanel({
           ))}
         </div>
       )}
-      {fix && (
+      {(fix || onIgnore) && (
         <div className="flex flex-wrap gap-2 px-3 py-2 border-t border-white/[0.06] bg-black/10">
-          {fix.actions.map(a => (
+          {fix?.actions.map(a => (
             <button key={a.value} onClick={() => apply(a.value)} disabled={applying}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors disabled:opacity-40 ${VARIANT_CLS[a.variant ?? 'zinc']}`}>
               {applying ? '…' : a.label}
             </button>
           ))}
+          {onIgnore && (
+            <button onClick={onIgnore}
+              className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-white/[0.05] text-zinc-500 hover:text-zinc-300 transition-colors ml-auto">
+              Ignorar
+            </button>
+          )}
         </div>
       )}
       {err && <p className="px-3 py-1 text-rose-400">{err}</p>}
@@ -675,12 +682,14 @@ const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: stri
 }
 
 function CheckCard({
-  check, fix, onFixed, onIgnore,
+  check, fix, onFixed, onIgnore, ignoredTxIds, onIgnoreTxs,
 }: {
   check: AuditCheck
   fix?: FixConfig
   onFixed?: () => void
   onIgnore?: () => void
+  ignoredTxIds?: Set<string>
+  onIgnoreTxs?: (ids: string[]) => void
 }) {
   const [open, setOpen]           = useState(check.severity !== 'ok' && check.count > 0)
   const [selected, setSelected]   = useState<Set<string>>(new Set())
@@ -688,15 +697,17 @@ function CheckCard({
   const [fixError, setFixError]   = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const m          = SEV_META[check.severity]
-  const allChecked = check.issues.length > 0 && selected.size === check.issues.length
+  const m              = SEV_META[check.severity]
+  const visibleIssues  = ignoredTxIds ? check.issues.filter(i => !ignoredTxIds.has(i.id)) : check.issues
+  const ignoredCount   = check.issues.length - visibleIssues.length
+  const allChecked     = visibleIssues.length > 0 && selected.size === visibleIssues.length
 
   function toggle(id: string) {
     setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
   }
 
   function toggleAll() {
-    setSelected(allChecked ? new Set() : new Set(check.issues.map(i => i.id)))
+    setSelected(allChecked ? new Set() : new Set(visibleIssues.map(i => i.id)))
   }
 
   function applyFix(action: string, ids: string[]) {
@@ -770,7 +781,7 @@ function CheckCard({
         )}
       </div>
 
-      {open && check.issues.length > 0 && (
+      {open && visibleIssues.length > 0 && (
         <div className="border-t border-white/[0.04]">
 
           {fix && (
@@ -783,13 +794,16 @@ function CheckCard({
               />
               <span className="text-[10px] text-zinc-500 select-none">
                 {selected.size > 0
-                  ? `${selected.size} de ${check.issues.length} seleccionados`
-                  : `Seleccionar los ${check.issues.length} mostrados`}
+                  ? `${selected.size} de ${visibleIssues.length} seleccionados`
+                  : `Seleccionar los ${visibleIssues.length} mostrados`}
               </span>
+              {ignoredCount > 0 && (
+                <span className="text-[10px] text-zinc-700 ml-auto">{ignoredCount} ignorada{ignoredCount !== 1 ? 's' : ''}</span>
+              )}
             </div>
           )}
 
-          {check.issues.map((issue, i) => (
+          {visibleIssues.map((issue, i) => (
             <div key={issue.id + i} className="border-b border-white/[0.03] last:border-0">
               <div
                 className={`flex items-start gap-3 px-4 py-2.5 ${issue.txData && !issue.dupeMeta ? 'cursor-pointer hover:bg-white/[0.02] transition-colors' : ''}`}
@@ -846,17 +860,18 @@ function CheckCard({
                   issue={issue}
                   fix={fix}
                   onFixed={() => { setExpandedId(null); onFixed?.() }}
+                  onIgnore={onIgnoreTxs ? () => { setExpandedId(null); onIgnoreTxs([issue.id]) } : undefined}
                 />
               )}
             </div>
           ))}
 
-          {fix && selected.size > 0 && (
+          {selected.size > 0 && (
             <div className="flex items-center flex-wrap gap-2 px-4 py-3 bg-white/[0.04] border-t border-white/[0.06]">
               <span className="text-[10px] text-zinc-400 mr-auto">
                 {selected.size} seleccionado{selected.size !== 1 ? 's' : ''}
               </span>
-              {fix.actions.map(a => (
+              {fix?.actions.map(a => (
                 <button
                   key={a.value}
                   onClick={() => applyFix(a.value, [...selected])}
@@ -866,6 +881,15 @@ function CheckCard({
                   {applying ? '…' : a.label}
                 </button>
               ))}
+              {onIgnoreTxs && (
+                <button
+                  onClick={() => { onIgnoreTxs([...selected]); setSelected(new Set()) }}
+                  disabled={applying}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-white/[0.06] text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-40"
+                >
+                  Ignorar
+                </button>
+              )}
               <button onClick={() => setSelected(new Set())}
                 className="px-2 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
                 Limpiar
@@ -925,6 +949,13 @@ export function AuditView({ custodios, flowData }: {
       return raw ? new Set(JSON.parse(raw) as string[]) : new Set()
     } catch { return new Set() }
   })
+  const [ignoredTxIds, setIgnoredTxIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const raw = localStorage.getItem('audit-ignored-tx-ids')
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set()
+    } catch { return new Set() }
+  })
 
   function dismissCheck(id: string) {
     setDismissed(prev => {
@@ -938,6 +969,15 @@ export function AuditView({ custodios, flowData }: {
   function resetDismissed() {
     setDismissed(new Set())
     try { localStorage.removeItem('audit-dismissed-checks') } catch {}
+  }
+
+  function ignoreTxs(ids: string[]) {
+    setIgnoredTxIds(prev => {
+      const next = new Set(prev)
+      for (const id of ids) next.add(id)
+      try { localStorage.setItem('audit-ignored-tx-ids', JSON.stringify([...next])) } catch {}
+      return next
+    })
   }
 
   function runAuditAction() {
@@ -1107,7 +1147,7 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-rose-400/70 uppercase tracking-[0.16em]">Errores</p>
                     {errorChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} ignoredTxIds={ignoredTxIds} onIgnoreTxs={ignoreTxs} />
                     ))}
                   </div>
                 )}
@@ -1115,7 +1155,7 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-[0.16em]">Advertencias</p>
                     {warningChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} ignoredTxIds={ignoredTxIds} onIgnoreTxs={ignoreTxs} />
                     ))}
                   </div>
                 )}
@@ -1123,14 +1163,14 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-blue-400/70 uppercase tracking-[0.16em]">Informativo</p>
                     {infoChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} ignoredTxIds={ignoredTxIds} onIgnoreTxs={ignoreTxs} />
                     ))}
                   </div>
                 )}
                 {okChecks.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.16em]">Sin problemas</p>
-                    {okChecks.map(c => <CheckCard key={c.id} check={c} onIgnore={() => dismissCheck(c.id)} />)}
+                    {okChecks.map(c => <CheckCard key={c.id} check={c} onIgnore={() => dismissCheck(c.id)} ignoredTxIds={ignoredTxIds} onIgnoreTxs={ignoreTxs} />)}
                   </div>
                 )}
                 {dismissedChecks.length > 0 && (
