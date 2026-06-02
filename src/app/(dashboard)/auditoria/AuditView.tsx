@@ -10,7 +10,10 @@ import {
   fixAllNullMovementType,
   fixExpenseGroup,
   addAdjustmentTransaction,
+  getAuditLog,
+  revertAuditChange,
 } from '@/app/actions/audit-fix'
+import type { AuditLogEntry } from '@/app/actions/audit-fix'
 import type { AuditReport, AuditCheck, AuditSeverity, DupeTxSnapshot } from '@/app/actions/audit'
 import type { CustodioInfo, FlowData } from './page'
 
@@ -460,6 +463,143 @@ function DuplicateComparePanel({
   )
 }
 
+// ── Audit log section ─────────────────────────────────────────────────────
+
+const FIELD_LABELS: Record<string, string> = {
+  movement_type:       'Tipo',
+  amount:              'Monto',
+  date:                'Fecha',
+  vendor:              'Comercio',
+  concept:             'Concepto',
+  expense_group:       'Grupo',
+  is_passive_income:   'Pasivo',
+  is_settlement:       'Liquidación',
+  is_survival_expense: 'Supervivencia',
+  category_code:       'Categoría',
+  notes:               'Notas',
+  investment_bucket_id:'Bucket',
+}
+
+function fmtVal(v: unknown): string {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'boolean') return v ? 'Sí' : 'No'
+  return String(v)
+}
+
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(diff / 60000)
+  if (m < 1)  return 'ahora'
+  if (m < 60) return `hace ${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `hace ${h}h`
+  return `hace ${Math.floor(h / 24)}d`
+}
+
+function AuditLogSection() {
+  const [entries, setEntries]   = useState<AuditLogEntry[] | null>(null)
+  const [loading, startLoad]    = useTransition()
+  const [reverting, startRevert]= useTransition()
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [error, setError]       = useState('')
+
+  function load() {
+    setError('')
+    startLoad(async () => {
+      const r = await getAuditLog(150)
+      if ('error' in r) { setError(r.error); return }
+      setEntries(r.entries)
+    })
+  }
+
+  function doRevert(logId: string) {
+    setError('')
+    startRevert(async () => {
+      const r = await revertAuditChange(logId)
+      if (r.error) { setError(r.error); return }
+      setConfirmId(null)
+      // Refresh log
+      const r2 = await getAuditLog(150)
+      if (!('error' in r2)) setEntries(r2.entries)
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      {entries === null ? (
+        <button onClick={load} disabled={loading}
+          className="w-full py-2.5 rounded-xl border border-dashed border-white/[0.08] text-[11px] text-zinc-500 hover:text-zinc-300 hover:border-white/[0.14] transition-colors disabled:opacity-40">
+          {loading ? 'Cargando…' : 'Cargar historial de cambios'}
+        </button>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-zinc-600">{entries.length} cambio{entries.length !== 1 ? 's' : ''} recientes</p>
+            <button onClick={load} disabled={loading}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors disabled:opacity-40">
+              {loading ? '…' : 'Actualizar'}
+            </button>
+          </div>
+          {entries.length === 0 ? (
+            <p className="text-[10px] text-zinc-700 text-center py-4">Sin cambios registrados todavía.</p>
+          ) : (
+            <div className="rounded-xl border border-white/[0.06] overflow-hidden divide-y divide-white/[0.04]">
+              {entries.map(e => (
+                <div key={e.id} className={`px-4 py-2.5 ${e.operation === 'DELETE' ? 'bg-rose-500/[0.04]' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      {/* Transaction context */}
+                      <p className="text-[11px] text-zinc-300 truncate">
+                        {e.concept || e.vendor || e.transaction_id.slice(0, 8)}
+                        {e.date ? <span className="text-zinc-600 ml-1.5">{e.date}</span> : null}
+                      </p>
+                      {/* Changed fields */}
+                      {e.operation === 'DELETE' ? (
+                        <p className="text-[10px] text-rose-400 mt-0.5">Eliminada</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                          {(e.changed_fields ?? []).map(f => (
+                            <span key={f} className="text-[10px] text-zinc-500">
+                              <span className="text-zinc-600">{FIELD_LABELS[f] ?? f}: </span>
+                              <span className="text-rose-400/80 line-through">{fmtVal(e.old_data?.[f])}</span>
+                              <span className="text-zinc-600 mx-1">→</span>
+                              <span className="text-lime-400/80">{fmtVal(e.new_data?.[f])}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right space-y-1">
+                      <p className="text-[10px] text-zinc-700">{timeAgo(e.changed_at)}</p>
+                      {e.operation === 'UPDATE' && (
+                        confirmId === e.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={() => doRevert(e.id)} disabled={reverting}
+                              className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-black disabled:opacity-40">
+                              {reverting ? '…' : 'Sí'}
+                            </button>
+                            <button onClick={() => setConfirmId(null)} className="text-[10px] text-zinc-600 hover:text-zinc-400">No</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setConfirmId(e.id)}
+                            className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors">
+                            Deshacer
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {error && <p className="text-[10px] text-rose-400">{error}</p>}
+    </div>
+  )
+}
+
 // ── Audit check card ───────────────────────────────────────────────────────
 
 const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: string; head: string }> = {
@@ -779,6 +919,12 @@ export function AuditView({ custodios, flowData }: {
               </button>
             </div>
           ))}
+        </div>
+      </Section>
+
+      <Section title="Historial de cambios" subtitle="Cambios recientes en transacciones — con opción de deshacer" defaultOpen={false}>
+        <div className="p-4">
+          <AuditLogSection />
         </div>
       </Section>
 
