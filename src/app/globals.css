@@ -29,3 +29,12 @@ body {
 .text-accent  { color: var(--accent); }
 .bg-accent    { background: var(--accent); }
 .border-accent { border-color: var(--accent); }
+
+/* Select dropdowns — force dark background on native options */
+select {
+  color-scheme: dark;
+}
+select option {
+  background-color: #18211a;
+  color: #f0f4ee;
+}
