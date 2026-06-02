@@ -653,12 +653,24 @@ export function TransactionEntryFAB({
                       </select>
                     </div>
                   )}
-                  {(isSettlement || isSurvival) && (
-                    <div className="flex flex-wrap gap-2">
-                      {isSurvival  && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20">Gasto de supervivencia</span>}
-                      {isSettlement && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 border border-blue-400/20">Liquidación de inversión</span>}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setIsSurvival(v => !v)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                        isSurvival
+                          ? 'bg-amber-400/10 text-amber-400 border-amber-400/20'
+                          : 'bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400'
+                      }`}>
+                      Gasto supervivencia
+                    </button>
+                    <button type="button" onClick={() => setIsSettlement(v => !v)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                        isSettlement
+                          ? 'bg-blue-400/10 text-blue-400 border-blue-400/20'
+                          : 'bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400'
+                      }`}>
+                      Liquidacion de inversion
+                    </button>
+                  </div>
                 </>
               )}
 
@@ -703,12 +715,24 @@ export function TransactionEntryFAB({
                       </select>
                     </div>
                   )}
-                  {(isPassive || isSettlement) && (
-                    <div className="flex flex-wrap gap-2">
-                      {isPassive    && <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">Ingreso pasivo</span>}
-                      {isSettlement && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 border border-blue-400/20">Liquidación de inversión</span>}
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setIsPassive(v => !v)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                        isPassive
+                          ? 'bg-cyan-400/10 text-cyan-400 border-cyan-400/20'
+                          : 'bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400'
+                      }`}>
+                      Ingreso pasivo
+                    </button>
+                    <button type="button" onClick={() => setIsSettlement(v => !v)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                        isSettlement
+                          ? 'bg-blue-400/10 text-blue-400 border-blue-400/20'
+                          : 'bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400'
+                      }`}>
+                      Liquidacion de inversion
+                    </button>
+                  </div>
                 </>
               )}
 
