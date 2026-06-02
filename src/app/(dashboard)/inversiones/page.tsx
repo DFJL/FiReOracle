@@ -40,7 +40,7 @@ export default async function InversionesPage() {
       .order('sort_order'),
     admin
       .from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
+      .select('vendor, concept, category_code, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin
