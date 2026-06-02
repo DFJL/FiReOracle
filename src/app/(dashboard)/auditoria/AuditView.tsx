@@ -980,6 +980,11 @@ export function AuditView({ custodios, flowData }: {
     })
   }
 
+  function resetIgnoredTxs() {
+    setIgnoredTxIds(new Set())
+    try { localStorage.removeItem('audit-ignored-tx-ids') } catch {}
+  }
+
   function runAuditAction() {
     setAuditError(null)
     start(async () => {
@@ -1173,15 +1178,30 @@ export function AuditView({ custodios, flowData }: {
                     {okChecks.map(c => <CheckCard key={c.id} check={c} onIgnore={() => dismissCheck(c.id)} ignoredTxIds={ignoredTxIds} onIgnoreTxs={ignoreTxs} />)}
                   </div>
                 )}
-                {dismissedChecks.length > 0 && (
-                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                    <p className="text-[10px] text-zinc-600">
-                      {dismissedChecks.length} check{dismissedChecks.length !== 1 ? 's' : ''} ignorado{dismissedChecks.length !== 1 ? 's' : ''}
-                    </p>
-                    <button onClick={resetDismissed}
-                      className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
-                      Restablecer
-                    </button>
+                {(dismissedChecks.length > 0 || ignoredTxIds.size > 0) && (
+                  <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] divide-y divide-white/[0.04] overflow-hidden">
+                    {dismissedChecks.length > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <p className="text-[10px] text-zinc-600">
+                          {dismissedChecks.length} check{dismissedChecks.length !== 1 ? 's' : ''} ignorado{dismissedChecks.length !== 1 ? 's' : ''}
+                        </p>
+                        <button onClick={resetDismissed}
+                          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+                          Restablecer
+                        </button>
+                      </div>
+                    )}
+                    {ignoredTxIds.size > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <p className="text-[10px] text-zinc-600">
+                          {ignoredTxIds.size} tx{ignoredTxIds.size !== 1 ? 's' : ''} ignorada{ignoredTxIds.size !== 1 ? 's' : ''}
+                        </p>
+                        <button onClick={resetIgnoredTxs}
+                          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+                          Restablecer
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 <p className="text-[9px] text-zinc-700 text-center pt-2">
