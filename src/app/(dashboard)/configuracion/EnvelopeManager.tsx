@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { createEnvelope, updateEnvelope, deactivateEnvelope } from '@/app/actions/envelopes'
+import { createEnvelope, updateEnvelope, deactivateEnvelope, renameCustodio } from '@/app/actions/envelopes'
 
 type Envelope = {
   id: string
@@ -149,7 +149,32 @@ export function EnvelopeManager({ envelopes: initial }: { envelopes: Envelope[] 
   const [confirmId, setConfirmId]         = useState<string | null>(null)
   const [isPending, start]                = useTransition()
 
+  // Custodio rename
+  const [editCust, setEditCust]           = useState<string | null>(null)
+  const [custNewName, setCustNewName]     = useState('')
+  const [custError, setCustError]         = useState('')
+  const [custPending, startCust]          = useTransition()
+
   const custodios = [...new Set(envelopes.map(e => e.custodio))]
+
+  function startRenameCustodio(name: string) {
+    setEditCust(name); setCustNewName(name); setCustError('')
+  }
+
+  function cancelRenameCustodio() {
+    setEditCust(null); setCustNewName(''); setCustError('')
+  }
+
+  function submitRenameCustodio() {
+    if (!editCust) return
+    startCust(async () => {
+      const res = await renameCustodio(editCust, custNewName)
+      if (res?.error) { setCustError(res.error); return }
+      const trimmed = custNewName.trim()
+      setEnvelopes(prev => prev.map(e => e.custodio === editCust ? { ...e, custodio: trimmed } : e))
+      setEditCust(null); setCustNewName(''); setCustError('')
+    })
+  }
 
   async function handleCreate(data: FormData) {
     const res = await createEnvelope(data)
@@ -174,6 +199,44 @@ export function EnvelopeManager({ envelopes: initial }: { envelopes: Envelope[] 
 
   return (
     <div className="space-y-3">
+      {/* Custodios section */}
+      <div className="rounded-xl bg-white/[0.02] border border-white/[0.05] p-4 space-y-2">
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Custodios</p>
+        {custodios.map(c => (
+          <div key={c} className="flex items-center gap-2">
+            {editCust === c ? (
+              <>
+                <input
+                  value={custNewName}
+                  onChange={e => setCustNewName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') submitRenameCustodio(); if (e.key === 'Escape') cancelRenameCustodio() }}
+                  className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
+                  autoFocus
+                />
+                <button onClick={submitRenameCustodio} disabled={custPending}
+                  className="px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50">
+                  {custPending ? '...' : 'Guardar'}
+                </button>
+                <button onClick={cancelRenameCustodio}
+                  className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-xs">
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm text-zinc-300">{c}</span>
+                <span className="text-[9px] text-zinc-600">{envelopes.filter(e => e.custodio === c).length} sobres</span>
+                <button onClick={() => startRenameCustodio(c)}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.04] text-zinc-500 text-[10px] hover:text-zinc-200 transition-colors">
+                  Renombrar
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+        {custError && <p className="text-xs text-rose-400">{custError}</p>}
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-black text-zinc-300">Sobres de liquidez</p>

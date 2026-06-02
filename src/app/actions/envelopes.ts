@@ -188,6 +188,30 @@ export async function deleteSubEnvelope(id: string) {
   revalidatePath('/configuracion')
 }
 
+export async function renameCustodio(oldName: string, newName: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const trimmed = newName.trim()
+  if (!trimmed) return { error: 'Nombre requerido' }
+  if (trimmed === oldName.trim()) return {}
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('savings_envelopes')
+    .update({ custodio: trimmed, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .eq('custodio', oldName.trim())
+    .eq('is_active', true)
+
+  if (error) return { error: error.message }
+  revalidatePath('/liquidez')
+  revalidatePath('/configuracion')
+  revalidatePath('/inversiones')
+  return {}
+}
+
 export async function deactivateEnvelope(id: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
