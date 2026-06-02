@@ -32,5 +32,9 @@ VALUES
   -- I-50, I-55, I-56, I-59, I-61: Farming, Anchor, Nodos, Hodl crypto
   ('INVESTMENT_RETURN_CRYPTO','Rendimientos Farming / Crypto',  'PASSIVE_INCOME', 'income', 'na', TRUE, FALSE, 32),
   -- I-54: Minería Ethereum / tarjetas gráficas
-  ('INVESTMENT_RETURN_MINING','Minería Crypto',                 'PASSIVE_INCOME', 'income', 'na', TRUE, FALSE, 33)
+  ('INVESTMENT_RETURN_MINING','Minería Crypto',                 'PASSIVE_INCOME', 'income', 'na', TRUE, FALSE, 33),
+  -- I-33, I-40, I-47, I-58, I-60: cash-out of accumulated returns (not capital withdrawal)
+  ('INVESTMENT_RETURN_LIQUID','Liquidación de Rendimientos',    'PASSIVE_INCOME', 'income', 'na', TRUE, FALSE, 35),
+  -- I-62: unrealized appreciation (crypto / fund value increases)
+  ('APPRECIATION',            'Aumento de valor / plusvalía',   'PASSIVE_INCOME', 'income', 'na', TRUE, FALSE, 36)
 ON CONFLICT (code) DO NOTHING;

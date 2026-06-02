@@ -27,7 +27,6 @@ import type { CustodioInfo, FlowData } from './page'
 function fmtCRC(n: number) {
   const abs = Math.abs(n)
   if (abs >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
-  if (abs >= 1_000)     return `₡${Math.round(n / 1_000)}K`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
@@ -655,7 +654,9 @@ function TxDetailPanel({
         // Liquidations — capital vs returns
         /liquidaci[oó]n.*laboral|liquidaci[oó]n.*laboral/.test(text) ? opts.find(o => o.value === 'LABOR_SETTLEMENT') :
         /liquidaci[oó]n.*ahorro|ahorro.*liquidaci[oó]n/.test(text)   ? opts.find(o => o.value === 'SAVINGS_LIQUIDATION') :
+        /liquidaci[oó]n.*rendimiento|rendimiento.*liquidaci[oó]n/.test(text) ? opts.find(o => o.value === 'INVESTMENT_RETURN_LIQUID') :
         /liquidaci[oó]n/.test(text)                              ? opts.find(o => o.value === 'INVESTMENT_LIQUIDATION') :
+        /aumento.*valor|plusval[ií]a/.test(text)                 ? opts.find(o => o.value === 'APPRECIATION') :
         // Rendimientos / returns
         /rendimiento|yield/.test(text)                           ? opts.find(o => o.value === 'INVESTMENT_RETURN') :
         // Interest / savings

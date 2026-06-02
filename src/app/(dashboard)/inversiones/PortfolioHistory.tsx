@@ -20,9 +20,9 @@ const TOTAL_COLOR = '#a3e635'
 function fmtV(n: number, currency: 'CRC' | 'USD', rate: number) {
   const v = currency === 'CRC' ? n : n / rate
   const sym = currency === 'CRC' ? '₡' : '$'
-  if (v >= 1_000_000) return `${sym}${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000)     return `${sym}${Math.round(v / 1_000)}K`
-  return `${sym}${Math.round(v)}`
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return `${sym}${(v / 1_000_000).toFixed(2)}M`
+  return `${sym}${Math.round(v).toLocaleString('es-CR')}`
 }
 
 function monthLabel(m: string) {

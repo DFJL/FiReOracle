@@ -26,8 +26,8 @@ const SUGGESTIONS = [
 function BarChart({ data, title }: { data: ChartPoint[]; title: string }) {
   const max = Math.max(...data.map(d => d.value), 1)
   const fmt = (n: number) => n >= 1_000_000
-    ? `₡${(n / 1_000_000).toFixed(1)}M`
-    : n >= 1_000 ? `₡${Math.round(n / 1_000)}K` : `₡${Math.round(n)}`
+    ? `₡${(n / 1_000_000).toFixed(2)}M`
+    : `₡${Math.round(n).toLocaleString('es-CR')}`
 
   return (
     <div className="mt-2 mb-1 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-4 w-full">
@@ -76,8 +76,8 @@ function LineChart({ data, title }: { data: ChartPoint[]; title: string }) {
   const areaPath = path + ` L${xs[xs.length - 1].toFixed(1)},${(pt + cH).toFixed(1)} L${xs[0].toFixed(1)},${(pt + cH).toFixed(1)} Z`
 
   const fmt = (n: number) => n >= 1_000_000
-    ? `₡${(n / 1_000_000).toFixed(1)}M`
-    : n >= 1_000 ? `₡${Math.round(n / 1_000)}K` : `₡${Math.round(n)}`
+    ? `₡${(n / 1_000_000).toFixed(2)}M`
+    : `₡${Math.round(n).toLocaleString('es-CR')}`
   const step = data.length > 10 ? 2 : 1
 
   return (

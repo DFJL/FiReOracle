@@ -81,8 +81,7 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
     const val = currency === 'CRC' ? v * liveRate : v
     const sym = currency === 'CRC' ? '₡' : '$'
     return val >= 1_000_000 ? `${sym}${(val / 1_000_000).toFixed(2)}M`
-      : val >= 1_000 ? `${sym}${(val / 1_000).toFixed(1)}K`
-      : `${sym}${Math.round(val)}`
+      : `${sym}${Math.round(val).toLocaleString('es-CR')}`
   }
 
   // Chart dimensions

@@ -117,7 +117,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
     }
 
     const dupeTotal = dupes.reduce((s, d) => s + (d.amount ?? 0), 0)
-    const fmtK = (n: number) => n >= 1_000_000 ? `₡${(n / 1_000_000).toFixed(1)}M` : `₡${Math.round(n / 1_000)}K`
+    const fmtK = (n: number) => n >= 1_000_000 ? `₡${(n / 1_000_000).toFixed(2)}M` : `₡${Math.round(n).toLocaleString('es-CR')}`
 
     checks.push({
       id: 'duplicates',

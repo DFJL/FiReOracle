@@ -7,7 +7,6 @@ import { createSelfLoan, recordSelfLoanPayment } from '@/app/actions/selfLoans'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
-  if (Math.abs(n) >= 1_000)     return `₡${Math.round(n / 1_000)}K`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
