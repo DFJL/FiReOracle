@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
+import { CONCEPT_CATALOG, lookupConcept } from '@/lib/concept-catalog'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type InvestmentBucket = { id: string; name: string }
@@ -620,12 +621,23 @@ export function TransactionEntryFAB({
                     </div>
                     <div>
                       <label className={lbl}>Concepto</label>
-                      <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
+                      <input type="text" list="catalog-expense" value={concept}
+                        onChange={e => {
+                          const v = e.target.value
+                          setConcept(v)
+                          const hit = lookupConcept(v)
+                          if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
+                        }}
                         placeholder="Almuerzo, Supermercado…" className={inputCls} />
+                      <datalist id="catalog-expense">
+                        {CONCEPT_CATALOG.filter(e => e.type === 'expense').map(e =>
+                          <option key={e.concepto} value={e.concepto} />
+                        )}
+                      </datalist>
                     </div>
                   </div>
                   <div>
-                    <label className={lbl}>Categoría <span className="text-zinc-700 normal-case tracking-normal">(auto-asigna grupo)</span></label>
+                    <label className={lbl}>Categoría <span className="text-zinc-700 normal-case tracking-normal">(auto-asigna al elegir concepto)</span></label>
                     <CategorySelect categories={categories} value={categoryCode}
                       onChange={v => { setCategoryCode(v); if (!v) setExpenseGroup('personal') }}
                       typeFilter="expense" className={inputCls} />
@@ -661,12 +673,23 @@ export function TransactionEntryFAB({
                     </div>
                     <div>
                       <label className={lbl}>Descripción / Concepto</label>
-                      <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
-                        placeholder="Salario, dividendo…" className={inputCls} />
+                      <input type="text" list="catalog-income" value={concept}
+                        onChange={e => {
+                          const v = e.target.value
+                          setConcept(v)
+                          const hit = lookupConcept(v)
+                          if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
+                        }}
+                        placeholder="Salario, Rendimientos Farming…" className={inputCls} />
+                      <datalist id="catalog-income">
+                        {CONCEPT_CATALOG.filter(e => e.type === 'income').map(e =>
+                          <option key={e.concepto} value={e.concepto} />
+                        )}
+                      </datalist>
                     </div>
                   </div>
                   <div>
-                    <label className={lbl}>Categoría</label>
+                    <label className={lbl}>Categoría <span className="text-zinc-700 normal-case tracking-normal">(auto-asigna al elegir concepto)</span></label>
                     <CategorySelect categories={categories} value={categoryCode}
                       onChange={v => setCategoryCode(v)}
                       typeFilter="income" className={inputCls} />
