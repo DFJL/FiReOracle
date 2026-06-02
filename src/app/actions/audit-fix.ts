@@ -238,3 +238,15 @@ export async function fixExpenseGroup(ids: string[], expenseGroup: string) {
   revalidate()
   return { ok: true }
 }
+
+export async function fixIsSettlement(ids: string[], value: boolean) {
+  if (!ids.length) return { ok: true }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  const { error } = await supabase
+    .from('transactions').update({ is_settlement: value }).in('id', ids).eq('user_id', user.id)
+  if (error) return { error: error.message }
+  revalidate()
+  return { ok: true }
+}
