@@ -276,18 +276,23 @@ export async function fixInvestmentBucket(ids: string[], bucketId: string) {
   return { ok: true }
 }
 
-export async function getIncomeCategories(): Promise<{ code: string; name: string; is_settlement: boolean }[]> {
+export async function getIncomeCategories(): Promise<{ code: string; name: string }[]> {
   const admin = createAdminClient()
   const { data } = await admin
     .from('transaction_categories')
-    .select('code, name, is_settlement')
-    .eq('category_type', 'income')
+    .select('code, name, parent_code, category_type')
     .eq('is_active', true)
     .order('sort_order')
-  return (data ?? []).map(r => ({
-    code: r.code as string,
-    name: r.name as string,
-    is_settlement: (r.is_settlement ?? false) as boolean,
+
+  const rows = (data ?? []) as { code: string; name: string; parent_code: string | null; category_type: string }[]
+  const nameMap = new Map(rows.map(r => [r.code, r.name]))
+
+  // Income categories first, then settlement/liquidation ones, with parent prefix for children
+  // Only leaf categories (with parent) — parent-only rows like INCOME are too generic
+  const income = rows.filter(r => r.category_type === 'income' && r.parent_code !== null)
+  return income.map(r => ({
+    code: r.code,
+    name: `${nameMap.get(r.parent_code!) ?? r.parent_code} · ${r.name}`,
   }))
 }
 
