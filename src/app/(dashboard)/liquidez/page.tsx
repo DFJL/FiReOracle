@@ -40,6 +40,7 @@ export type SelfLoan = {
   status: string
   source_envelope_id: string | null
   source_envelope_name: string | null
+  envelope_split: { envelope_id: string; name: string; amount: number }[] | null
   notes: string | null
 }
 
@@ -67,7 +68,7 @@ export default async function LiquidezPage() {
       .eq('user_id', user.id),
     admin
       .from('self_loans')
-      .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, notes')
+      .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, envelope_split, notes')
       .eq('user_id', user.id)
       .order('loan_date', { ascending: false }),
   ])
@@ -137,17 +138,24 @@ export default async function LiquidezPage() {
   const envelopeNameMap: Record<string, string> = {}
   for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
 
-  const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => ({
-    id: l.id,
-    description: l.description,
-    original_amount: Number(l.original_amount),
-    amount_repaid: Number(l.amount_repaid),
-    loan_date: l.loan_date,
-    status: l.status,
-    source_envelope_id: l.source_envelope_id ?? null,
-    source_envelope_name: l.source_envelope_id ? (envelopeNameMap[l.source_envelope_id] ?? null) : null,
-    notes: l.notes,
-  }))
+  const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => {
+    const rawSplit = l.envelope_split as { envelope_id: string; amount: number }[] | null
+    const split = rawSplit
+      ? rawSplit.map(s => ({ ...s, name: envelopeNameMap[s.envelope_id] ?? '?' }))
+      : null
+    return {
+      id: l.id,
+      description: l.description,
+      original_amount: Number(l.original_amount),
+      amount_repaid: Number(l.amount_repaid),
+      loan_date: l.loan_date,
+      status: l.status,
+      source_envelope_id: l.source_envelope_id ?? null,
+      source_envelope_name: l.source_envelope_id ? (envelopeNameMap[l.source_envelope_id] ?? null) : null,
+      envelope_split: split,
+      notes: l.notes,
+    }
+  })
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">

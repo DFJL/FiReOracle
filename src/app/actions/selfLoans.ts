@@ -28,7 +28,6 @@ export async function createAutoprestamo(data: AutoprestamoInput) {
 
   if (!acct) return { error: 'No hay cuentas financieras configuradas' }
 
-  // Debit the envelope
   const { error: movErr } = await admin.from('envelope_movements').insert({
     user_id: user.id,
     envelope_id: data.envelope_id,
@@ -39,7 +38,6 @@ export async function createAutoprestamo(data: AutoprestamoInput) {
   })
   if (movErr) return { error: movErr.message }
 
-  // Create the self-loan record
   const { error: loanErr } = await admin.from('self_loans').insert({
     user_id: user.id,
     description: data.description,
@@ -61,7 +59,7 @@ export type SelfLoanFormData = {
   description: string
   original_amount: number
   loan_date: string
-  source_envelope_id: string | null
+  sources: { envelope_id: string; amount: number }[]
   notes?: string
 }
 
@@ -72,7 +70,6 @@ export async function createSelfLoan(data: SelfLoanFormData) {
 
   const admin = createAdminClient()
 
-  // Pick a placeholder account_id (required by schema) — use first financial account
   const { data: acct } = await admin
     .from('financial_accounts')
     .select('id')
@@ -82,13 +79,37 @@ export async function createSelfLoan(data: SelfLoanFormData) {
 
   if (!acct) return { error: 'No hay cuentas financieras configuradas' }
 
+  const validSources = data.sources.filter(s => s.envelope_id && s.amount > 0)
+  const sumFromSources = validSources.reduce((s, e) => s + e.amount, 0)
+  const originalAmount = validSources.length > 0 && sumFromSources > 0
+    ? sumFromSources
+    : data.original_amount
+
+  if (originalAmount <= 0) return { error: 'Monto inválido' }
+
+  for (const src of validSources) {
+    const { error: movErr } = await admin.from('envelope_movements').insert({
+      user_id: user.id,
+      envelope_id: src.envelope_id,
+      date: data.loan_date,
+      amount: -Math.abs(src.amount),
+      movement_type: 'retiro',
+      notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
+    })
+    if (movErr) return { error: movErr.message }
+  }
+
+  const primaryEnvelopeId = validSources.length > 0 ? validSources[0].envelope_id : null
+  const envelopeSplit = validSources.length > 1 ? validSources : null
+
   const { error } = await admin.from('self_loans').insert({
     user_id: user.id,
     description: data.description,
-    original_amount: data.original_amount,
+    original_amount: originalAmount,
     loan_date: data.loan_date,
     source_account_id: acct.id,
-    source_envelope_id: data.source_envelope_id,
+    source_envelope_id: primaryEnvelopeId,
+    envelope_split: envelopeSplit,
     currency_code: 'CRC',
     status: 'pending',
     notes: data.notes || null,
@@ -109,10 +130,9 @@ export async function recordSelfLoanPayment(
 
   const admin = createAdminClient()
 
-  // Fetch loan to get current state + source envelope
   const { data: loan, error: loanErr } = await admin
     .from('self_loans')
-    .select('id, original_amount, amount_repaid, source_envelope_id, status')
+    .select('id, original_amount, amount_repaid, source_envelope_id, envelope_split, status')
     .eq('id', loanId)
     .eq('user_id', user.id)
     .single()
@@ -124,7 +144,6 @@ export async function recordSelfLoanPayment(
   const newBalance = Math.max(0, Number(loan.original_amount) - newRepaid)
   const newStatus = newBalance === 0 ? 'paid' : newRepaid > 0 ? 'partial' : 'pending'
 
-  // Insert payment record
   const { error: payErr } = await admin.from('self_loan_payments').insert({
     self_loan_id: loanId,
     amount: payment.amount,
@@ -133,15 +152,38 @@ export async function recordSelfLoanPayment(
   })
   if (payErr) return { error: payErr.message }
 
-  // Update loan totals
   const { error: updErr } = await admin
     .from('self_loans')
     .update({ amount_repaid: newRepaid, balance_remaining: newBalance, status: newStatus })
     .eq('id', loanId)
   if (updErr) return { error: updErr.message }
 
-  // Credit the source envelope if set
-  if (loan.source_envelope_id) {
+  const split = loan.envelope_split as { envelope_id: string; amount: number }[] | null
+
+  if (split && split.length > 0) {
+    const totalOriginalSplit = split.reduce((s, e) => s + e.amount, 0)
+    if (totalOriginalSplit > 0) {
+      let credited = 0
+      for (let i = 0; i < split.length; i++) {
+        const entry = split[i]
+        const isLast = i === split.length - 1
+        const portion = isLast
+          ? payment.amount - credited
+          : Math.round((entry.amount / totalOriginalSplit) * payment.amount)
+        credited += portion
+        if (portion === 0) continue
+        const { error: movErr } = await supabase.from('envelope_movements').insert({
+          user_id: user.id,
+          envelope_id: entry.envelope_id,
+          date: payment.date,
+          amount: Math.abs(portion),
+          movement_type: 'traslado_in',
+          notes: `Abono autopréstamo${payment.notes ? ` · ${payment.notes}` : ''}`,
+        })
+        if (movErr) return { error: movErr.message }
+      }
+    }
+  } else if (loan.source_envelope_id) {
     const { error: movErr } = await supabase.from('envelope_movements').insert({
       user_id: user.id,
       envelope_id: loan.source_envelope_id,
@@ -153,6 +195,32 @@ export async function recordSelfLoanPayment(
     if (movErr) return { error: movErr.message }
   }
 
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
+export async function updateLoanSources(
+  loanId: string,
+  sources: { envelope_id: string; amount: number }[],
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+
+  const validSources = sources.filter(s => s.envelope_id && s.amount > 0)
+
+  const { error } = await admin
+    .from('self_loans')
+    .update({
+      source_envelope_id: validSources[0]?.envelope_id ?? null,
+      envelope_split: validSources.length > 1 ? validSources : null,
+    })
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
   revalidatePath('/liquidez')
   return { ok: true }
 }

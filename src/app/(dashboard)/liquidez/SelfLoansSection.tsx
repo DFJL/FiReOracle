@@ -29,7 +29,7 @@ function NewLoanForm({ envelopes, onClose }: { envelopes: Envelope[]; onClose: (
         description: description.trim(),
         original_amount: amt,
         loan_date: date,
-        source_envelope_id: envelopeId || null,
+        sources: envelopeId ? [{ envelope_id: envelopeId, amount: amt }] : [],
         notes,
       })
       if (res?.error) { setError(res.error); return }
