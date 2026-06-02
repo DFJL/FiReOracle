@@ -292,6 +292,7 @@ export function EnvelopeSection({
   const [openId, setOpenId]             = useState<string | null>(null)
   const [expandedId, setExpandedId]     = useState<string | null>(null)
   const [subAddParentId, setSubAdd]     = useState<string | null>(null)
+  const [subAddLeafId, setSubAddLeaf]   = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
 
   const custodios = [...new Set(envelopes.map(e => e.custodio))]
@@ -398,8 +399,23 @@ export function EnvelopeSection({
                 )}
               </button>
 
-              {!hasChildren && isOpen && (
-                <AddMovementPanel envelope={env} onClose={() => setOpenId(null)} />
+              {!hasChildren && isOpen && subAddLeafId !== env.id && (
+                <>
+                  <AddMovementPanel envelope={env} onClose={() => setOpenId(null)} />
+                  <div className="flex justify-end pl-9 pr-4 py-1.5 bg-white/[0.02] border-t border-white/[0.03]">
+                    <button
+                      onClick={() => { setSubAddLeaf(env.id); setOpenId(null) }}
+                      className="text-[9px] font-black text-[#a3e635]/60 hover:text-[#a3e635] transition-colors">
+                      + Sub-sobre
+                    </button>
+                  </div>
+                </>
+              )}
+              {!hasChildren && subAddLeafId === env.id && (
+                <AddSubEnvelopePanel
+                  parentId={env.id}
+                  onClose={() => setSubAddLeaf(null)}
+                />
               )}
 
               {hasChildren && isExpanded && (

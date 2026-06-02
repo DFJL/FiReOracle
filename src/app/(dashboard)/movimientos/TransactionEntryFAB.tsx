@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
+import { createAutoprestamo } from '@/app/actions/selfLoans'
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type Category = {
@@ -56,7 +57,8 @@ const TYPE_OPTIONS: { value: TxEntryType; label: string; desc: string; color: st
   { value: 'gasto',    label: 'Gasto',             desc: 'Solo en transacciones',                  color: 'text-rose-400' },
   { value: 'ingreso',  label: 'Ingreso',            desc: 'Solo en transacciones',                  color: 'text-[#a3e635]' },
   { value: 'ahorro',   label: 'Ahorro → Sobre',     desc: 'Transacción + movimiento de sobre',       color: 'text-blue-400' },
-  { value: 'traslado', label: 'Traslado de sobres', desc: 'Solo movimientos internos, sin tx',       color: 'text-amber-400' },
+  { value: 'traslado',     label: 'Traslado de sobres', desc: 'Solo movimientos internos, sin tx',          color: 'text-amber-400' },
+  { value: 'autoprestamo', label: 'Autopréstamo',       desc: 'Débito de sobre + registro de préstamo',    color: 'text-orange-400' },
 ]
 
 export function TransactionEntryFAB({
@@ -321,6 +323,18 @@ export function TransactionEntryFAB({
           to_envelope_id: toEnvelopeId,
           notes: notes || undefined,
         })
+      } else if (type === 'autoprestamo') {
+        if (!envelopeId) { setError('Seleccioná el sobre fuente'); return }
+        if (!concept.trim()) { setError('Ingresá una descripción'); return }
+        const r = await createAutoprestamo({
+          description: concept.trim(),
+          amount: amtCRC,
+          date,
+          envelope_id: envelopeId,
+          notes: notes || undefined,
+        })
+        if (r?.error) { setError(r.error); return }
+        close(); return
       }
 
       if (result?.error) { setError(result.error); return }
@@ -380,6 +394,18 @@ export function TransactionEntryFAB({
           to_envelope_id: toEnvelopeId,
           notes: notes || undefined,
         })
+      } else if (type === 'autoprestamo') {
+        if (!envelopeId) { setError('Seleccioná el sobre fuente'); return }
+        if (!concept.trim()) { setError('Ingresá una descripción'); return }
+        const r = await createAutoprestamo({
+          description: concept.trim(),
+          amount: amtCRC,
+          date,
+          envelope_id: envelopeId,
+          notes: notes || undefined,
+        })
+        if (r?.error) { setError(r.error); return }
+        reset(); return
       }
 
       if (result?.error) { setError(result.error); return }
@@ -538,23 +564,25 @@ export function TransactionEntryFAB({
                   <label className={lbl}>Fecha</label>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
                 </div>
-                <div>
-                  <label className={lbl}>Moneda</label>
-                  <div className="flex gap-1">
-                    {(['CRC', 'USD'] as const).map(c => (
-                      <button key={c} type="button" onClick={() => setCurrency(c)}
-                        className={`flex-1 py-2 rounded-lg text-xs font-black transition-all border ${
-                          currency === c ? 'bg-[#a3e635] text-black border-[#a3e635]' : 'text-zinc-500 border-white/[0.08] hover:text-zinc-300'
-                        }`}>
-                        {c === 'CRC' ? '₡' : '$'}
-                      </button>
-                    ))}
+                {type !== 'traslado' && type !== 'autoprestamo' && (
+                  <div>
+                    <label className={lbl}>Moneda</label>
+                    <div className="flex gap-1">
+                      {(['CRC', 'USD'] as const).map(c => (
+                        <button key={c} type="button" onClick={() => setCurrency(c)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-black transition-all border ${
+                            currency === c ? 'bg-[#a3e635] text-black border-[#a3e635]' : 'text-zinc-500 border-white/[0.08] hover:text-zinc-300'
+                          }`}>
+                          {c === 'CRC' ? '₡' : '$'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Amount fields depend on currency */}
-              {currency === 'CRC' ? (
+              {(type === 'traslado' || type === 'autoprestamo' || currency === 'CRC') ? (
                 <div>
                   <label className={lbl}>Monto (₡ CRC)</label>
                   <input type="number" min="0" step="any" value={amount}
@@ -679,6 +707,30 @@ export function TransactionEntryFAB({
                   </div>
                   <p className="text-[9px] text-zinc-600">
                     Crea una transacción + movimiento de sobre. Si el sobre corresponde a un bucket de portafolio, ingresá el vendor exacto para que aparezca en Inversiones.
+                  </p>
+                </>
+              )}
+
+              {/* ── Autopréstamo fields ── */}
+              {type === 'autoprestamo' && (
+                <>
+                  <div>
+                    <label className={lbl}>Sobre fuente <span className="text-zinc-700 normal-case tracking-normal">(débito)</span></label>
+                    <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)}
+                      className={inputCls} required>
+                      <option value="">Seleccioná un sobre…</option>
+                      {leafEnvelopes.map(env => (
+                        <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={lbl}>Descripción del préstamo</label>
+                    <input type="text" value={concept} onChange={e => setConcept(e.target.value)}
+                      placeholder="Para qué es el préstamo…" className={inputCls} required />
+                  </div>
+                  <p className="text-[9px] text-zinc-600">
+                    Registra un retiro del sobre seleccionado y crea un autopréstamo en Liquidez para que puedas rastrear el pago.
                   </p>
                 </>
               )}

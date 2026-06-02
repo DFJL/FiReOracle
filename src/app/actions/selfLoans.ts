@@ -4,6 +4,59 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 
+export type AutoprestamoInput = {
+  description: string
+  amount: number
+  date: string
+  envelope_id: string
+  notes?: string
+}
+
+export async function createAutoprestamo(data: AutoprestamoInput) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+
+  const { data: acct } = await admin
+    .from('financial_accounts')
+    .select('id')
+    .eq('user_id', user.id)
+    .limit(1)
+    .maybeSingle()
+
+  if (!acct) return { error: 'No hay cuentas financieras configuradas' }
+
+  // Debit the envelope
+  const { error: movErr } = await admin.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: data.envelope_id,
+    date: data.date,
+    amount: -Math.abs(data.amount),
+    movement_type: 'retiro',
+    notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
+  })
+  if (movErr) return { error: movErr.message }
+
+  // Create the self-loan record
+  const { error: loanErr } = await admin.from('self_loans').insert({
+    user_id: user.id,
+    description: data.description,
+    original_amount: Math.abs(data.amount),
+    loan_date: data.date,
+    source_account_id: acct.id,
+    source_envelope_id: data.envelope_id,
+    currency_code: 'CRC',
+    status: 'pending',
+    notes: data.notes || null,
+  })
+  if (loanErr) return { error: loanErr.message }
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
 export type SelfLoanFormData = {
   description: string
   original_amount: number

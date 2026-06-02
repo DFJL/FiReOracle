@@ -55,7 +55,7 @@ export async function checkDuplicateTransaction(input: {
   })
 }
 
-export type TxEntryType = 'gasto' | 'ingreso' | 'ahorro' | 'traslado'
+export type TxEntryType = 'gasto' | 'ingreso' | 'ahorro' | 'traslado' | 'autoprestamo'
 
 type CurrencyFields = {
   currency_code: 'CRC' | 'USD'
