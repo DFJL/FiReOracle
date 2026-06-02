@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import type { Envelope, SubEnvelope } from './page'
 import { addMovement, distributeInterest } from './actions'
-import { createSubEnvelope } from '@/app/actions/envelopes'
+import { createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -164,6 +164,17 @@ function InterestModal({
 function SubEnvelopeRow({ sub, isOpen, onToggle }: {
   sub: SubEnvelope; isOpen: boolean; onToggle: () => void
 }) {
+  const [deleting, startDelete] = useTransition()
+  const [confirmDel, setConfirmDel] = useState(false)
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirmDel) { setConfirmDel(true); return }
+    startDelete(async () => {
+      await deleteSubEnvelope(sub.id)
+    })
+  }
+
   return (
     <div>
       <button onClick={onToggle}
@@ -182,6 +193,15 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
             </span>
           )}
         </div>
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          title={confirmDel ? 'Toca de nuevo para confirmar' : 'Eliminar sub-sobre'}
+          className={`text-[10px] w-5 text-center shrink-0 transition-colors ${
+            confirmDel ? 'text-rose-400 hover:text-rose-300' : 'text-zinc-700 hover:text-zinc-500'
+          }`}>
+          {deleting ? '…' : confirmDel ? '!' : '×'}
+        </button>
         <span className="text-zinc-700 text-[10px] w-3 text-center shrink-0 hover:text-zinc-500">
           {isOpen ? '−' : '+'}
         </span>
@@ -384,7 +404,7 @@ export function EnvelopeSection({
 
               {hasChildren && isExpanded && (
                 <div className="border-t border-white/[0.03]">
-                  {env.children.map(sub => (
+                  {env.children.filter(sub => sub.balance + sub.interest > 0).map(sub => (
                     <div key={sub.id} className="border-t border-white/[0.02] first:border-t-0">
                       <SubEnvelopeRow
                         sub={sub}
@@ -409,7 +429,7 @@ export function EnvelopeSection({
                           className="text-[9px] font-black text-[#a3e635]/60 hover:text-[#a3e635] transition-colors">
                           + Sub-sobre
                         </button>
-                        <span className="text-[9px] font-black tabular-nums text-zinc-500">{fmtCRC(env.balance)}</span>
+                        <span className="text-[9px] font-black tabular-nums text-zinc-500">{fmtCRC(env.balance + env.interest)}</span>
                       </div>
                     </div>
                   )}

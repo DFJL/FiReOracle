@@ -160,6 +160,34 @@ export async function createSubEnvelope(parentId: string, data: {
   revalidatePath('/configuracion')
 }
 
+export async function deleteSubEnvelope(id: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  // Only allow deleting sub-envelopes (must have a parent)
+  const { data: envelope } = await admin
+    .from('savings_envelopes')
+    .select('id, parent_envelope_id')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (!envelope?.parent_envelope_id) return { error: 'Solo se pueden eliminar sub-sobres' }
+
+  const { error } = await admin
+    .from('savings_envelopes')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/liquidez')
+  revalidatePath('/configuracion')
+}
+
 export async function deactivateEnvelope(id: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
