@@ -1026,8 +1026,10 @@ export function AuditView({ custodios, flowData }: {
         { label: 'Aplicar sugeridos', value: 'suggested', variant: 'amber' },
         { label: 'Ingreso',           value: 'income',    variant: 'lime'  },
         { label: 'Gasto',             value: 'expense',   variant: 'rose'  },
+        { label: 'Eliminar',          value: 'delete',    variant: 'zinc'  },
       ],
       onApply: async (action, ids) => {
+        if (action === 'delete') { const r = await deleteTransactions(ids); return 'error' in r ? r : {} }
         const r = await fixMovementType(ids, action)
         return 'error' in r ? r : {}
       },
