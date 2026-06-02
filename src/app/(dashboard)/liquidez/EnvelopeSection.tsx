@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import type { Envelope, SubEnvelope } from './page'
 import { addMovement, distributeInterest } from './actions'
-import { createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
+import { createEnvelope, createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -213,6 +213,81 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
 
 const SUB_PRESET_COLORS = ['#a3e635','#60a5fa','#f472b6','#fb923c','#a78bfa','#34d399','#fbbf24','#f87171']
 
+function AddEnvelopePanel({ onClose }: { onClose: () => void }) {
+  const [name, setCustName]   = useState('')
+  const [custodio, setCust]   = useState('')
+  const [color, setColor]     = useState(SUB_PRESET_COLORS[0])
+  const [rate, setRate]       = useState('')
+  const [balance, setBalance] = useState('')
+  const [error, setError]     = useState('')
+  const [isPending, start]    = useTransition()
+
+  function submit() {
+    if (!name.trim())     { setError('Nombre requerido'); return }
+    if (!custodio.trim()) { setError('Custodio requerido'); return }
+    setError('')
+    start(async () => {
+      const res = await createEnvelope({
+        name,
+        custodio,
+        color,
+        annual_rate: rate ? parseFloat(rate) : null,
+        initial_balance: balance ? parseFloat(balance.replace(/,/g, '')) : null,
+      })
+      if (res?.error) { setError(res.error); return }
+      onClose()
+    })
+  }
+
+  return (
+    <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.15] p-4 space-y-3">
+      <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest">Nuevo sobre</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Nombre</p>
+          <input value={name} onChange={e => setCustName(e.target.value)} placeholder="Fondo de emergencia"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Custodio / Banco</p>
+          <input value={custodio} onChange={e => setCust(e.target.value)} placeholder="BAC, BCR…"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Tasa anual % (opcional)</p>
+          <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)} placeholder="4.5"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Saldo inicial ₡ (opcional)</p>
+          <input type="number" value={balance} onChange={e => setBalance(e.target.value)} placeholder="0"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+      </div>
+      <div>
+        <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1.5">Color</p>
+        <div className="flex gap-1.5 flex-wrap">
+          {SUB_PRESET_COLORS.map(c => (
+            <button key={c} type="button" onClick={() => setColor(c)}
+              className={`w-5 h-5 rounded-full transition-all ${color === c ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-[#080c08] scale-110' : 'opacity-60 hover:opacity-100'}`}
+              style={{ background: c }} />
+          ))}
+        </div>
+      </div>
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={isPending}
+          className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50 transition-opacity">
+          {isPending ? '...' : 'Crear sobre'}
+        </button>
+        <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/[0.06] text-zinc-400 text-xs hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function AddSubEnvelopePanel({ parentId, onClose }: { parentId: string; onClose: () => void }) {
   const [name, setName]       = useState('')
   const [color, setColor]     = useState(SUB_PRESET_COLORS[0])
@@ -294,6 +369,7 @@ export function EnvelopeSection({
   const [subAddParentId, setSubAdd]     = useState<string | null>(null)
   const [subAddLeafId, setSubAddLeaf]   = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
+  const [showAddEnvelope, setShowAdd]   = useState(false)
 
   const custodios = [...new Set(envelopes.map(e => e.custodio))]
   const total     = envelopes.reduce((s, e) => s + e.balance, 0)
@@ -347,9 +423,16 @@ export function EnvelopeSection({
 
       {/* Envelope table */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#a3e635]/[0.08]">
-          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Sobres de ahorro</p>
-          <p className="text-xs text-zinc-500 mt-0.5">Toca un sobre para registrar movimientos</p>
+        <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Sobres de ahorro</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Toca un sobre para registrar movimientos</p>
+          </div>
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            className="shrink-0 text-[9px] font-black text-[#a3e635]/60 hover:text-[#a3e635] transition-colors px-2.5 py-1.5 rounded-lg border border-[#a3e635]/[0.12] hover:border-[#a3e635]/30">
+            + Sobre
+          </button>
         </div>
         {envelopes.map((env, i) => {
           const hasChildren = env.children.length > 0
@@ -455,6 +538,10 @@ export function EnvelopeSection({
           )
         })}
       </div>
+
+      {showAddEnvelope && (
+        <AddEnvelopePanel onClose={() => setShowAdd(false)} />
+      )}
 
       {interestCustodio && (
         <InterestModal

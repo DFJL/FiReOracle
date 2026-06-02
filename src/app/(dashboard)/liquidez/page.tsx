@@ -149,25 +149,6 @@ export default async function LiquidezPage() {
     notes: l.notes,
   }))
 
-  if (rootEnvelopes.length === 0) {
-    return (
-      <div className="p-4 md:p-8 max-w-3xl mx-auto">
-        <div className="mb-8">
-          <p className="text-[9px] font-black text-[#a3e635]/60 tracking-[0.22em] uppercase mb-1">Fire Oracle</p>
-          <p className="text-3xl font-black text-white tracking-tight leading-none">Liquidez</p>
-        </div>
-        <div className="rounded-2xl border border-dashed border-[#a3e635]/[0.15] p-10 text-center space-y-3">
-          <p className="text-zinc-400 text-sm font-semibold">Sin sobres configurados</p>
-          <p className="text-zinc-600 text-xs">Creá tus sobres de ahorro en Configuración para empezar.</p>
-          <a href="/configuracion"
-            className="inline-block mt-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-xs font-black hover:bg-[#a3e635]/20 transition-all">
-            Ir a Configuración
-          </a>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
       <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} />
