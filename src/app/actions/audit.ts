@@ -333,6 +333,46 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
     })
   }
 
+  // ── 7b. Income without category_code ─────────────────────────────────────
+  {
+    const { data: uncatCount } = await admin
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .is('category_code', null)
+
+    const total = (uncatCount as unknown as { count: number } | null)?.count
+      ?? (await admin.from('transactions').select('id').eq('user_id', user.id).eq('movement_type', 'income').is('category_code', null)).data?.length
+      ?? 0
+
+    const { data } = await admin
+      .from('transactions')
+      .select('id, date, amount, vendor, concept, is_passive_income, is_settlement')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .is('category_code', null)
+      .order('amount', { ascending: false })
+      .limit(20)
+
+    const issues = (data ?? []).map(tx => ({
+      id: tx.id,
+      date: tx.date ?? undefined,
+      amount: Number(tx.amount ?? 0),
+      description: `"${tx.concept || tx.vendor || '—'}"${tx.is_passive_income ? ' · pasivo' : ''}${tx.is_settlement ? ' · liquidación' : ''}`,
+      action: 'Verificá si es income, expense o retiro',
+    }))
+
+    checks.push({
+      id: 'uncategorized_income',
+      label: 'Ingresos sin categoría',
+      description: `${total} income sin category_code — revisalos para confirmar que son correctos o reclasificá los que sean gastos.`,
+      severity: total > 100 ? 'warning' : total > 0 ? 'info' : 'ok',
+      count: total as number,
+      issues,
+    })
+  }
+
   // ── 8. Settlements without investment_bucket_id ───────────────────────────
   {
     const { data } = await admin
