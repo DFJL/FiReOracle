@@ -13,9 +13,23 @@ export async function addMovement(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autorizado' }
 
-  const signed = ['retiro', 'traslado_out'].includes(data.type)
-    ? -Math.abs(data.amount)
-    : Math.abs(data.amount)
+  const isDebit = ['retiro', 'traslado_out'].includes(data.type)
+  const signed  = isDebit ? -Math.abs(data.amount) : Math.abs(data.amount)
+
+  if (isDebit) {
+    const { data: rows, error: sumErr } = await supabase
+      .from('envelope_movements')
+      .select('amount')
+      .eq('user_id', user.id)
+      .eq('envelope_id', envelopeId)
+      .neq('movement_type', 'interes')
+
+    if (sumErr) return { error: sumErr.message }
+    const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
+    if (current + signed < 0) {
+      return { error: `Saldo insuficiente — el sobre tiene ₡${Math.round(current).toLocaleString('es-CR')} y el retiro es ₡${Math.round(data.amount).toLocaleString('es-CR')}` }
+    }
+  }
 
   const { error } = await supabase.from('envelope_movements').insert({
     user_id: user.id,
