@@ -486,8 +486,8 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
     checks.push({
       id: 'settlement_no_bucket',
       label: 'Liquidaciones sin bucket asignado',
-      description: 'Ingresos marcados como liquidación (is_settlement) sin investment_bucket_id — no reducen el portafolio correctamente.',
-      severity: issues.length > 0 ? 'warning' : 'ok',
+      description: 'Estas txs YA cuentan como ingreso. Solo falta el bucket de inversión para que descuenten del portafolio. Ignorá este check si no usás seguimiento de portafolio.',
+      severity: issues.length > 0 ? 'info' : 'ok',
       count: issues.length,
       issues,
     })
