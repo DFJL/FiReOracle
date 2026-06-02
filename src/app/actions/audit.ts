@@ -24,6 +24,14 @@ export type AuditIssue = {
   description: string
   action?: string
   dupeMeta?: { orig: DupeTxSnapshot; dupe: DupeTxSnapshot }
+  suggestedType?: 'income' | 'expense' | 'cash_withdrawal'
+}
+
+function suggestMovementType(vendor: string | null, concept: string | null): 'income' | 'expense' | 'cash_withdrawal' {
+  const text = `${vendor ?? ''} ${concept ?? ''}`.toLowerCase()
+  if (/retiro|atm|cajero|efectivo/.test(text)) return 'cash_withdrawal'
+  if (/salario|sueldo|aguinaldo|bono|liquidaci[oó]n|dividendo|rendimiento|utilidad|honorarios|comisi[oó]n|ingreso|abono|cr[eé]dito|dep[oó]sito|transferencia recibida|pago recibido|alquiler|renta/.test(text)) return 'income'
+  return 'expense'
 }
 
 export type AuditCheck = {
@@ -304,13 +312,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       .order('date', { ascending: false })
       .limit(20)
 
-    const issues = (data ?? []).map(tx => ({
-      id: tx.id,
-      date: tx.date ?? undefined,
-      amount: Number(tx.amount ?? 0),
-      description: `"${tx.concept || tx.vendor || '—'}" sin tipo de movimiento`,
-      action: 'Clasificá como income o expense',
-    }))
+    const issues = (data ?? []).map(tx => {
+      const suggested = suggestMovementType(tx.vendor ?? null, tx.concept ?? null)
+      return {
+        id: tx.id,
+        date: tx.date ?? undefined,
+        amount: Number(tx.amount ?? 0),
+        description: `"${tx.concept || tx.vendor || '—'}" sin tipo de movimiento`,
+        suggestedType: suggested,
+      } satisfies AuditIssue
+    })
 
     checks.push({
       id: 'null_movement_type',

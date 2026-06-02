@@ -495,6 +495,24 @@ function CheckCard({
   function applyFix(action: string, ids: string[]) {
     if (!ids.length || !fix) return
     setFixError('')
+    if (action === 'suggested') {
+      // Group by each issue's suggestedType, then call onApply per group
+      const groups = new Map<string, string[]>()
+      for (const id of ids) {
+        const t = check.issues.find(i => i.id === id)?.suggestedType ?? 'expense'
+        if (!groups.has(t)) groups.set(t, [])
+        groups.get(t)!.push(id)
+      }
+      startApply(async () => {
+        for (const [type, groupIds] of groups) {
+          const r = await fix.onApply(type, groupIds)
+          if (r?.error) { setFixError(r.error); return }
+        }
+        setSelected(new Set())
+        onFixed?.()
+      })
+      return
+    }
     startApply(async () => {
       const r = await fix.onApply(action, ids)
       if (r?.error) { setFixError(r.error); return }
@@ -566,7 +584,19 @@ function CheckCard({
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] text-zinc-300">{issue.description}</p>
-                  {issue.action && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
+                  {issue.suggestedType && (
+                    <p className="text-[10px] mt-0.5">
+                      <span className="text-zinc-600">sugerido: </span>
+                      <span className={
+                        issue.suggestedType === 'income'           ? 'text-lime-400 font-bold' :
+                        issue.suggestedType === 'cash_withdrawal'  ? 'text-amber-400 font-bold' :
+                                                                     'text-rose-400 font-bold'
+                      }>
+                        {issue.suggestedType === 'income' ? 'ingreso' : issue.suggestedType === 'cash_withdrawal' ? 'retiro' : 'gasto'}
+                      </span>
+                    </p>
+                  )}
+                  {issue.action && !issue.suggestedType && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
                 </div>
                 <div className="shrink-0 text-right">
                   {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
@@ -690,8 +720,9 @@ export function AuditView({ custodios, flowData }: {
     },
     null_movement_type: {
       actions: [
-        { label: 'Ingreso', value: 'income',  variant: 'lime' },
-        { label: 'Gasto',   value: 'expense', variant: 'rose' },
+        { label: 'Aplicar sugeridos', value: 'suggested', variant: 'amber' },
+        { label: 'Ingreso',           value: 'income',    variant: 'lime'  },
+        { label: 'Gasto',             value: 'expense',   variant: 'rose'  },
       ],
       onApply: async (action, ids) => {
         const r = await fixMovementType(ids, action)
