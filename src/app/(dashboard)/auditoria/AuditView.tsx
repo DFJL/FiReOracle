@@ -8,6 +8,7 @@ import {
   fixPassiveIncomeFlag,
   fixMovementType,
   fixAllNullMovementType,
+  fixIsSettlement,
   clearMovementType,
   clearAllUncategorizedIncome,
   fixExpenseGroup,
@@ -1065,6 +1066,56 @@ export function AuditView({ custodios, flowData }: {
       onApply: async (_, ids) => {
         const r = await deleteTransactions(ids)
         return 'error' in r ? r : {}
+      },
+    },
+    anonymous_income: {
+      actions: [
+        { label: 'Gasto',        value: 'expense',         variant: 'rose'  },
+        { label: 'Retiro',       value: 'cash_withdrawal', variant: 'amber' },
+        { label: 'Limpiar tipo', value: 'clear',           variant: 'zinc'  },
+        { label: 'Eliminar',     value: 'delete',          variant: 'rose'  },
+      ],
+      onApply: async (action, ids) => {
+        if (action === 'delete') { const r = await deleteTransactions(ids); return 'error' in r ? r : {} }
+        if (action === 'clear')  { const r = await clearMovementType(ids);  return 'error' in r ? r : {} }
+        const r = await fixMovementType(ids, action)
+        return 'error' in r ? r : {}
+      },
+    },
+    orphan_savings: {
+      actions: [
+        { label: 'Personal',  value: 'personal',  variant: 'zinc' },
+        { label: 'Necesario', value: 'necesario', variant: 'zinc' },
+        { label: 'Eliminar',  value: 'delete',    variant: 'rose' },
+      ],
+      onApply: async (action, ids) => {
+        if (action === 'delete') { const r = await deleteTransactions(ids); return 'error' in r ? r : {} }
+        const r = await fixExpenseGroup(ids, action)
+        return 'error' in r ? r : {}
+      },
+    },
+    income_not_in_envelope: {
+      actions: [
+        { label: 'Marcar liquidación', value: 'settle',   variant: 'amber' },
+        { label: 'Limpiar tipo',       value: 'clear',    variant: 'zinc'  },
+        { label: 'Eliminar',           value: 'delete',   variant: 'rose'  },
+      ],
+      onApply: async (action, ids) => {
+        if (action === 'delete')  { const r = await deleteTransactions(ids);       return 'error' in r ? r : {} }
+        if (action === 'clear')   { const r = await clearMovementType(ids);        return 'error' in r ? r : {} }
+        if (action === 'settle')  { const r = await fixIsSettlement(ids, true);    return 'error' in r ? r : {} }
+        return {}
+      },
+    },
+    settlement_no_bucket: {
+      actions: [
+        { label: 'Desmarcar liquidación', value: 'unsettle', variant: 'amber' },
+        { label: 'Eliminar',              value: 'delete',   variant: 'rose'  },
+      ],
+      onApply: async (action, ids) => {
+        if (action === 'delete')   { const r = await deleteTransactions(ids);       return 'error' in r ? r : {} }
+        if (action === 'unsettle') { const r = await fixIsSettlement(ids, false);   return 'error' in r ? r : {} }
+        return {}
       },
     },
   }
