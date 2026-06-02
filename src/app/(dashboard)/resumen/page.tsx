@@ -15,7 +15,7 @@ export default async function ResumenPage() {
   const [{ data: rawTx }, { data: categories }] = await Promise.all([
     admin
       .from('transactions')
-      .select('id, movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense, notes, investment_bucket_id')
+      .select('id, movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense, notes, investment_bucket_id, created_at')
       .eq('user_id', user.id)
       .not('amount', 'is', null)
       .not('date', 'is', null)

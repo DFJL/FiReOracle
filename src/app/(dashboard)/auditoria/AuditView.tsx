@@ -10,7 +10,7 @@ import {
   fixAllNullMovementType,
   fixExpenseGroup,
 } from '@/app/actions/audit-fix'
-import type { AuditReport, AuditCheck, AuditSeverity } from '@/app/actions/audit'
+import type { AuditReport, AuditCheck, AuditSeverity, DupeTxSnapshot } from '@/app/actions/audit'
 import type { CustodioInfo, FlowData } from './page'
 
 function fmtCRC(n: number) {
@@ -289,6 +289,117 @@ const VARIANT_CLS: Record<FixVariant, string> = {
   zinc:  'bg-white/[0.08] text-zinc-300  hover:bg-white/[0.12]',
 }
 
+// ── Duplicate comparison panel ────────────────────────────────────────────
+
+function DuplicateComparePanel({
+  orig, dupe, onDeleted,
+}: {
+  orig: DupeTxSnapshot
+  dupe: DupeTxSnapshot
+  onDeleted: () => void
+}) {
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [isPending, start]        = useTransition()
+  const [error, setError]         = useState('')
+
+  function fmtCreated(ts: string) {
+    if (!ts) return '—'
+    return new Date(ts).toLocaleString('es-CR', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    })
+  }
+
+  function handleDelete(id: string) {
+    setError('')
+    start(async () => {
+      const r = await deleteTransactions([id])
+      if ('error' in r && r.error) { setError(r.error); return }
+      onDeleted()
+    })
+  }
+
+  const rows: { label: string; orig: string; dupe: string; highlight?: boolean }[] = [
+    { label: 'Fecha',        orig: orig.date ?? '—', dupe: dupe.date ?? '—' },
+    { label: 'Vendor',       orig: orig.vendor ?? '—', dupe: dupe.vendor ?? '—' },
+    { label: 'Concepto',     orig: orig.concept ?? '—', dupe: dupe.concept ?? '—' },
+    { label: 'Tipo',         orig: orig.movement_type ?? '—', dupe: dupe.movement_type ?? '—' },
+    { label: 'Monto',        orig: fmtCRC(orig.amount), dupe: fmtCRC(dupe.amount) },
+    { label: 'Liquidación',  orig: orig.is_settlement ? 'Sí' : 'No', dupe: dupe.is_settlement ? 'Sí' : 'No' },
+    { label: 'Notas',        orig: orig.notes ?? '—', dupe: dupe.notes ?? '—' },
+    { label: 'Ingresado',    orig: fmtCreated(orig.created_at), dupe: fmtCreated(dupe.created_at), highlight: true },
+    { label: 'ID',           orig: orig.id.slice(0, 8) + '…', dupe: dupe.id.slice(0, 8) + '…' },
+  ]
+
+  return (
+    <div className="mx-4 mb-3 mt-1 rounded-xl border border-white/[0.08] overflow-hidden bg-white/[0.02]">
+      <div className="grid grid-cols-3 border-b border-white/[0.06]">
+        <div className="px-3 py-2" />
+        <div className="px-3 py-2 border-l border-white/[0.06]">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Original</p>
+          <p className="text-[10px] text-zinc-600">{orig.id.slice(0, 8)}…</p>
+        </div>
+        <div className="px-3 py-2 border-l border-white/[0.06]">
+          <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-wider">Posible duplicado</p>
+          <p className="text-[10px] text-zinc-600">{dupe.id.slice(0, 8)}…</p>
+        </div>
+      </div>
+
+      {rows.map(row => {
+        const differ = row.orig !== row.dupe
+        return (
+          <div key={row.label} className={`grid grid-cols-3 border-b border-white/[0.04] last:border-0 ${differ ? 'bg-amber-500/[0.04]' : ''}`}>
+            <div className="px-3 py-1.5">
+              <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wide">{row.label}</p>
+            </div>
+            <div className="px-3 py-1.5 border-l border-white/[0.04]">
+              <p className={`text-[11px] truncate ${row.highlight ? 'text-zinc-300 font-medium' : 'text-zinc-400'}`}>{row.orig}</p>
+            </div>
+            <div className="px-3 py-1.5 border-l border-white/[0.04]">
+              <p className={`text-[11px] truncate ${differ ? 'text-amber-300 font-medium' : row.highlight ? 'text-zinc-300 font-medium' : 'text-zinc-400'}`}>
+                {row.dupe}
+              </p>
+            </div>
+          </div>
+        )
+      })}
+
+      <div className="grid grid-cols-2 gap-px bg-white/[0.04]">
+        {confirmId === orig.id ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-2.5 bg-[#0d120d]">
+            <span className="text-[10px] text-zinc-500">¿Eliminar original?</span>
+            <button onClick={() => handleDelete(orig.id)} disabled={isPending}
+              className="px-2 py-1 rounded bg-rose-500/20 text-rose-400 text-[10px] font-black disabled:opacity-40">
+              {isPending ? '…' : 'Sí'}
+            </button>
+            <button onClick={() => setConfirmId(null)} className="text-[10px] text-zinc-600 hover:text-zinc-400">No</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmId(orig.id)} disabled={isPending}
+            className="px-3 py-2.5 bg-[#0d120d] text-[11px] text-zinc-500 hover:text-rose-400 hover:bg-rose-500/[0.06] transition-colors text-center">
+            Eliminar original
+          </button>
+        )}
+        {confirmId === dupe.id ? (
+          <div className="flex items-center justify-center gap-2 px-3 py-2.5 bg-[#0d120d]">
+            <span className="text-[10px] text-zinc-500">¿Eliminar duplicado?</span>
+            <button onClick={() => handleDelete(dupe.id)} disabled={isPending}
+              className="px-2 py-1 rounded bg-rose-500/20 text-rose-400 text-[10px] font-black disabled:opacity-40">
+              {isPending ? '…' : 'Sí'}
+            </button>
+            <button onClick={() => setConfirmId(null)} className="text-[10px] text-zinc-600 hover:text-zinc-400">No</button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmId(dupe.id)} disabled={isPending}
+            className="px-3 py-2.5 bg-[#0d120d] text-[11px] font-black text-rose-400 hover:bg-rose-500/[0.08] transition-colors text-center">
+            Eliminar duplicado
+          </button>
+        )}
+      </div>
+      {error && <p className="px-3 py-1.5 text-[10px] text-rose-400">{error}</p>}
+    </div>
+  )
+}
+
 // ── Audit check card ───────────────────────────────────────────────────────
 
 const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: string; head: string }> = {
@@ -366,7 +477,7 @@ function CheckCard({
       {open && check.issues.length > 0 && (
         <div className="border-t border-white/[0.04]">
 
-          {fix && (
+          {fix && !check.issues[0]?.dupeMeta && (
             <div className="flex items-center gap-3 px-4 py-2 bg-white/[0.02] border-b border-white/[0.04]">
               <input
                 type="checkbox"
@@ -383,26 +494,36 @@ function CheckCard({
           )}
 
           {check.issues.map((issue, i) => (
-            <div key={issue.id + i}
-              className="flex items-start gap-3 px-4 py-2.5 border-b border-white/[0.03] last:border-0">
-              {fix && (
-                <input
-                  type="checkbox"
-                  checked={selected.has(issue.id)}
-                  onChange={() => toggle(issue.id)}
-                  className="mt-0.5 w-3.5 h-3.5 rounded accent-[#a3e635] cursor-pointer shrink-0"
+            <div key={issue.id + i} className="border-b border-white/[0.03] last:border-0">
+              <div className="flex items-start gap-3 px-4 py-2.5">
+                {fix && !issue.dupeMeta && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(issue.id)}
+                    onChange={() => toggle(issue.id)}
+                    className="mt-0.5 w-3.5 h-3.5 rounded accent-[#a3e635] cursor-pointer shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] text-zinc-300">{issue.description}</p>
+                  {issue.action && !issue.dupeMeta && (
+                    <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>
+                  )}
+                </div>
+                <div className="shrink-0 text-right">
+                  {issue.date && !issue.dupeMeta && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
+                  {issue.amount !== undefined && issue.amount !== 0 && (
+                    <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
+                  )}
+                </div>
+              </div>
+              {issue.dupeMeta && (
+                <DuplicateComparePanel
+                  orig={issue.dupeMeta.orig}
+                  dupe={issue.dupeMeta.dupe}
+                  onDeleted={() => onFixed?.()}
                 />
               )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-zinc-300">{issue.description}</p>
-                {issue.action && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
-              </div>
-              <div className="shrink-0 text-right">
-                {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
-                {issue.amount !== undefined && issue.amount !== 0 && (
-                  <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
-                )}
-              </div>
             </div>
           ))}
 
