@@ -1,14 +1,16 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState, useMemo, useTransition, useEffect } from 'react'
+import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import { updateTransaction, deleteTransaction, type UpdateTransactionInput } from '@/app/actions/transactions'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 export interface TxClient {
+  id: string
   date: string | null
   vendor: string | null
   concept: string | null
@@ -19,6 +21,14 @@ export interface TxClient {
   is_settlement: boolean
   is_passive_income?: boolean
   is_survival_expense?: boolean
+  notes?: string | null
+  investment_bucket_id?: string | null
+}
+
+type Category = {
+  code: string; name: string; parent_code: string | null
+  category_type: string; group_gasto: string | null
+  is_passive_income: boolean; is_survival_expense: boolean; is_settlement: boolean
 }
 
 export interface AccountSummary {
@@ -459,20 +469,164 @@ function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
   )
 }
 
+// ── edit modal ────────────────────────────────────────────────────────────────
+
+function EditTransactionModal({ tx, categories, onClose }: {
+  tx: TxClient; categories: Category[]; onClose: () => void
+}) {
+  const [date, setDate]               = useState(tx.date ?? '')
+  const [amount, setAmount]           = useState(String(tx.amount ?? ''))
+  const [vendor, setVendor]           = useState(tx.vendor ?? '')
+  const [concept, setConcept]         = useState(tx.concept ?? '')
+  const [categoryCode, setCategoryCode] = useState(tx.category_code ?? '')
+  const [expenseGroup, setExpenseGroup] = useState(tx.expense_group ?? 'personal')
+  const [notes, setNotes]             = useState(tx.notes ?? '')
+  const [isPassive, setIsPassive]     = useState(tx.is_passive_income ?? false)
+  const [isSettlement, setIsSettlement] = useState(tx.is_settlement ?? false)
+  const [isSurvival, setIsSurvival]   = useState(tx.is_survival_expense ?? false)
+  const [error, setError]             = useState<string | null>(null)
+  const [isPending, startTransition]  = useTransition()
+
+  useEffect(() => {
+    if (!categoryCode) return
+    const cat = categories.find(c => c.code === categoryCode)
+    if (!cat) return
+    if (cat.group_gasto && cat.group_gasto !== 'na') setExpenseGroup(cat.group_gasto)
+    setIsPassive(cat.is_passive_income)
+    setIsSettlement(cat.is_settlement)
+    setIsSurvival(cat.is_survival_expense)
+  }, [categoryCode, categories])
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    startTransition(async () => {
+      const result = await updateTransaction(tx.id, {
+        date: date || undefined,
+        amount: amt,
+        vendor: vendor.trim() || null,
+        concept: concept.trim() || null,
+        category_code: categoryCode || null,
+        expense_group: expenseGroup,
+        notes: notes.trim() || null,
+        is_passive_income: isPassive,
+        is_settlement: isSettlement,
+        is_survival_expense: isSurvival,
+      } satisfies UpdateTransactionInput)
+      if (result?.error) { setError(result.error); return }
+      onClose()
+    })
+  }
+
+  const typeFilter = tx.movement_type === 'income' ? 'income' : 'expense'
+  const parents  = categories.filter(c => !c.parent_code && c.category_type === typeFilter)
+  const children = categories.filter(c =>  c.parent_code && c.category_type === typeFilter)
+
+  const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+  const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Editar transacción</p>
+          <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Fecha</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
+            </div>
+            <div>
+              <label className={lbl}>Monto (₡ CRC)</label>
+              <input type="number" min="0" step="any" value={amount} onChange={e => setAmount(e.target.value)} className={inputCls} required />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>{tx.movement_type === 'income' ? 'Fuente / Pagador' : 'Comercio / Vendor'}</label>
+              <input type="text" value={vendor} onChange={e => setVendor(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className={lbl}>Concepto</label>
+              <input type="text" value={concept} onChange={e => setConcept(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <label className={lbl}>Categoría</label>
+            <select value={categoryCode} onChange={e => setCategoryCode(e.target.value)} className={inputCls}>
+              <option value="">Sin categoría</option>
+              {parents.map(p => {
+                const kids = children.filter(c => c.parent_code === p.code)
+                return kids.length > 0 ? (
+                  <optgroup key={p.code} label={p.name}>
+                    {kids.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  </optgroup>
+                ) : (
+                  <option key={p.code} value={p.code}>{p.name}</option>
+                )
+              })}
+            </select>
+          </div>
+          {tx.movement_type !== 'income' && !categoryCode && (
+            <div>
+              <label className={lbl}>Grupo de gasto</label>
+              <select value={expenseGroup} onChange={e => setExpenseGroup(e.target.value)} className={inputCls}>
+                <option value="personal">Personal / Discrecional</option>
+                <option value="necesario">Necesario / Esencial</option>
+                <option value="objetivos_financieros">Ahorro / Inversión</option>
+                <option value="na">Sin categoría</option>
+              </select>
+            </div>
+          )}
+          <div>
+            <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Nota libre…" className={inputCls} />
+          </div>
+          {error && <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>}
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={onClose}
+              className="py-3 rounded-xl bg-white/[0.06] border border-white/[0.10] text-white text-sm font-black hover:bg-white/[0.10] transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" disabled={isPending}
+              className="py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+              {isPending ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── transaction table (L3) ────────────────────────────────────────────────────
 
 type TxSortKey = 'date' | 'amount' | 'vendor' | 'category'
 
-function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
+function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
-  currency: 'CRC' | 'USD'; tcSell: number
+  currency: 'CRC' | 'USD'; tcSell: number; categories: Category[]
 }) {
-  const [search, setSearch]   = useState('')
-  const [sortKey, setSortKey] = useState<TxSortKey>('date')
-  const [sortAsc, setSortAsc] = useState(false)
+  const [search, setSearch]         = useState('')
+  const [sortKey, setSortKey]       = useState<TxSortKey>('date')
+  const [sortAsc, setSortAsc]       = useState(false)
+  const [editingTx, setEditingTx]   = useState<TxClient | null>(null)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)  // tx.id being confirmed
+  const [delPending, startDelTrans] = useTransition()
 
   function cycleSort(key: TxSortKey) {
     if (sortKey === key) { setSortAsc(a => !a) } else { setSortKey(key); setSortAsc(false) }
+  }
+
+  function handleDelete(id: string) {
+    startDelTrans(async () => {
+      await deleteTransaction(id)
+      setConfirmDel(null)
+    })
   }
 
   const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
@@ -505,6 +659,10 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
   }
 
   return (
+    <>
+    {editingTx && (
+      <EditTransactionModal tx={editingTx} categories={categories} onClose={() => setEditingTx(null)} />
+    )}
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-xs font-semibold text-zinc-300">{title} <span className="text-zinc-600 font-normal">({filtered.length})</span></h3>
@@ -512,7 +670,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
           className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-[440px]">
+        <table className="w-full text-xs min-w-[500px]">
           <thead>
             <tr className="border-b border-white/[0.04]">
               {([
@@ -521,8 +679,9 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
                 { label: 'Concepto',   key: null        },
                 { label: 'Categoría',  key: 'category' },
                 { label: 'Monto',      key: 'amount'   },
-              ] as { label: string; key: TxSortKey | null }[]).map(({ label, key }) => (
-                <th key={label}
+                { label: '',           key: null        },
+              ] as { label: string; key: TxSortKey | null }[]).map(({ label, key }, i) => (
+                <th key={i}
                   onClick={key ? () => cycleSort(key) : undefined}
                   className={`px-4 py-2.5 text-left text-[9px] text-zinc-500 uppercase tracking-wider font-black whitespace-nowrap ${key ? 'cursor-pointer hover:text-zinc-300 select-none transition-colors' : ''}`}>
                   {label}
@@ -532,12 +691,13 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.03]">
-            {filtered.slice(0, 300).map((tx, i) => {
+            {filtered.slice(0, 300).map((tx) => {
               const badge = TYPE_BADGE[tx.movement_type ?? '']
               const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
               const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
+              const isConfirming = confirmDel === tx.id
               return (
-                <tr key={i} className="hover:bg-white/[0.015] transition-colors">
+                <tr key={tx.id} className="hover:bg-white/[0.015] transition-colors group">
                   <td className="px-4 py-2.5 text-zinc-500 tabular-nums whitespace-nowrap">{tx.date ? fmtDate(tx.date) : '—'}</td>
                   <td className="px-4 py-2.5 text-zinc-200 max-w-[160px] truncate">{tx.vendor ?? '—'}</td>
                   <td className="px-4 py-2.5 text-zinc-400 max-w-[140px] truncate">{tx.concept ?? '—'}</td>
@@ -547,14 +707,41 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell }: {
                   <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
                     {sign}{fmtTx(Number(tx.amount))}
                   </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-right">
+                    {isConfirming ? (
+                      <div className="flex items-center justify-end gap-1">
+                        <span className="text-[10px] text-zinc-500 mr-1">¿Eliminar?</span>
+                        <button onClick={() => handleDelete(tx.id)} disabled={delPending}
+                          className="p-1 rounded text-rose-400 hover:bg-rose-400/10 transition-colors disabled:opacity-50">
+                          {delPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        </button>
+                        <button onClick={() => setConfirmDel(null)}
+                          className="p-1 rounded text-zinc-500 hover:bg-white/[0.05] transition-colors">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditingTx(tx)}
+                          className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.05] transition-colors">
+                          <Pencil size={12} />
+                        </button>
+                        <button onClick={() => setConfirmDel(tx.id)}
+                          className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-400/10 transition-colors">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
+    </>
   )
 }
 
@@ -577,8 +764,9 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, accounts, exchangeRate, defaultCurrency }: {
+export function InteractiveSection({ transactions, categories, accounts, exchangeRate, defaultCurrency }: {
   transactions: TxClient[]
+  categories: Category[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
   defaultCurrency?: 'CRC' | 'USD'
@@ -960,7 +1148,7 @@ export function InteractiveSection({ transactions, accounts, exchangeRate, defau
         )}
 
         {/* L3 — full width */}
-        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} />
+        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} />
       </>)}
     </div>
   )

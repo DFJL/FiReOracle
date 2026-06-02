@@ -12,13 +12,20 @@ export default async function ResumenPage() {
   const admin = createAdminClient()
 
   // Transactions — admin client bypasses PostgREST max_rows
-  const { data: rawTx } = await admin
-    .from('transactions')
-    .select('movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense')
-    .eq('user_id', user.id)
-    .not('amount', 'is', null)
-    .not('date', 'is', null)
-    .order('date', { ascending: true })
+  const [{ data: rawTx }, { data: categories }] = await Promise.all([
+    admin
+      .from('transactions')
+      .select('id, movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense, notes, investment_bucket_id')
+      .eq('user_id', user.id)
+      .not('amount', 'is', null)
+      .not('date', 'is', null)
+      .order('date', { ascending: true }),
+    admin
+      .from('transaction_categories')
+      .select('code, name, parent_code, category_type, group_gasto, is_passive_income, is_survival_expense, is_settlement')
+      .eq('is_active', true)
+      .order('sort_order'),
+  ])
 
   // Initial account balances — separate liquid (checking/cash) from savings/investment
   const { data: accountRows } = await admin
@@ -58,6 +65,7 @@ export default async function ResumenPage() {
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <InteractiveSection
         transactions={(rawTx ?? []) as TxClient[]}
+        categories={categories ?? []}
         accounts={accounts}
         exchangeRate={exchangeRate}
         defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
