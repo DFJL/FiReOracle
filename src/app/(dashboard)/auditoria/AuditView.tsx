@@ -1109,12 +1109,10 @@ export function AuditView({ custodios, flowData }: {
     },
     settlement_no_bucket: {
       actions: [
-        { label: 'Desmarcar liquidación', value: 'unsettle', variant: 'amber' },
-        { label: 'Eliminar',              value: 'delete',   variant: 'rose'  },
+        { label: 'Desmarcar liquidación', value: 'unsettle', variant: 'zinc' },
       ],
       onApply: async (action, ids) => {
-        if (action === 'delete')   { const r = await deleteTransactions(ids);       return 'error' in r ? r : {} }
-        if (action === 'unsettle') { const r = await fixIsSettlement(ids, false);   return 'error' in r ? r : {} }
+        if (action === 'unsettle') { const r = await fixIsSettlement(ids, false); return 'error' in r ? r : {} }
         return {}
       },
     },
