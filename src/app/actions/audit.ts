@@ -25,6 +25,16 @@ export type AuditIssue = {
   action?: string
   dupeMeta?: { orig: DupeTxSnapshot; dupe: DupeTxSnapshot }
   suggestedType?: 'income' | 'expense' | 'cash_withdrawal'
+  txData?: {
+    vendor: string | null
+    concept: string | null
+    movement_type: string | null
+    expense_group: string | null
+    is_passive_income: boolean | null
+    is_settlement: boolean | null
+    notes: string | null
+    category_code: string | null
+  }
 }
 
 function suggestMovementType(vendor: string | null, concept: string | null): 'income' | 'expense' | 'cash_withdrawal' {
@@ -119,7 +129,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'na')
@@ -133,6 +143,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount),
       description: `"${tx.concept || tx.vendor || '—'}" sin categoría de gasto`,
       action: 'Editá el gasto y asigná grupo (personal, necesario, objetivos_financieros)',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({
@@ -150,7 +170,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
     const passiveCodes = ['RENTAL_INCOME', 'INTEREST', 'DIVIDENDS', 'PASSIVE_OTHER']
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, category_code, is_passive_income')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_passive_income', false)
@@ -164,6 +184,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount),
       description: `"${tx.concept || tx.vendor || '—'}" tiene categoría pasiva (${tx.category_code}) pero is_passive_income = false`,
       action: 'Editá el ingreso y marcalo como ingreso pasivo',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({
@@ -180,7 +210,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('concept', null)
@@ -194,6 +224,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount),
       description: `Ingreso de ${Number(tx.amount).toLocaleString('es-CR', { style: 'currency', currency: 'CRC' })} sin concepto ni origen`,
       action: 'Editá el ingreso para agregar concepto o vendedor',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({
@@ -210,7 +250,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data: savingsTx } = await admin
       .from('transactions')
-      .select('id, date, amount, concept, vendor')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'objetivos_financieros')
@@ -237,6 +277,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
           amount: Number(tx.amount),
           description: `"${tx.concept || tx.vendor || 'Ahorro'}" — gasto de objetivos sin depósito a sobre correspondiente`,
           action: 'Agregá un depósito en el sobre correcto para esta fecha y monto',
+          txData: {
+            vendor: tx.vendor ?? null,
+            concept: tx.concept ?? null,
+            movement_type: tx.movement_type ?? null,
+            expense_group: tx.expense_group ?? null,
+            is_passive_income: tx.is_passive_income ?? null,
+            is_settlement: tx.is_settlement ?? null,
+            notes: tx.notes ?? null,
+            category_code: tx.category_code ?? null,
+          },
         })
       }
     }
@@ -255,7 +305,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data: bigIncome } = await admin
       .from('transactions')
-      .select('id, date, amount, concept, vendor, is_settlement')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .gte('amount', 50000)
@@ -288,6 +338,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
           amount: Number(tx.amount),
           description: `"${tx.concept || tx.vendor || '—'}"${tx.is_settlement ? ' [liquidación]' : ''} — sin depósito a sobre en los 7 días siguientes`,
           action: 'Verificá si este ingreso fue depositado a un sobre o quedó en cuenta bancaria',
+          txData: {
+            vendor: tx.vendor ?? null,
+            concept: tx.concept ?? null,
+            movement_type: tx.movement_type ?? null,
+            expense_group: tx.expense_group ?? null,
+            is_passive_income: tx.is_passive_income ?? null,
+            is_settlement: tx.is_settlement ?? null,
+            notes: tx.notes ?? null,
+            category_code: tx.category_code ?? null,
+          },
         })
       }
     }
@@ -306,7 +366,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .is('movement_type', null)
       .order('date', { ascending: false })
@@ -320,6 +380,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
         amount: Number(tx.amount ?? 0),
         description: `"${tx.concept || tx.vendor || '—'}" sin tipo de movimiento`,
         suggestedType: suggested,
+        txData: {
+          vendor: tx.vendor ?? null,
+          concept: tx.concept ?? null,
+          movement_type: tx.movement_type ?? null,
+          expense_group: tx.expense_group ?? null,
+          is_passive_income: tx.is_passive_income ?? null,
+          is_settlement: tx.is_settlement ?? null,
+          notes: tx.notes ?? null,
+          category_code: tx.category_code ?? null,
+        },
       } satisfies AuditIssue
     })
 
@@ -348,7 +418,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, is_passive_income, is_settlement')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('category_code', null)
@@ -361,6 +431,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount ?? 0),
       description: `"${tx.concept || tx.vendor || '—'}"${tx.is_passive_income ? ' · pasivo' : ''}${tx.is_settlement ? ' · liquidación' : ''}`,
       action: 'Verificá si es income, expense o retiro',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({
@@ -377,7 +457,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, concept, vendor')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_settlement', true)
@@ -391,6 +471,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount),
       description: `Liquidación "${tx.concept || tx.vendor || '—'}" sin bucket de inversión asignado`,
       action: 'Asigná el bucket de inversión para que la liquidación descuente correctamente del portafolio',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({
@@ -407,7 +497,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .lte('amount', 0)
       .in('movement_type', ['income', 'expense'])
@@ -420,6 +510,16 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       amount: Number(tx.amount),
       description: `"${tx.concept || tx.vendor || '—'}" (${tx.movement_type}) tiene monto ≤ 0`,
       action: 'Eliminá o corregí el monto',
+      txData: {
+        vendor: tx.vendor ?? null,
+        concept: tx.concept ?? null,
+        movement_type: tx.movement_type ?? null,
+        expense_group: tx.expense_group ?? null,
+        is_passive_income: tx.is_passive_income ?? null,
+        is_settlement: tx.is_settlement ?? null,
+        notes: tx.notes ?? null,
+        category_code: tx.category_code ?? null,
+      },
     }))
 
     checks.push({

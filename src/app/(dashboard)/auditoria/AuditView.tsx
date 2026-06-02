@@ -16,7 +16,7 @@ import {
   revertAuditChange,
 } from '@/app/actions/audit-fix'
 import type { AuditLogEntry } from '@/app/actions/audit-fix'
-import type { AuditReport, AuditCheck, AuditSeverity, DupeTxSnapshot } from '@/app/actions/audit'
+import type { AuditReport, AuditCheck, AuditIssue, AuditSeverity, DupeTxSnapshot } from '@/app/actions/audit'
 import type { CustodioInfo, FlowData } from './page'
 
 function fmtCRC(n: number) {
@@ -602,6 +602,69 @@ function AuditLogSection() {
   )
 }
 
+// ── Transaction detail panel ───────────────────────────────────────────────
+
+function TxDetailPanel({
+  issue, fix, onFixed,
+}: {
+  issue: AuditIssue
+  fix?: FixConfig
+  onFixed?: () => void
+}) {
+  const [applying, start] = useTransition()
+  const [err, setErr]     = useState('')
+  const tx = issue.txData
+  if (!tx) return null
+
+  function apply(action: string) {
+    if (!fix) return
+    setErr('')
+    start(async () => {
+      const r = await fix.onApply(action, [issue.id])
+      if (r?.error) { setErr(r.error); return }
+      onFixed?.()
+    })
+  }
+
+  const rows: { label: string; value: string }[] = [
+    tx.movement_type     && { label: 'Tipo',        value: tx.movement_type },
+    tx.expense_group && tx.expense_group !== 'na'
+                         && { label: 'Grupo',       value: tx.expense_group },
+    tx.category_code     && { label: 'Categoría',   value: tx.category_code },
+    tx.is_passive_income && { label: 'Pasivo',      value: 'Sí' },
+    tx.is_settlement     && { label: 'Liquidación', value: 'Sí' },
+    tx.notes             && { label: 'Notas',       value: tx.notes },
+    tx.vendor            && { label: 'Comercio',    value: tx.vendor },
+    tx.concept           && { label: 'Concepto',    value: tx.concept },
+  ].filter(Boolean) as { label: string; value: string }[]
+
+  return (
+    <div className="ml-9 mr-4 mb-2.5 rounded-lg border border-white/[0.08] overflow-hidden text-[10px]">
+      {rows.length > 0 && (
+        <div className="px-3 py-2 grid grid-cols-2 gap-x-6 gap-y-1 bg-white/[0.02]">
+          {rows.map(r => (
+            <div key={r.label} className="flex items-baseline gap-1.5 min-w-0">
+              <span className="text-[9px] font-black text-zinc-600 uppercase tracking-wide shrink-0">{r.label}</span>
+              <span className="text-zinc-300 truncate">{r.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {fix && (
+        <div className="flex flex-wrap gap-2 px-3 py-2 border-t border-white/[0.06] bg-black/10">
+          {fix.actions.map(a => (
+            <button key={a.value} onClick={() => apply(a.value)} disabled={applying}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors disabled:opacity-40 ${VARIANT_CLS[a.variant ?? 'zinc']}`}>
+              {applying ? '…' : a.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {err && <p className="px-3 py-1 text-rose-400">{err}</p>}
+    </div>
+  )
+}
+
 // ── Audit check card ───────────────────────────────────────────────────────
 
 const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: string; head: string }> = {
@@ -612,16 +675,18 @@ const SEV_META: Record<AuditSeverity, { dot: string; badge: string; border: stri
 }
 
 function CheckCard({
-  check, fix, onFixed,
+  check, fix, onFixed, onIgnore,
 }: {
   check: AuditCheck
   fix?: FixConfig
   onFixed?: () => void
+  onIgnore?: () => void
 }) {
-  const [open, setOpen]         = useState(check.severity !== 'ok' && check.count > 0)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [applying, startApply]  = useTransition()
-  const [fixError, setFixError] = useState('')
+  const [open, setOpen]           = useState(check.severity !== 'ok' && check.count > 0)
+  const [selected, setSelected]   = useState<Set<string>>(new Set())
+  const [applying, startApply]    = useTransition()
+  const [fixError, setFixError]   = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const m          = SEV_META[check.severity]
   const allChecked = check.issues.length > 0 && selected.size === check.issues.length
@@ -676,23 +741,34 @@ function CheckCard({
 
   return (
     <div className={`rounded-xl border ${m.border} overflow-hidden`}>
-      <button onClick={() => setOpen(v => !v)}
-        className={`w-full flex items-center gap-3 px-4 py-3 ${m.head} text-left`}>
-        <span className={`w-2 h-2 rounded-full shrink-0 ${m.dot}`} />
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-zinc-200">{check.label}</p>
-          <p className="text-[10px] text-zinc-500 mt-0.5 truncate">{check.description}</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {check.count > 0 && (
-            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${m.badge}`}>{check.count}</span>
-          )}
-          {check.severity === 'ok' && (
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-lime-500/15 text-lime-400">✓</span>
-          )}
-          <span className="text-zinc-600 text-[10px]">{open ? '−' : '+'}</span>
-        </div>
-      </button>
+      <div className={`flex items-stretch ${m.head}`}>
+        <button onClick={() => setOpen(v => !v)}
+          className="flex-1 flex items-center gap-3 px-4 py-3 text-left min-w-0">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${m.dot}`} />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-zinc-200">{check.label}</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5 truncate">{check.description}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {check.count > 0 && (
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${m.badge}`}>{check.count}</span>
+            )}
+            {check.severity === 'ok' && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-lime-500/15 text-lime-400">✓</span>
+            )}
+            <span className="text-zinc-600 text-[10px]">{open ? '−' : '+'}</span>
+          </div>
+        </button>
+        {onIgnore && (
+          <button
+            onClick={onIgnore}
+            title="No mostrar más este check"
+            className="shrink-0 px-3 border-l border-white/[0.06] text-[9px] font-black text-zinc-700 hover:text-zinc-400 uppercase tracking-wide transition-colors"
+          >
+            Ignorar
+          </button>
+        )}
+      </div>
 
       {open && check.issues.length > 0 && (
         <div className="border-t border-white/[0.04]">
@@ -715,12 +791,16 @@ function CheckCard({
 
           {check.issues.map((issue, i) => (
             <div key={issue.id + i} className="border-b border-white/[0.03] last:border-0">
-              <div className="flex items-start gap-3 px-4 py-2.5">
+              <div
+                className={`flex items-start gap-3 px-4 py-2.5 ${issue.txData && !issue.dupeMeta ? 'cursor-pointer hover:bg-white/[0.02] transition-colors' : ''}`}
+                onClick={() => { if (issue.txData && !issue.dupeMeta) setExpandedId(prev => prev === issue.id ? null : issue.id) }}
+              >
                 {fix && (
                   <input
                     type="checkbox"
                     checked={selected.has(issue.id)}
-                    onChange={() => toggle(issue.id)}
+                    onChange={e => { e.stopPropagation(); toggle(issue.id) }}
+                    onClick={e => e.stopPropagation()}
                     className="mt-0.5 w-3.5 h-3.5 rounded accent-[#a3e635] cursor-pointer shrink-0"
                   />
                 )}
@@ -740,10 +820,17 @@ function CheckCard({
                   )}
                   {issue.action && !issue.suggestedType && <p className="text-[10px] text-zinc-600 mt-0.5">→ {issue.action}</p>}
                 </div>
-                <div className="shrink-0 text-right">
-                  {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
-                  {issue.amount !== undefined && issue.amount !== 0 && (
-                    <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
+                <div className="shrink-0 text-right flex items-start gap-2">
+                  <div>
+                    {issue.date && <p className="text-[10px] text-zinc-600">{issue.date}</p>}
+                    {issue.amount !== undefined && issue.amount !== 0 && (
+                      <p className="text-[11px] font-bold tabular-nums text-zinc-400">{fmtCRC(issue.amount)}</p>
+                    )}
+                  </div>
+                  {issue.txData && !issue.dupeMeta && (
+                    <span className="text-[10px] text-zinc-600 mt-0.5 select-none">
+                      {expandedId === issue.id ? '▴' : '▾'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -752,6 +839,13 @@ function CheckCard({
                   orig={issue.dupeMeta.orig}
                   dupe={issue.dupeMeta.dupe}
                   onDeleted={() => onFixed?.()}
+                />
+              )}
+              {expandedId === issue.id && !issue.dupeMeta && (
+                <TxDetailPanel
+                  issue={issue}
+                  fix={fix}
+                  onFixed={() => { setExpandedId(null); onFixed?.() }}
                 />
               )}
             </div>
@@ -824,6 +918,27 @@ export function AuditView({ custodios, flowData }: {
   const [auditError, setAuditError]   = useState<string | null>(null)
   const [isPending, start]            = useTransition()
   const [reconciling, setReconciling] = useState<string | null>(null)
+  const [dismissed, setDismissed]     = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const raw = localStorage.getItem('audit-dismissed-checks')
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set()
+    } catch { return new Set() }
+  })
+
+  function dismissCheck(id: string) {
+    setDismissed(prev => {
+      const next = new Set(prev)
+      next.add(id)
+      try { localStorage.setItem('audit-dismissed-checks', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }
+
+  function resetDismissed() {
+    setDismissed(new Set())
+    try { localStorage.removeItem('audit-dismissed-checks') } catch {}
+  }
 
   function runAuditAction() {
     setAuditError(null)
@@ -911,10 +1026,11 @@ export function AuditView({ custodios, flowData }: {
 
   const reconcilingInfo = custodios.find(c => c.name === reconciling)
 
-  const errorChecks   = report?.checks.filter(c => c.severity === 'error'   && c.count > 0) ?? []
-  const warningChecks = report?.checks.filter(c => c.severity === 'warning'  && c.count > 0) ?? []
-  const infoChecks    = report?.checks.filter(c => c.severity === 'info'     && c.count > 0) ?? []
-  const okChecks      = report?.checks.filter(c => c.severity === 'ok')                      ?? []
+  const errorChecks    = report?.checks.filter(c => c.severity === 'error'   && c.count > 0 && !dismissed.has(c.id)) ?? []
+  const warningChecks  = report?.checks.filter(c => c.severity === 'warning'  && c.count > 0 && !dismissed.has(c.id)) ?? []
+  const infoChecks     = report?.checks.filter(c => c.severity === 'info'     && c.count > 0 && !dismissed.has(c.id)) ?? []
+  const okChecks       = report?.checks.filter(c => c.severity === 'ok'                      && !dismissed.has(c.id)) ?? []
+  const dismissedChecks = report?.checks.filter(c => dismissed.has(c.id)) ?? []
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-6">
@@ -991,7 +1107,7 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-rose-400/70 uppercase tracking-[0.16em]">Errores</p>
                     {errorChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
                     ))}
                   </div>
                 )}
@@ -999,7 +1115,7 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-[0.16em]">Advertencias</p>
                     {warningChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
                     ))}
                   </div>
                 )}
@@ -1007,14 +1123,25 @@ export function AuditView({ custodios, flowData }: {
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-blue-400/70 uppercase tracking-[0.16em]">Informativo</p>
                     {infoChecks.map(c => (
-                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} />
+                      <CheckCard key={c.id} check={c} fix={fixConfigs[c.id]} onFixed={runAuditAction} onIgnore={() => dismissCheck(c.id)} />
                     ))}
                   </div>
                 )}
                 {okChecks.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.16em]">Sin problemas</p>
-                    {okChecks.map(c => <CheckCard key={c.id} check={c} />)}
+                    {okChecks.map(c => <CheckCard key={c.id} check={c} onIgnore={() => dismissCheck(c.id)} />)}
+                  </div>
+                )}
+                {dismissedChecks.length > 0 && (
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                    <p className="text-[10px] text-zinc-600">
+                      {dismissedChecks.length} check{dismissedChecks.length !== 1 ? 's' : ''} ignorado{dismissedChecks.length !== 1 ? 's' : ''}
+                    </p>
+                    <button onClick={resetDismissed}
+                      className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+                      Restablecer
+                    </button>
                   </div>
                 )}
                 <p className="text-[9px] text-zinc-700 text-center pt-2">
