@@ -5,12 +5,25 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 export type AuditSeverity = 'error' | 'warning' | 'info' | 'ok'
 
+export type DupeTxSnapshot = {
+  id: string
+  date: string | null
+  amount: number
+  vendor: string | null
+  concept: string | null
+  movement_type: string | null
+  created_at: string
+  notes: string | null
+  is_settlement: boolean | null
+}
+
 export type AuditIssue = {
   id: string
   date?: string
   amount?: number
   description: string
-  action?: string  // suggested fix hint
+  action?: string
+  dupeMeta?: { orig: DupeTxSnapshot; dupe: DupeTxSnapshot }
 }
 
 export type AuditCheck = {
@@ -41,7 +54,7 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, created_at')
+      .select('id, date, amount, vendor, concept, movement_type, created_at, notes, is_settlement')
       .eq('user_id', user.id)
       .order('date')
       .order('amount')
@@ -55,12 +68,24 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       const key = `${tx.date}|${tx.amount}|${(tx.vendor ?? '').toLowerCase().trim()}|${(tx.concept ?? '').toLowerCase().trim()}|${tx.movement_type}`
       if (seen.has(key)) {
         const orig = seen.get(key)!
+        const snap = (r: typeof rows[0]): DupeTxSnapshot => ({
+          id: r.id,
+          date: r.date,
+          amount: Number(r.amount),
+          vendor: r.vendor,
+          concept: r.concept,
+          movement_type: r.movement_type,
+          created_at: r.created_at ?? '',
+          notes: (r as unknown as { notes?: string | null }).notes ?? null,
+          is_settlement: (r as unknown as { is_settlement?: boolean | null }).is_settlement ?? null,
+        })
         dupes.push({
           id: tx.id,
           date: tx.date ?? undefined,
           amount: Number(tx.amount),
-          description: `"${tx.concept || tx.vendor || '—'}" (${tx.movement_type}) duplicado con tx ${orig.id.slice(0, 8)}`,
-          action: 'Revisá y eliminá el duplicado desde Resumen',
+          description: `"${tx.concept || tx.vendor || '—'}" — ${tx.movement_type} el ${tx.date}`,
+          action: 'Expandí para comparar ambas transacciones y elegir cuál eliminar',
+          dupeMeta: { orig: snap(orig), dupe: snap(tx) },
         })
       } else {
         seen.set(key, tx)

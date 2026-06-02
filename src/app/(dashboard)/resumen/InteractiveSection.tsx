@@ -23,6 +23,7 @@ export interface TxClient {
   is_survival_expense?: boolean
   notes?: string | null
   investment_bucket_id?: string | null
+  created_at?: string | null
 }
 
 type Category = {
@@ -605,7 +606,7 @@ function EditTransactionModal({ tx, categories, onClose }: {
 
 // ── transaction table (L3) ────────────────────────────────────────────────────
 
-type TxSortKey = 'date' | 'amount' | 'vendor' | 'category'
+type TxSortKey = 'date' | 'amount' | 'vendor' | 'category' | 'created_at'
 
 function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
@@ -639,10 +640,11 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
     )
     return [...base].sort((a, b) => {
       let va: string | number = 0, vb: string | number = 0
-      if (sortKey === 'date')     { va = a.date ?? ''; vb = b.date ?? '' }
-      if (sortKey === 'amount')   { va = Number(a.amount ?? 0); vb = Number(b.amount ?? 0) }
-      if (sortKey === 'vendor')   { va = (a.vendor ?? '').toLowerCase(); vb = (b.vendor ?? '').toLowerCase() }
-      if (sortKey === 'category') { va = getCat(a).toLowerCase(); vb = getCat(b).toLowerCase() }
+      if (sortKey === 'date')       { va = a.date ?? ''; vb = b.date ?? '' }
+      if (sortKey === 'amount')     { va = Number(a.amount ?? 0); vb = Number(b.amount ?? 0) }
+      if (sortKey === 'vendor')     { va = (a.vendor ?? '').toLowerCase(); vb = (b.vendor ?? '').toLowerCase() }
+      if (sortKey === 'category')   { va = getCat(a).toLowerCase(); vb = getCat(b).toLowerCase() }
+      if (sortKey === 'created_at') { va = a.created_at ?? ''; vb = b.created_at ?? '' }
       if (va < vb) return sortAsc ? -1 : 1
       if (va > vb) return sortAsc ? 1 : -1
       return 0
@@ -670,20 +672,22 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
           className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-[500px]">
+        <table className="w-full text-xs min-w-[700px]">
           <thead>
             <tr className="border-b border-white/[0.04]">
               {([
-                { label: 'Fecha',      key: 'date'     },
-                { label: 'Descripción',key: 'vendor'   },
-                { label: 'Concepto',   key: null        },
-                { label: 'Categoría',  key: 'category' },
-                { label: 'Monto',      key: 'amount'   },
-                { label: '',           key: null        },
-              ] as { label: string; key: TxSortKey | null }[]).map(({ label, key }, i) => (
+                { label: 'Fecha',      key: 'date',       cls: '' },
+                { label: 'Descripción',key: 'vendor',     cls: '' },
+                { label: 'Concepto',   key: null,         cls: '' },
+                { label: 'Tipo',       key: 'category',   cls: '' },
+                { label: 'Grupo',      key: null,         cls: 'hidden lg:table-cell' },
+                { label: 'Monto',      key: 'amount',     cls: 'text-right' },
+                { label: 'Ingresado',  key: 'created_at', cls: 'hidden md:table-cell' },
+                { label: '',           key: null,         cls: '' },
+              ] as { label: string; key: TxSortKey | null; cls: string }[]).map(({ label, key, cls }, i) => (
                 <th key={i}
                   onClick={key ? () => cycleSort(key) : undefined}
-                  className={`px-4 py-2.5 text-left text-[9px] text-zinc-500 uppercase tracking-wider font-black whitespace-nowrap ${key ? 'cursor-pointer hover:text-zinc-300 select-none transition-colors' : ''}`}>
+                  className={`px-4 py-2.5 text-left text-[9px] text-zinc-500 uppercase tracking-wider font-black whitespace-nowrap ${cls} ${key ? 'cursor-pointer hover:text-zinc-300 select-none transition-colors' : ''}`}>
                   {label}
                   {key && sortKey === key && <span className="ml-1 opacity-60">{sortAsc ? '↑' : '↓'}</span>}
                 </th>
@@ -696,17 +700,45 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
               const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
               const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
               const isConfirming = confirmDel === tx.id
+
+              const expGrpLabel: Record<string, string> = {
+                personal: 'Personal', necesario: 'Necesario', objetivos_financieros: 'Ahorro',
+              }
+              const expGrpCls: Record<string, string> = {
+                personal: 'bg-zinc-500/15 text-zinc-400',
+                necesario: 'bg-blue-500/15 text-blue-400',
+                objetivos_financieros: 'bg-lime-500/15 text-lime-400',
+              }
+
+              const createdAt = tx.created_at
+                ? new Date(tx.created_at).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : '—'
+
               return (
                 <tr key={tx.id} className="hover:bg-white/[0.015] transition-colors group">
                   <td className="px-4 py-2.5 text-zinc-500 tabular-nums whitespace-nowrap">{tx.date ? fmtDate(tx.date) : '—'}</td>
                   <td className="px-4 py-2.5 text-zinc-200 max-w-[160px] truncate">{tx.vendor ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-zinc-400 max-w-[140px] truncate">{tx.concept ?? '—'}</td>
+                  <td className="px-4 py-2 max-w-[150px]">
+                    <p className="text-zinc-400 truncate">{tx.concept ?? '—'}</p>
+                    {tx.notes && <p className="text-[10px] text-zinc-600 truncate italic mt-0.5">{tx.notes}</p>}
+                  </td>
                   <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">
-                    {badge && <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {badge && <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>}
+                      {tx.is_settlement && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-400">Liquid.</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap hidden lg:table-cell">
+                    {tx.expense_group && tx.expense_group !== 'na' && expGrpLabel[tx.expense_group] && (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${expGrpCls[tx.expense_group]}`}>
+                        {expGrpLabel[tx.expense_group]}
+                      </span>
+                    )}
                   </td>
                   <td className={`px-4 py-2.5 font-medium tabular-nums whitespace-nowrap text-right ${color}`}>
                     {sign}{fmtTx(Number(tx.amount))}
                   </td>
+                  <td className="px-4 py-2.5 text-zinc-600 tabular-nums whitespace-nowrap text-[10px] hidden md:table-cell">{createdAt}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-right">
                     {isConfirming ? (
                       <div className="flex items-center justify-end gap-1">
@@ -736,7 +768,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
                 </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-zinc-600">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
