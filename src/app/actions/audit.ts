@@ -60,13 +60,19 @@ export type AuditReport = {
   total_warnings: number
 }
 
-export async function runAudit(): Promise<{ error: string } | AuditReport> {
+export async function runAudit(excludeIds: string[] = []): Promise<{ error: string } | AuditReport> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado' }
 
   const admin = createAdminClient()
   const checks: AuditCheck[] = []
+
+  // Helper: apply exclude filter when there are ignored IDs
+  function withExclude<T>(q: T): T {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return excludeIds.length ? (q as any).not('id', 'in', `(${excludeIds.join(',')})`) as T : q
+  }
 
   // ── 1. Exact duplicates ────────────────────────────────────────────────────
   {
@@ -127,14 +133,14 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 2. Expenses with expense_group = 'na' ─────────────────────────────────
   {
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'na')
       .eq('is_settlement', false)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(30)
 
     const issues = (data ?? []).map(tx => ({
@@ -168,14 +174,14 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
   // ── 3. Income missing is_passive_income flag where category implies it ─────
   {
     const passiveCodes = ['RENTAL_INCOME', 'INTEREST', 'DIVIDENDS', 'PASSIVE_OTHER']
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_passive_income', false)
       .in('category_code', passiveCodes)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => ({
@@ -208,14 +214,14 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 4. Income with no concept and no vendor ────────────────────────────────
   {
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('concept', null)
       .is('vendor', null)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => ({
@@ -248,14 +254,14 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 5. Savings without a corresponding envelope movement ──────────────────
   {
-    const { data: savingsTx } = await admin
+    const { data: savingsTx } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'objetivos_financieros')
       .eq('is_settlement', false)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
 
     const { data: envMovements } = await admin
       .from('envelope_movements')
@@ -303,13 +309,13 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 6. Large income (>50K CRC) with no envelope deposit within 7 days ─────
   {
-    const { data: bigIncome } = await admin
+    const { data: bigIncome } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .gte('amount', 50000)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(100)
 
     const { data: deposits } = await admin
@@ -364,12 +370,12 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 7. Transactions with null movement_type ───────────────────────────────
   {
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .is('movement_type', null)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => {
@@ -416,13 +422,13 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
       ?? (await admin.from('transactions').select('id').eq('user_id', user.id).eq('movement_type', 'income').is('category_code', null)).data?.length
       ?? 0
 
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('category_code', null)
-      .order('amount', { ascending: false })
+      .order('amount', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => ({
@@ -455,14 +461,14 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 8. Settlements without investment_bucket_id ───────────────────────────
   {
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_settlement', true)
       .is('investment_bucket_id', null)
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => ({
@@ -495,13 +501,13 @@ export async function runAudit(): Promise<{ error: string } | AuditReport> {
 
   // ── 9. Amount = 0 or negative on income/expense ───────────────────────────
   {
-    const { data } = await admin
+    const { data } = await withExclude(admin
       .from('transactions')
       .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
       .eq('user_id', user.id)
       .lte('amount', 0)
       .in('movement_type', ['income', 'expense'])
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }))
       .limit(20)
 
     const issues = (data ?? []).map(tx => ({

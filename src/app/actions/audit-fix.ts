@@ -250,3 +250,28 @@ export async function fixIsSettlement(ids: string[], value: boolean) {
   revalidate()
   return { ok: true }
 }
+
+export async function getInvestmentBuckets(): Promise<{ id: string; name: string }[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('user_investment_buckets')
+    .select('id, name')
+    .eq('user_id', user.id)
+    .order('sort_order')
+  return (data ?? []).map(r => ({ id: r.id as string, name: r.name as string }))
+}
+
+export async function fixInvestmentBucket(ids: string[], bucketId: string) {
+  if (!ids.length) return { ok: true }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  const { error } = await supabase
+    .from('transactions').update({ investment_bucket_id: bucketId }).in('id', ids).eq('user_id', user.id)
+  if (error) return { error: error.message }
+  revalidate()
+  return { ok: true }
+}
