@@ -105,6 +105,21 @@ export type CreateTransactionInput =
       notes?: string
     }
 
+async function getEnvelopeBalance(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  envelopeId: string,
+): Promise<number> {
+  const { data } = await admin
+    .from('envelope_movements')
+    .select('amount, movement_type')
+    .eq('user_id', userId)
+    .eq('envelope_id', envelopeId)
+  return (data ?? [])
+    .filter((m: { movement_type: string }) => m.movement_type !== 'interes')
+    .reduce((sum: number, m: { amount: string | number }) => sum + Number(m.amount), 0)
+}
+
 export async function createTransaction(input: CreateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -195,11 +210,16 @@ export async function createTransaction(input: CreateTransactionInput) {
     if (input.from_envelope_id === input.to_envelope_id) {
       return { error: 'El sobre origen y destino deben ser diferentes' }
     }
+    const fromBalance = await getEnvelopeBalance(admin, user.id, input.from_envelope_id)
+    if (fromBalance < input.amount) {
+      const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+      return { error: `Saldo insuficiente en sobre origen (disponible ₡${fmt(fromBalance)}, requerido ₡${fmt(input.amount)})` }
+    }
     const { error: outErr } = await admin.from('envelope_movements').insert({
       user_id: user.id,
       envelope_id: input.from_envelope_id,
       movement_type: 'traslado_out',
-      amount: input.amount,
+      amount: -input.amount,
       date: input.date,
       notes: input.notes?.trim() || 'Traslado',
     })
