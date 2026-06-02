@@ -275,3 +275,30 @@ export async function fixInvestmentBucket(ids: string[], bucketId: string) {
   revalidate()
   return { ok: true }
 }
+
+export async function getIncomeCategories(): Promise<{ code: string; name: string; is_settlement: boolean }[]> {
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('transaction_categories')
+    .select('code, name, is_settlement')
+    .eq('category_type', 'income')
+    .eq('is_active', true)
+    .order('sort_order')
+  return (data ?? []).map(r => ({
+    code: r.code as string,
+    name: r.name as string,
+    is_settlement: (r.is_settlement ?? false) as boolean,
+  }))
+}
+
+export async function fixCategoryCode(ids: string[], categoryCode: string) {
+  if (!ids.length) return { ok: true }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  const { error } = await supabase
+    .from('transactions').update({ category_code: categoryCode }).in('id', ids).eq('user_id', user.id)
+  if (error) return { error: error.message }
+  revalidate()
+  return { ok: true }
+}

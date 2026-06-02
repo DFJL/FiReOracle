@@ -11,6 +11,8 @@ import {
   fixIsSettlement,
   fixInvestmentBucket,
   getInvestmentBuckets,
+  fixCategoryCode,
+  getIncomeCategories,
   clearMovementType,
   clearAllUncategorizedIncome,
   fixExpenseGroup,
@@ -642,7 +644,18 @@ function TxDetailPanel({
 
   function openSelect() {
     if (!fix?.selectAction || selOptions !== null) return
-    fix.selectAction.loadOptions().then(opts => { setSelOptions(opts); if (opts[0]) setSelValue(opts[0].value) })
+    fix.selectAction.loadOptions().then(opts => {
+      setSelOptions(opts)
+      // Auto-suggest: match vendor or concept against option label
+      const vendorLower   = (tx?.vendor  ?? '').toLowerCase()
+      const conceptLower  = (tx?.concept ?? '').toLowerCase()
+      const match = opts.find(o => {
+        const lbl = o.label.toLowerCase()
+        return (vendorLower  && (lbl.includes(vendorLower)  || vendorLower.includes(lbl)))
+            || (conceptLower && (lbl.includes(conceptLower) || conceptLower.includes(lbl)))
+      })
+      setSelValue(match?.value ?? opts[0]?.value ?? '')
+    })
   }
 
   function applySelect() {
@@ -743,11 +756,13 @@ function CheckCard({
   ignoredTxIds?: Set<string>
   onIgnoreTxs?: (ids: string[]) => void
 }) {
-  const [open, setOpen]           = useState(check.severity !== 'ok' && check.count > 0)
-  const [selected, setSelected]   = useState<Set<string>>(new Set())
-  const [applying, startApply]    = useTransition()
-  const [fixError, setFixError]   = useState('')
+  const [open, setOpen]             = useState(check.severity !== 'ok' && check.count > 0)
+  const [selected, setSelected]     = useState<Set<string>>(new Set())
+  const [applying, startApply]      = useTransition()
+  const [fixError, setFixError]     = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [bulkSelOpts, setBulkSelOpts] = useState<{ value: string; label: string }[] | null>(null)
+  const [bulkSelVal, setBulkSelVal]   = useState('')
 
   const m              = SEV_META[check.severity]
   const visibleIssues  = ignoredTxIds ? check.issues.filter(i => !ignoredTxIds.has(i.id)) : check.issues
@@ -933,6 +948,41 @@ function CheckCard({
                   {applying ? '…' : a.label}
                 </button>
               ))}
+              {fix?.selectAction && (
+                bulkSelOpts === null ? (
+                  <button
+                    onClick={() => fix.selectAction!.loadOptions().then(opts => { setBulkSelOpts(opts); setBulkSelVal(opts[0]?.value ?? '') })}
+                    disabled={applying}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-lime-500/20 text-lime-400 hover:bg-lime-500/30 disabled:opacity-40 transition-colors"
+                  >
+                    {fix.selectAction.label}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <select value={bulkSelVal} onChange={e => setBulkSelVal(e.target.value)}
+                      className="bg-white/[0.08] border border-white/[0.14] rounded-lg px-2 py-1 text-[11px] text-white focus:outline-none focus:border-white/30 max-w-[180px]">
+                      {bulkSelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <button
+                      onClick={() => {
+                        if (!bulkSelVal) return
+                        startApply(async () => {
+                          const r = await fix.selectAction!.onApply(bulkSelVal, [...selected])
+                          if (r?.error) { setFixError(r.error); return }
+                          setSelected(new Set())
+                          setBulkSelOpts(null)
+                          onFixed?.()
+                        })
+                      }}
+                      disabled={applying || !bulkSelVal}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-lime-500/20 text-lime-400 hover:bg-lime-500/30 disabled:opacity-40 transition-colors"
+                    >
+                      {applying ? '…' : 'Aplicar'}
+                    </button>
+                    <button onClick={() => setBulkSelOpts(null)} className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
+                  </div>
+                )
+              )}
               {onIgnoreTxs && (
                 <button
                   onClick={() => { onIgnoreTxs([...selected]); setSelected(new Set()) }}
@@ -942,7 +992,7 @@ function CheckCard({
                   Ignorar
                 </button>
               )}
-              <button onClick={() => setSelected(new Set())}
+              <button onClick={() => { setSelected(new Set()); setBulkSelOpts(null) }}
                 className="px-2 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
                 Limpiar
               </button>
@@ -1092,9 +1142,9 @@ export function AuditView({ custodios, flowData }: {
     },
     uncategorized_income: {
       actions: [
-        { label: 'Gasto',         value: 'expense',        variant: 'rose'  },
+        { label: 'Gasto',         value: 'expense',         variant: 'rose'  },
         { label: 'Retiro',        value: 'cash_withdrawal', variant: 'amber' },
-        { label: 'Limpiar tipo',  value: 'clear',          variant: 'zinc'  },
+        { label: 'Limpiar tipo',  value: 'clear',           variant: 'zinc'  },
       ],
       onApply: async (action, ids) => {
         if (action === 'clear') {
@@ -1113,6 +1163,18 @@ export function AuditView({ custodios, flowData }: {
         return 'error' in r ? r : {}
       },
       fixAllLabel: 'Aplica a todos los income sin categoría (incluye no mostrados)',
+      selectAction: {
+        label: 'Asignar categoría',
+        placeholder: 'Seleccioná categoría…',
+        loadOptions: async () => {
+          const cats = await getIncomeCategories()
+          return cats.map(c => ({ value: c.code, label: c.name }))
+        },
+        onApply: async (code, ids) => {
+          const r = await fixCategoryCode(ids, code)
+          return 'error' in r ? r : {}
+        },
+      },
     },
     zero_amount: {
       actions: [{ label: 'Eliminar', value: 'delete', variant: 'rose' }],
