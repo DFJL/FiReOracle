@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useOptimistic } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   PlusCircle, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 
 export type Envelope = {
@@ -70,6 +70,23 @@ export function PresupuestoClient({
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  type OptAction =
+    | { type: 'toggle'; id: string; q: 1 | 2; done: boolean }
+    | { type: 'bulk';   q: 1 | 2; done: boolean }
+
+  const [optimisticBudgets, dispatchOptimistic] = useOptimistic(
+    budgets,
+    (state: Budget[], action: OptAction) => {
+      if (action.type === 'toggle') {
+        return state.map(b => b.id === action.id
+          ? { ...b, [action.q === 1 ? 'q1_done' : 'q2_done']: action.done }
+          : b
+        )
+      }
+      return state.map(b => ({ ...b, [action.q === 1 ? 'q1_done' : 'q2_done']: action.done }))
+    },
+  )
 
   const [editId, setEditId]                       = useState<string | null>(null)
   const [editName, setEditName]                   = useState('')
@@ -176,16 +193,19 @@ export function PresupuestoClient({
     })
   }
 
-  const expenseLines = sortLines(budgets.filter(b => b.budget_type === 'expense'))
-  const savingsLines = sortLines(budgets.filter(b => b.budget_type === 'savings'))
-  const incomeLines  = sortLines(budgets.filter(b => b.budget_type === 'income'))
+  const expenseLines = sortLines(optimisticBudgets.filter(b => b.budget_type === 'expense'))
+  const savingsLines = sortLines(optimisticBudgets.filter(b => b.budget_type === 'savings'))
+  const incomeLines  = sortLines(optimisticBudgets.filter(b => b.budget_type === 'income'))
+
+  const allQ1Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q1_done)
+  const allQ2Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q2_done)
 
   const incomeExpected = incomeLines.reduce((s, b) => s + (b.monthly_limit ?? 0), 0)
   const totalPlanQ1    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q1_amount ?? 0), 0)
   const totalPlanQ2    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q2_amount ?? 0), 0)
   const totalPlan      = totalPlanQ1 + totalPlanQ2
 
-  const budgetedGroups = new Set(budgets.map(b => b.category))
+  const budgetedGroups = new Set(optimisticBudgets.map(b => b.category))
   let totalActQ1 = 0, totalActQ2 = 0
   for (const g of budgetedGroups) { totalActQ1 += actualQ1[g] ?? 0; totalActQ2 += actualQ2[g] ?? 0 }
   const totalAct = totalActQ1 + totalActQ2
@@ -239,7 +259,19 @@ export function PresupuestoClient({
   }
 
   function handleToggle(id: string, q: 1 | 2, done: boolean) {
-    startTransition(async () => { await toggleQuincena(id, q, done) })
+    startTransition(async () => {
+      dispatchOptimistic({ type: 'toggle', id, q, done })
+      await toggleQuincena(id, q, done)
+    })
+  }
+
+  function handleBulkToggle(q: 1 | 2) {
+    const allDone = optimisticBudgets.every(b => (q === 1 ? b.q1_done : b.q2_done))
+    const done = !allDone
+    startTransition(async () => {
+      dispatchOptimistic({ type: 'bulk', q, done })
+      await bulkToggleQuincena(q, done)
+    })
   }
 
   function handleDelete(id: string) {
@@ -316,9 +348,9 @@ export function PresupuestoClient({
     )
   }
 
-  // ── section renderer ──────────────────────────────────────────────────────────
+  // ── section renderer (called as function, not component, to avoid remount) ────
 
-  function Section({ label, lines }: { label: string; lines: Budget[] }) {
+  function renderSection(label: string, lines: Budget[]) {
     const isCollapsed = collapsed.has(label)
     const sectionPlanQ1 = lines.reduce((s, b) => s + (b.q1_amount ?? 0), 0)
     const sectionPlanQ2 = lines.reduce((s, b) => s + (b.q2_amount ?? 0), 0)
@@ -328,6 +360,7 @@ export function PresupuestoClient({
     return (
       <>
         <tr
+          key={`section-${label}`}
           onClick={() => toggleSection(label)}
           className="cursor-pointer select-none border-b border-zinc-700/60 hover:bg-zinc-800/30 transition-colors"
         >
@@ -346,14 +379,14 @@ export function PresupuestoClient({
             </div>
           </td>
         </tr>
-        {!isCollapsed && lines.map(b => <BudgetRow key={b.id} b={b} />)}
+        {!isCollapsed && lines.map(b => renderBudgetRow(b))}
       </>
     )
   }
 
-  // ── budget row ────────────────────────────────────────────────────────────────
+  // ── budget row (called as function, not component, to avoid remount) ──────────
 
-  function BudgetRow({ b }: { b: Budget }) {
+  function renderBudgetRow(b: Budget) {
     const q1Act  = actualQ1[b.category]
     const q2Act  = actualQ2[b.category]
     const hist   = lookupHistory(b.category)
@@ -367,7 +400,7 @@ export function PresupuestoClient({
     const hasTxAuto = !!b.auto_tx_category_code
 
     if (isEdit) return (
-      <tr className="bg-zinc-800/50 border-b border-zinc-700">
+      <tr key={b.id} className="bg-zinc-800/50 border-b border-zinc-700">
         <td className="px-2 py-2 space-y-1.5">
           <input value={editName} onChange={e => setEditName(e.target.value)} list="budget-cat-list"
             className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635]" />
@@ -405,7 +438,7 @@ export function PresupuestoClient({
     )
 
     return (
-      <tr className="border-b border-zinc-800/40 hover:bg-zinc-800/20 group transition-colors">
+      <tr key={b.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 group transition-colors">
         <td className="px-3 py-2 text-xs font-medium text-white">
           <span className="flex items-center gap-1.5 min-w-0">
             <button onClick={() => startEdit(b)}
@@ -565,21 +598,33 @@ export function PresupuestoClient({
               <Th k="actual" right>
                 <span className={isQ1Active ? 'text-[#a3e635]/80' : ''}>Q1 Real</span>
               </Th>
-              <th className={`px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-center ${isQ1Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>✓</th>
+              <th className={`px-2 py-2 text-center ${isQ1Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>
+                <button onClick={() => handleBulkToggle(1)} disabled={isPending}
+                  title={allQ1Done ? 'Desmarcar todos Q1' : 'Marcar todos Q1 listos'}
+                  className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors hover:opacity-70 ${allQ1Done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-current'}`}>
+                  {allQ1Done && <Check size={9} />}
+                </button>
+              </th>
               <Th k="q2_plan" right>
                 <span className={isQ2Active ? 'text-[#a3e635]/80' : ''}>Q2 Plan</span>
               </Th>
               <th className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-right ${isQ2Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>Q2 Real</th>
-              <th className={`px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-center ${isQ2Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>✓</th>
+              <th className={`px-2 py-2 text-center ${isQ2Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>
+                <button onClick={() => handleBulkToggle(2)} disabled={isPending}
+                  title={allQ2Done ? 'Desmarcar todos Q2' : 'Marcar todos Q2 listos'}
+                  className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors hover:opacity-70 ${allQ2Done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-current'}`}>
+                  {allQ2Done && <Check size={9} />}
+                </button>
+              </th>
               <Th k="history" right>3m Avg</Th>
               <Th k="pct" right>%</Th>
             </tr>
           </thead>
 
           <tbody className="bg-zinc-900/10">
-            {expenseLines.length > 0 && <Section label="Gastos" lines={expenseLines} />}
-            {savingsLines.length > 0 && <Section label="Ahorros / Inversión" lines={savingsLines} />}
-            {incomeLines.length  > 0 && <Section label="Ingresos esperados"  lines={incomeLines}  />}
+            {expenseLines.length > 0 && renderSection('Gastos', expenseLines)}
+            {savingsLines.length > 0 && renderSection('Ahorros / Inversión', savingsLines)}
+            {incomeLines.length  > 0 && renderSection('Ingresos esperados',  incomeLines)}
           </tbody>
 
           <tfoot>

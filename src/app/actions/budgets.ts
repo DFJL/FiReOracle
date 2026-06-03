@@ -152,6 +152,95 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promi
   revalidatePath('/presupuesto')
 }
 
+export async function bulkToggleQuincena(q: 1 | 2, done: boolean): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No autorizado')
+
+  const admin = createAdminClient()
+
+  const { data: all } = await admin.from('budgets')
+    .select('id, q1_done, q2_done, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+
+  const changing = (all ?? []).filter(b => (q === 1 ? b.q1_done : b.q2_done) !== done)
+  if (!changing.length) { revalidatePath('/presupuesto'); return }
+
+  const patch = q === 1 ? { q1_done: done } : { q2_done: done }
+  await admin.from('budgets')
+    .update(patch)
+    .in('id', changing.map(b => b.id))
+    .eq('user_id', user.id)
+
+  const today     = new Date()
+  const todayStr  = today.toISOString().slice(0, 10)
+
+  // ── Envelope movements (batch) ────────────────────────────────────────────────
+  const envItems = changing.filter(b => b.envelope_id)
+  if (done) {
+    const rows = envItems.map(b => ({
+      user_id:       user.id,
+      envelope_id:   b.envelope_id!,
+      date:          todayStr,
+      amount:        Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
+      movement_type: b.budget_type === 'expense' ? 'retiro' : 'deposito',
+      notes:         `presupuesto_q${q}:${b.id}`,
+    }))
+    if (rows.length) await admin.from('envelope_movements').insert(rows)
+  } else {
+    const refs = envItems.map(b => `presupuesto_q${q}:${b.id}`)
+    if (refs.length) await admin.from('envelope_movements').delete().eq('user_id', user.id).in('notes', refs)
+  }
+
+  // ── Auto-tx transactions (batch) ──────────────────────────────────────────────
+  const txItems = changing.filter(b => b.auto_tx_category_code)
+  if (txItems.length) {
+    if (done) {
+      const codes = [...new Set(txItems.map(b => b.auto_tx_category_code!))]
+      const { data: cats } = await admin.from('transaction_categories')
+        .select('code, group_gasto, is_passive_income, is_survival_expense')
+        .in('code', codes)
+      const catMap = new Map((cats ?? []).map(c => [c.code, c]))
+
+      const rows = txItems.map(b => {
+        const cat     = catMap.get(b.auto_tx_category_code!)
+        const movType = b.budget_type === 'income'  ? 'income'
+                      : b.budget_type === 'savings' ? 'transfer'
+                      : 'expense'
+        return {
+          user_id:             user.id,
+          external_id:         `budget_tx_q${q}:${b.id}`,
+          date:                todayStr,
+          year:                today.getFullYear(),
+          month:               today.getMonth() + 1,
+          day:                 today.getDate(),
+          weekday:             today.getDay(),
+          concept:             b.category,
+          vendor:              b.category,
+          category_code:       b.auto_tx_category_code!,
+          movement_type:       movType,
+          amount:              Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
+          currency_code:       'CRC' as const,
+          account_id:          b.auto_tx_account_id ?? null,
+          expense_group:       cat?.group_gasto ?? null,
+          is_passive_income:   cat?.is_passive_income  ?? false,
+          is_survival_expense: cat?.is_survival_expense ?? false,
+          is_settlement:       false,
+          source:              'budget',
+          notes:               `budget_tx_q${q}:${b.id}`,
+        }
+      })
+      if (rows.length) await admin.from('transactions').insert(rows)
+    } else {
+      const refs = txItems.map(b => `budget_tx_q${q}:${b.id}`)
+      await admin.from('transactions').delete().eq('user_id', user.id).in('external_id', refs).eq('source', 'budget')
+    }
+  }
+
+  revalidatePath('/presupuesto')
+}
+
 export async function deleteBudget(id: string): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
