@@ -216,8 +216,8 @@ export function PresupuestoClient({
   const totalPlan      = totalPlanQ1 + totalPlanQ2
 
   const budgetedGroups = new Set(optimisticBudgets.map(b => b.category))
-  const totalActQ1 = optimisticBudgets.reduce((s, b) => s + effActQ1(b), 0)
-  const totalActQ2 = optimisticBudgets.reduce((s, b) => s + effActQ2(b), 0)
+  const totalActQ1 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ1(b), 0)
+  const totalActQ2 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ2(b), 0)
   const totalAct = totalActQ1 + totalActQ2
   const totalPct = totalPlan > 0 ? totalAct / totalPlan * 100 : 0
 
