@@ -65,7 +65,7 @@ export default async function PresupuestoPage({
 
     // Last 3 months for historical avg
     admin.from('transactions')
-      .select('category_code, amount, currency_code, amount_usd, expense_group, year, month')
+      .select('category_code, amount, currency_code, amount_usd, expense_group, year, month, day')
       .eq('user_id', user.id)
       .in('movement_type', ['expense', 'cash_withdrawal'])
       .in('year', prevYears)
@@ -127,20 +127,33 @@ export default async function PresupuestoPage({
     else           actualQ2[group] = (actualQ2[group] ?? 0) + crc
   }
 
-  // Historical avg (last 3 months) per L1 group
-  const histPerGroupMonth: Record<string, Record<string, number>> = {}
+  // Historical avg (last 3 months) per L1 group, split by quincena
+  const histQ1PerGroupMonth: Record<string, Record<string, number>> = {}
+  const histQ2PerGroupMonth: Record<string, Record<string, number>> = {}
   for (const tx of histRows ?? []) {
     const key = `${tx.year}-${tx.month}`
     if (!prevMonths.some(([py, pm]) => py === tx.year && pm === tx.month)) continue
     if (tx.expense_group === 'objetivos_financieros') continue
     const group = getGroupLabel(tx.category_code ?? 'MISC_EXPENSE')
-    if (!histPerGroupMonth[group]) histPerGroupMonth[group] = {}
-    histPerGroupMonth[group][key] = (histPerGroupMonth[group][key] ?? 0) + toCRC(tx)
+    const crc = toCRC(tx)
+    const day = tx.day ?? 0
+    if (day <= 15) {
+      if (!histQ1PerGroupMonth[group]) histQ1PerGroupMonth[group] = {}
+      histQ1PerGroupMonth[group][key] = (histQ1PerGroupMonth[group][key] ?? 0) + crc
+    } else {
+      if (!histQ2PerGroupMonth[group]) histQ2PerGroupMonth[group] = {}
+      histQ2PerGroupMonth[group][key] = (histQ2PerGroupMonth[group][key] ?? 0) + crc
+    }
   }
-  const history: Record<string, number> = {}
-  for (const [group, byMonth] of Object.entries(histPerGroupMonth)) {
+  const histQ1: Record<string, number> = {}
+  const histQ2: Record<string, number> = {}
+  for (const [group, byMonth] of Object.entries(histQ1PerGroupMonth)) {
     const vals = Object.values(byMonth)
-    if (vals.length) history[group] = vals.reduce((a, b) => a + b, 0) / vals.length
+    if (vals.length) histQ1[group] = vals.reduce((a, b) => a + b, 0) / vals.length
+  }
+  for (const [group, byMonth] of Object.entries(histQ2PerGroupMonth)) {
+    const vals = Object.values(byMonth)
+    if (vals.length) histQ2[group] = vals.reduce((a, b) => a + b, 0) / vals.length
   }
 
   // Actual income
@@ -161,7 +174,8 @@ export default async function PresupuestoPage({
         budgets={budgetRows ?? []}
         actualQ1={actualQ1}
         actualQ2={actualQ2}
-        history={history}
+        histQ1={histQ1}
+        histQ2={histQ2}
         incomeActual={incomeActual}
         year={year}
         month={month}
