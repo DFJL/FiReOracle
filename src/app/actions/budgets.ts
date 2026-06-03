@@ -70,6 +70,10 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
 
   const admin = createAdminClient()
 
+  // Keep the budget-row flag updated so the optimistic rollback lands on correct data
+  const patch = q === 1 ? { q1_done: done } : { q2_done: done }
+  await admin.from('budgets').update(patch).eq('id', id).eq('user_id', user.id)
+
   const { data: budget } = await admin
     .from('budgets')
     .select('envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
@@ -193,6 +197,10 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
     return (cur ? (q === 1 ? cur.q1_done : cur.q2_done) : false) !== done
   })
   if (!changing.length) { revalidatePath('/presupuesto'); return }
+
+  // Keep budget-row flags updated so optimistic rollback lands on correct data
+  const patch = q === 1 ? { q1_done: done } : { q2_done: done }
+  await admin.from('budgets').update(patch).in('id', changing.map(b => b.id)).eq('user_id', user.id)
 
   const doneRows = changing.map(b => {
     const cur = doneMap.get(b.category)

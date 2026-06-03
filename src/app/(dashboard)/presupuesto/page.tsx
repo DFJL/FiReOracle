@@ -110,7 +110,10 @@ export default async function PresupuestoPage({
 
   // Dedup: keep only the most recent effective row per category
   // (rows are already sorted effective_from DESC, so first occurrence wins)
-  // Override q1_done/q2_done with per-month state so marks from other months don't bleed through.
+  // Done-state priority: monthly_done record > budget-row value (current month only) > false
+  // This prevents marks from one month bleeding into other months while keeping the budget-row
+  // as a safe fallback for the current month (avoids optimistic-rollback flicker).
+  const isCurrentViewMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const seen = new Set<string>()
   const monthlyDoneMap = new Map((monthlyDoneRows ?? []).map(d => [d.category, d]))
   const budgetRows = (allBudgetRows ?? []).filter(b => {
@@ -119,7 +122,9 @@ export default async function PresupuestoPage({
     return true
   }).map(b => {
     const md = monthlyDoneMap.get(b.category)
-    return { ...b, q1_done: md?.q1_done ?? false, q2_done: md?.q2_done ?? false }
+    const q1_done = md ? md.q1_done : (isCurrentViewMonth ? b.q1_done : false)
+    const q2_done = md ? md.q2_done : (isCurrentViewMonth ? b.q2_done : false)
+    return { ...b, q1_done, q2_done }
   })
 
   function toCRC(tx: { amount: number | null; currency_code: string | null; amount_usd: number | null }) {
