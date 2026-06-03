@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
-import { inferCategory, displayCategory, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { updateTransaction, deleteTransaction, type UpdateTransactionInput } from '@/app/actions/transactions'
@@ -122,6 +122,8 @@ function buildConceptCatMap(txs: TxClient[]): CatMap {
 // For passive income, category_code reflects the savings bucket destination (SAVINGS, INCOME),
 // not the economic nature of the transaction. The concept/vendor is always more informative
 // ("Rendimientos Fondo X", "Farming Y", etc.) and is used instead.
+// Returns a canonical category CODE (not a display string).
+// Callers must wrap with displayCategory() for L2 display or getGroupLabel() for L1 grouping.
 function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   const ck = (tx.concept ?? '').toLowerCase().trim()
   const vk = (tx.vendor ?? '').toLowerCase().trim()
@@ -129,20 +131,20 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   // category_code is authoritative except for passive income entries where it
   // records the bucket destination (SAVINGS, INCOME) rather than the economic type.
   // Specific passive income categories (RENTAL_INCOME, INVESTMENT_RETURN, etc.)
-  // are always meaningful and should be displayed directly.
+  // are always meaningful and should be used directly.
   const BUCKET_ONLY_CATS = new Set(['SAVINGS', 'INCOME', 'SAVINGS_INVESTMENT', 'PASSIVE_INCOME'])
   if (tx.category_code && (!tx.is_passive_income || !BUCKET_ONLY_CATS.has(tx.category_code))) {
-    return displayCategory(tx.category_code)
+    return tx.category_code
   }
 
-  // Concept-level pattern overrides
-  if (/^abarrotes/i.test(ck)) return 'Abarrotes'
-  if (/^impresion/i.test(ck)) return 'Hogar'
+  // Concept-level pattern overrides → codes
+  if (/^abarrotes/i.test(ck)) return 'FOOD_SUPER'
+  if (/^impresion/i.test(ck)) return 'HOUSEHOLD'
 
-  if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
-  if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
+  if (vk && vk !== 'na' && vMap[vk]) return vMap[vk]
+  if (ck && (!vk || vk === 'na') && cMap[ck]) return cMap[ck]
   // Pass null as categoryCode for passive income so inferCategory uses concept/vendor only
-  return displayCategory(inferCategory(tx.vendor, tx.concept, tx.is_passive_income ? null : tx.category_code))
+  return inferCategory(tx.vendor, tx.concept, tx.is_passive_income ? null : tx.category_code)
 }
 
 // ── classifiers ───────────────────────────────────────────────────────────────
@@ -186,7 +188,7 @@ function isSavings(tx: TxClient) {
   return true
 }
 
-const INVEST_CODES = new Set(['SAVINGS_INVESTMENT'])
+const INVEST_CODES = new Set(['SAVINGS_FUND', 'SAVINGS_CRYPTO', 'SAVINGS_PENSION', 'INVESTMENT', 'REAL_ESTATE', 'SAVINGS_INVESTMENT'])
 const isInvestment = (tx: TxClient) =>
   INVEST_CODES.has(tx.category_code ?? inferCategory(tx.vendor, tx.concept, null))
 
@@ -633,7 +635,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
     })
   }
 
-  const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
+  const getCat = (tx: TxClient) => displayCategory(resolveCategory(tx, vMap, cMap))
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     const base = !q ? rows : rows.filter(tx =>
@@ -887,12 +889,13 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
     })
   }, [periodTxs])
 
-  // Resolves display category with overrides for edge cases
+  // Resolves L1 display group for category breakdown.
+  // getCat returns a code; getGroupLabel maps it to the L1 non-overlapping group.
   const getDisplayCat = (tx: TxClient) => {
     if (tx.is_settlement) return 'Liquidaciones'
     // Loan payments always → Préstamos, regardless of bucket/category_code
     if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
-    return getCat(tx)
+    return getGroupLabel(getCat(tx))
   }
 
   // Normalize concept label for grouping: trim + collapse spaces + title case
