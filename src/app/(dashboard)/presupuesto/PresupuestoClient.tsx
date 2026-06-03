@@ -5,10 +5,16 @@ import { useRouter } from 'next/navigation'
 import {
   PlusCircle, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  ArrowUpDown, ArrowUp, ArrowDown,
+  ArrowUpDown, ArrowUp, ArrowDown, Link2,
 } from 'lucide-react'
 import { upsertBudget, deleteBudget, toggleQuincena } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
+
+export type Envelope = {
+  id: string
+  name: string
+  parent_envelope_id: string | null
+}
 
 const MONTH_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
@@ -43,42 +49,58 @@ interface Props {
   year:         number
   month:        number
   suggestions:  string[]
+  envelopes:    Envelope[]
 }
 
 export function PresupuestoClient({
-  budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions,
+  budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  const [editId, setEditId]       = useState<string | null>(null)
-  const [editName, setEditName]   = useState('')
-  const [editQ1, setEditQ1]       = useState('')
-  const [editQ2, setEditQ2]       = useState('')
+  const [editId, setEditId]               = useState<string | null>(null)
+  const [editName, setEditName]           = useState('')
+  const [editQ1, setEditQ1]               = useState('')
+  const [editQ2, setEditQ2]               = useState('')
+  const [editEnvelopeId, setEditEnvelopeId] = useState<string>('')
 
-  const [showAdd, setShowAdd]     = useState(false)
-  const [newName, setNewName]     = useState('')
-  const [newQ1, setNewQ1]         = useState('')
-  const [newQ2, setNewQ2]         = useState('')
-  const [newType, setNewType]     = useState<BudgetType>('expense')
+  const [showAdd, setShowAdd]             = useState(false)
+  const [newName, setNewName]             = useState('')
+  const [newQ1, setNewQ1]                 = useState('')
+  const [newQ2, setNewQ2]                 = useState('')
+  const [newType, setNewType]             = useState<BudgetType>('expense')
+  const [newEnvelopeId, setNewEnvelopeId] = useState<string>('')
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [sortKey, setSortKey]     = useState<SortKey | null>(null)
-  const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('asc')
-  const [showNoLimit, setShowNoLimit] = useState(false)
+  const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
+  const [sortKey, setSortKey]             = useState<SortKey | null>(null)
+  const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
+  const [showNoLimit, setShowNoLimit]     = useState(false)
 
-  const now = new Date()
-  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
-  const currentDay     = isCurrentMonth ? now.getDate() : 31
-  const isQ1Active     = currentDay <= 15
-  const isQ2Active     = currentDay > 15
+  const now             = new Date()
+  const isCurrentMonth  = year === now.getFullYear() && month === now.getMonth() + 1
+  const currentDay      = isCurrentMonth ? now.getDate() : 31
+  const isQ1Active      = currentDay <= 15
+  const isQ2Active      = currentDay > 15
+
+  // Map envelope id → name for display
+  const envelopeMap = new Map(envelopes.map(e => [e.id, e]))
+
+  // Build grouped options: top-level first, then children indented
+  const topEnvelopes  = envelopes.filter(e => !e.parent_envelope_id)
+  const childMap      = new Map<string, Envelope[]>()
+  for (const e of envelopes) {
+    if (e.parent_envelope_id) {
+      const list = childMap.get(e.parent_envelope_id) ?? []
+      list.push(e)
+      childMap.set(e.parent_envelope_id, list)
+    }
+  }
 
   function navigate(delta: number) {
     const d = new Date(year, month - 1 + delta, 1)
     router.push(`/presupuesto?m=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
 
-  // Fuzzy history lookup: exact → partial (substring in either direction)
   function lookupHistory(category: string): number | undefined {
     if (history[category] !== undefined) return history[category]
     const lower = category.toLowerCase()
@@ -164,14 +186,16 @@ export function PresupuestoClient({
   function startEdit(b: Budget) {
     setEditId(b.id); setEditName(b.category)
     setEditQ1(String(b.q1_amount ?? '')); setEditQ2(String(b.q2_amount ?? ''))
+    setEditEnvelopeId(b.envelope_id ?? '')
   }
 
   function saveEdit(b: Budget) {
     const q1   = parseFloat(editQ1) || 0
     const q2   = parseFloat(editQ2) || 0
     const name = editName.trim() || b.category
+    const envId = editEnvelopeId || null
     startTransition(async () => {
-      await upsertBudget(name, q1, q2, b.budget_type)
+      await upsertBudget(name, q1, q2, b.budget_type, envId)
       if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
     })
@@ -181,9 +205,10 @@ export function PresupuestoClient({
     const q1 = parseFloat(newQ1) || 0
     const q2 = parseFloat(newQ2) || 0
     if (!newName.trim()) return
+    const envId = newEnvelopeId || null
     startTransition(async () => {
-      await upsertBudget(newName.trim(), q1, q2, newType)
-      setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewType('expense')
+      await upsertBudget(newName.trim(), q1, q2, newType, envId)
+      setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewType('expense'); setNewEnvelopeId('')
     })
   }
 
@@ -193,6 +218,30 @@ export function PresupuestoClient({
 
   function handleDelete(id: string) {
     startTransition(async () => { await deleteBudget(id) })
+  }
+
+  // ── envelope select ───────────────────────────────────────────────────────────
+
+  function EnvelopeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    return (
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-[#a3e635]">
+        <option value="">Sin sobre</option>
+        {topEnvelopes.map(e => (
+          <>
+            <option key={e.id} value={e.id}>{e.name}</option>
+            {(childMap.get(e.id) ?? []).map(child => (
+              <>
+                <option key={child.id} value={child.id}>{'  └ '}{child.name}</option>
+                {(childMap.get(child.id) ?? []).map(grandchild => (
+                  <option key={grandchild.id} value={grandchild.id}>{'    └ '}{grandchild.name}</option>
+                ))}
+              </>
+            ))}
+          </>
+        ))}
+      </select>
+    )
   }
 
   // ── sort icon ─────────────────────────────────────────────────────────────────
@@ -228,7 +277,6 @@ export function PresupuestoClient({
 
     return (
       <>
-        {/* Section header row */}
         <tr
           onClick={() => toggleSection(label)}
           className="cursor-pointer select-none border-b border-zinc-700/60 hover:bg-zinc-800/30 transition-colors"
@@ -236,14 +284,9 @@ export function PresupuestoClient({
           <td colSpan={9} className="px-3 py-1.5 bg-zinc-900/50">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                {isCollapsed
-                  ? <ChevronDown size={11} />
-                  : <ChevronUp size={11} />
-                }
+                {isCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
                 {label}
-                <span className="text-zinc-600 font-normal normal-case tracking-normal">
-                  ({lines.length})
-                </span>
+                <span className="text-zinc-600 font-normal normal-case tracking-normal">({lines.length})</span>
               </span>
               {isCollapsed && (
                 <span className="text-[10px] text-zinc-500 tabular-nums">
@@ -253,8 +296,6 @@ export function PresupuestoClient({
             </div>
           </td>
         </tr>
-
-        {/* Rows */}
         {!isCollapsed && lines.map(b => <BudgetRow key={b.id} b={b} />)}
       </>
     )
@@ -272,12 +313,14 @@ export function PresupuestoClient({
     const act    = (q1Act ?? 0) + (q2Act ?? 0)
     const pct    = plan > 0 ? act / plan * 100 : 0
     const isEdit = editId === b.id
+    const envName = b.envelope_id ? envelopeMap.get(b.envelope_id)?.name : undefined
 
     if (isEdit) return (
       <tr className="bg-zinc-800/50 border-b border-zinc-700">
-        <td className="px-2 py-2">
+        <td className="px-2 py-2 space-y-1.5">
           <input value={editName} onChange={e => setEditName(e.target.value)} list="budget-cat-list"
             className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635]" />
+          <EnvelopeSelect value={editEnvelopeId} onChange={setEditEnvelopeId} />
         </td>
         <td className="px-2 py-2" colSpan={3}>
           <input type="number" value={editQ1} onChange={e => setEditQ1(e.target.value)}
@@ -316,7 +359,13 @@ export function PresupuestoClient({
               className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300">
               <Pencil size={10} />
             </button>
-            <span className="truncate max-w-[130px]" title={b.category}>{b.category}</span>
+            <span className="truncate max-w-[110px]" title={b.category}>{b.category}</span>
+            {envName && (
+              <span className="shrink-0 flex items-center gap-0.5 text-[9px] text-violet-400 bg-violet-400/10 rounded px-1 py-0.5"
+                title={`Sobre: ${envName}`}>
+                <Link2 size={8} />{envName}
+              </span>
+            )}
           </span>
         </td>
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ1Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
@@ -329,7 +378,9 @@ export function PresupuestoClient({
         </td>
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 1, !b.q1_done)} disabled={isPending}
-            title={b.q1_done ? 'Marcar pendiente' : 'Marcar listo'}
+            title={b.q1_done
+              ? envName ? `Quincena 1 lista · undo retirará movimiento de "${envName}"` : 'Marcar pendiente'
+              : envName ? `Marcar listo · registrará movimiento en "${envName}"` : 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
               b.q1_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
@@ -346,7 +397,9 @@ export function PresupuestoClient({
         </td>
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 2, !b.q2_done)} disabled={isPending}
-            title={b.q2_done ? 'Marcar pendiente' : 'Marcar listo'}
+            title={b.q2_done
+              ? envName ? `Quincena 2 lista · undo retirará movimiento de "${envName}"` : 'Marcar pendiente'
+              : envName ? `Marcar listo · registrará movimiento en "${envName}"` : 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
               b.q2_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
@@ -433,7 +486,6 @@ export function PresupuestoClient({
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full border-collapse text-left" style={{ minWidth: 680 }}>
           <thead>
-            {/* Progress bar row */}
             <tr className="bg-zinc-900/80 border-b border-zinc-800">
               <td colSpan={9} className="px-3 py-2">
                 <div className="flex items-center gap-3 text-xs text-zinc-500">
@@ -447,7 +499,6 @@ export function PresupuestoClient({
                 </div>
               </td>
             </tr>
-            {/* Column headers — all sortable */}
             <tr className="bg-zinc-900/50 border-b border-zinc-700">
               <Th k="name">Línea</Th>
               <Th k="q1_plan" right>
@@ -519,6 +570,17 @@ export function PresupuestoClient({
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
             </div>
           </div>
+          <div>
+            <label className="text-[10px] text-zinc-500 mb-1 flex items-center gap-1 block">
+              <Link2 size={9} /> Vincular sobre (opcional)
+            </label>
+            <EnvelopeSelect value={newEnvelopeId} onChange={setNewEnvelopeId} />
+            {newEnvelopeId && (
+              <p className="text-[10px] text-violet-400 mt-1">
+                Al marcar ✓ se registrará automáticamente un movimiento en el sobre seleccionado.
+              </p>
+            )}
+          </div>
           <p className="text-[10px] text-zinc-600">
             Si el nombre coincide con un grupo de categoría (ej. "Supermercado", "Mariam") el Real y el 3m Avg se calculan automáticamente.
           </p>
@@ -527,7 +589,7 @@ export function PresupuestoClient({
               className="flex-1 py-2 rounded-lg bg-[#a3e635] text-black text-sm font-bold disabled:opacity-40 transition-opacity">
               Agregar
             </button>
-            <button onClick={() => { setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2('') }}
+            <button onClick={() => { setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewEnvelopeId('') }}
               className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm hover:bg-zinc-700 transition-colors">
               Cancelar
             </button>

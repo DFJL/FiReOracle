@@ -433,6 +433,7 @@ export type Database = {
           category: string
           created_at: string
           effective_from: string
+          envelope_id: string | null
           id: string
           is_active: boolean
           monthly_limit: number
@@ -450,6 +451,7 @@ export type Database = {
           category: string
           created_at?: string
           effective_from?: string
+          envelope_id?: string | null
           id?: string
           is_active?: boolean
           monthly_limit: number
@@ -467,6 +469,7 @@ export type Database = {
           category?: string
           created_at?: string
           effective_from?: string
+          envelope_id?: string | null
           id?: string
           is_active?: boolean
           monthly_limit?: number
@@ -479,7 +482,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "budgets_envelope_id_fkey"
+            columns: ["envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       currencies: {
         Row: {

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { PresupuestoClient } from './PresupuestoClient'
+import type { Envelope } from './PresupuestoClient'
 import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
@@ -38,9 +39,10 @@ export default async function PresupuestoPage({
     { data: histRows },
     { data: incomeTxRows },
     { data: catRows },
+    { data: envelopeRows },
   ] = await Promise.all([
     admin.from('budgets')
-      .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes')
+      .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order')
@@ -76,6 +78,12 @@ export default async function PresupuestoPage({
 
     admin.from('transaction_categories')
       .select('code, name')
+      .eq('is_active', true)
+      .order('name'),
+
+    admin.from('savings_envelopes')
+      .select('id, name, parent_envelope_id')
+      .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),
   ])
@@ -137,6 +145,7 @@ export default async function PresupuestoPage({
         year={year}
         month={month}
         suggestions={suggestions}
+        envelopes={(envelopeRows ?? []) as Envelope[]}
       />
     </div>
   )
