@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { PresupuestoClient } from './PresupuestoClient'
-import { getGroupLabel } from '../resumen/categoryUtils'
+import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 export default async function PresupuestoPage({
@@ -23,7 +23,7 @@ export default async function PresupuestoPage({
   const admin  = createAdminClient()
   const tcRate = (await fetchExchangeRate()).sell
 
-  const [{ data: budgetRows }, { data: txRows }] = await Promise.all([
+  const [{ data: budgetRows }, { data: txRows }, { data: catRows }] = await Promise.all([
     admin
       .from('budgets')
       .select('id, category, monthly_limit, effective_from')
@@ -38,7 +38,21 @@ export default async function PresupuestoPage({
       .eq('year', year)
       .eq('month', month)
       .not('amount', 'is', null),
+    admin
+      .from('transaction_categories')
+      .select('code, name')
+      .eq('is_active', true)
+      .order('name'),
   ])
+
+  // Build suggestion list: L1 group names + L2 display names from all active categories
+  const suggestionSet = new Set<string>()
+  for (const cat of catRows ?? []) {
+    suggestionSet.add(getGroupLabel(cat.code))
+    suggestionSet.add(displayCategory(cat.code))
+    suggestionSet.add(cat.name)
+  }
+  const suggestions = [...suggestionSet].filter(Boolean).sort()
 
   // Aggregate by L1 group, exclude savings and settlements
   const actual: Record<string, number> = {}
@@ -58,6 +72,7 @@ export default async function PresupuestoPage({
         actual={actual}
         year={year}
         month={month}
+        suggestions={suggestions}
       />
     </div>
   )

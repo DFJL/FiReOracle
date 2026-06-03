@@ -6,33 +6,6 @@ import { PlusCircle, Pencil, Trash2, X, Check, ChevronLeft, ChevronRight, Chevro
 import { upsertBudget, deleteBudget } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 
-const BUDGETABLE_GROUPS = [
-  'Supermercado',
-  'Comida y restaurantes',
-  'Gastos de carro',
-  'Transporte',
-  'Salud',
-  'Seguros',
-  'Entretenimiento',
-  'Suscripciones',
-  'Viajes',
-  'Vestimenta',
-  'Educación',
-  'Hogar',
-  'Servicios básicos',
-  'Servicios del hogar',
-  'Servicios varios',
-  'Gastos laborales',
-  'Regalos y donaciones',
-  'Comisiones y cargos',
-  'Impuestos',
-  'Tecnología',
-  'Mariam',
-  'Emma · Manutención',
-  'Familia',
-  'Otros',
-]
-
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 function fmtCRC(n: number) {
@@ -56,9 +29,10 @@ interface Props {
   actual: Record<string, number>
   year: number
   month: number
+  suggestions: string[]  // from DB transaction_categories — used as datalist hints only
 }
 
-export function PresupuestoClient({ budgets, actual, year, month }: Props) {
+export function PresupuestoClient({ budgets, actual, year, month, suggestions }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editId, setEditId]     = useState<string | null>(null)
@@ -87,12 +61,10 @@ export function PresupuestoClient({ budgets, actual, year, month }: Props) {
   const totalActual   = budgets.reduce((s, b) => s + (actual[b.category] ?? 0), 0)
   const totalPct      = totalBudgeted > 0 ? (totalActual / totalBudgeted) * 100 : 0
 
-  const budgetedGroups = new Set(budgets.map(b => b.category))
+  const budgetedSet = new Set(budgets.map(b => b.category))
   const unbudgeted = Object.entries(actual)
-    .filter(([g]) => !budgetedGroups.has(g))
+    .filter(([g]) => !budgetedSet.has(g))
     .sort((a, b) => b[1] - a[1])
-
-  const availableGroups = BUDGETABLE_GROUPS.filter(g => !budgetedGroups.has(g))
 
   function handleEdit(b: Budget) {
     setEditId(b.id)
@@ -244,17 +216,22 @@ export function PresupuestoClient({ budgets, actual, year, month }: Props) {
       {/* Add budget */}
       {showAdd ? (
         <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-semibold text-white">Nueva categoría</p>
-          <select
+          <p className="text-sm font-semibold text-white">Nueva línea de presupuesto</p>
+          <p className="text-xs text-zinc-500">Escribe cualquier nombre — categoría del sistema, ahorro, gasto fijo personalizado, etc.</p>
+          <datalist id="budget-cat-list">
+            {suggestions.filter(s => !budgetedSet.has(s)).map(s => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+          <input
+            type="text"
+            list="budget-cat-list"
+            placeholder="Nombre de la línea (ej. CrossFit, Ahorro prima casa…)"
             value={newCategory}
             onChange={e => setNewCategory(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]"
-          >
-            <option value="">Seleccionar categoría…</option>
-            {availableGroups.map(g => (
-              <option key={g} value={g}>{g}</option>
-            ))}
-          </select>
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635]"
+            autoFocus
+          />
           <input
             type="number"
             placeholder="Límite mensual (₡)"
@@ -266,7 +243,7 @@ export function PresupuestoClient({ budgets, actual, year, month }: Props) {
           <div className="flex gap-2">
             <button
               onClick={handleAdd}
-              disabled={!newCategory || !newAmount || isPending}
+              disabled={!newCategory.trim() || !newAmount || isPending}
               className="flex-1 py-2 rounded-lg bg-[#a3e635] text-black text-sm font-bold disabled:opacity-40 transition-opacity"
             >
               Agregar
@@ -280,15 +257,13 @@ export function PresupuestoClient({ budgets, actual, year, month }: Props) {
           </div>
         </div>
       ) : (
-        availableGroups.length > 0 && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 border border-dashed border-zinc-700 rounded-xl text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 text-sm transition-colors"
-          >
-            <PlusCircle size={15} />
-            Agregar categoría
-          </button>
-        )
+        <button
+          onClick={() => setShowAdd(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 border border-dashed border-zinc-700 rounded-xl text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 text-sm transition-colors"
+        >
+          <PlusCircle size={15} />
+          Agregar línea de presupuesto
+        </button>
       )}
 
       {/* Unbudgeted spending */}
