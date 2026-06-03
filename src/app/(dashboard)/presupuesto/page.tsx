@@ -33,8 +33,11 @@ export default async function PresupuestoPage({
   const prevYears  = [...new Set(prevMonths.map(([y]) => y))]
   const prevMonthN = prevMonths.map(([, mn]) => mn)
 
+  // Last day of the viewed month (for temporal budget filtering)
+  const lastDayOfMonth = new Date(year, month, 0).toISOString().slice(0, 10)
+
   const [
-    { data: budgetRows },
+    { data: allBudgetRows },
     { data: txRows },
     { data: histRows },
     { data: incomeTxRows },
@@ -46,8 +49,10 @@ export default async function PresupuestoPage({
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
       .eq('user_id', user.id)
       .eq('is_active', true)
+      .lte('effective_from', lastDayOfMonth)
       .order('sort_order')
-      .order('category'),
+      .order('category')
+      .order('effective_from', { ascending: false }),
 
     // Current month expenses split by day (for Q1/Q2 actuals)
     admin.from('transactions')
@@ -94,6 +99,15 @@ export default async function PresupuestoPage({
       .eq('is_active', true)
       .order('name'),
   ])
+
+  // Dedup: keep only the most recent effective row per category
+  // (rows are already sorted effective_from DESC, so first occurrence wins)
+  const seen = new Set<string>()
+  const budgetRows = (allBudgetRows ?? []).filter(b => {
+    if (seen.has(b.category)) return false
+    seen.add(b.category)
+    return true
+  })
 
   function toCRC(tx: { amount: number | null; currency_code: string | null; amount_usd: number | null }) {
     return tx.currency_code === 'CRC'

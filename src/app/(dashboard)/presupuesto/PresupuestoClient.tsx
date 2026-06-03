@@ -238,6 +238,9 @@ export function PresupuestoClient({
     setEditAutoTxAccount(b.auto_tx_account_id ?? '')
   }
 
+  // First day of the currently viewed month — edits apply from here forward
+  const effectiveFrom = `${year}-${String(month).padStart(2, '0')}-01`
+
   function saveEdit(b: Budget) {
     const q1   = parseFloat(editQ1) || 0
     const q2   = parseFloat(editQ2) || 0
@@ -247,6 +250,7 @@ export function PresupuestoClient({
         editEnvelopeId || null,
         editAutoTxCat || null,
         editAutoTxAccount || null,
+        effectiveFrom,
       )
       if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
@@ -262,6 +266,7 @@ export function PresupuestoClient({
         newEnvelopeId || null,
         newAutoTxCat || null,
         newAutoTxAccount || null,
+        effectiveFrom,
       )
       setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2('')
       setNewType('expense'); setNewEnvelopeId(''); setNewAutoTxCat(''); setNewAutoTxAccount('')

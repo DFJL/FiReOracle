@@ -29,6 +29,7 @@ export async function upsertBudget(
   envelopeId: string | null = null,
   autoTxCategoryCode: string | null = null,
   autoTxAccountId: string | null = null,
+  effectiveFrom = '2000-01-01',
 ): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -36,11 +37,14 @@ export async function upsertBudget(
 
   const admin = createAdminClient()
 
+  // Only deactivate rows that are effective from this month onwards;
+  // earlier rows stay active so past months keep their historical values.
   await admin.from('budgets')
     .update({ is_active: false })
     .eq('user_id', user.id)
     .eq('category', category)
     .eq('is_active', true)
+    .gte('effective_from', effectiveFrom)
 
   await admin.from('budgets').insert({
     user_id: user.id,
@@ -49,7 +53,7 @@ export async function upsertBudget(
     q2_amount: q2Amount,
     monthly_limit: q1Amount + q2Amount,
     budget_type: budgetType,
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: effectiveFrom,
     is_active: true,
     envelope_id: envelopeId || null,
     auto_tx_category_code: autoTxCategoryCode || null,
