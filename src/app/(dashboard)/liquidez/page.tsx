@@ -15,6 +15,7 @@ export type SubEnvelope = {
   parent_envelope_id: string
   balance: number   // principal only (excludes interes movements)
   interest: number  // sum of interes movements (reference only)
+  grandchildren: { id: string; name: string; balance: number; interest: number }[]
 }
 
 export type Envelope = {
@@ -100,7 +101,16 @@ export default async function LiquidezPage() {
       parent_envelope_id: e.parent_envelope_id,
       balance: ownBalance[e.id] ?? 0,
       interest: ownInterest[e.id] ?? 0,
+      grandchildren: [],
     })
+  }
+  // Attach any 3rd-level envelopes as grandchildren of their parent sub-envelope
+  for (const children of Object.values(childMap)) {
+    for (const sub of children) {
+      sub.grandchildren = (childMap[sub.id] ?? []).map(gc => ({
+        id: gc.id, name: gc.name, balance: gc.balance, interest: gc.interest,
+      }))
+    }
   }
 
   // Root envelopes: balance = sum of children (if has children) or own movements

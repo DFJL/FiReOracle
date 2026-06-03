@@ -6,7 +6,6 @@ import { addMovement, distributeInterest, transferBetweenEnvelopes } from './act
 import { createEnvelope, createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
-  if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
@@ -203,6 +202,38 @@ function InterestModal({
   )
 }
 
+function GrandchildRow({ gc }: {
+  gc: { id: string; name: string; balance: number; interest: number }
+}) {
+  const [deleting, start] = useTransition()
+  const [confirm, setConfirm] = useState(false)
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm) { setConfirm(true); return }
+    start(async () => { await deleteSubEnvelope(gc.id) })
+  }
+
+  return (
+    <div className="flex items-center gap-2 py-0.5">
+      <span className="w-1 h-1 rounded-full bg-zinc-700 shrink-0" />
+      <span className="flex-1 text-[10px] text-zinc-600 truncate min-w-0">{gc.name}</span>
+      <span className="text-[10px] tabular-nums text-zinc-600 shrink-0">
+        {fmtCRC(gc.balance + gc.interest)}
+      </span>
+      <button
+        onClick={handleDelete}
+        disabled={deleting}
+        title={confirm ? 'Confirmar eliminación' : 'Eliminar'}
+        className={`text-[10px] w-5 text-center shrink-0 transition-colors ${
+          confirm ? 'text-rose-400 hover:text-rose-300' : 'text-zinc-700 hover:text-zinc-500'
+        }`}>
+        {deleting ? '…' : confirm ? '!' : '×'}
+      </button>
+    </div>
+  )
+}
+
 function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
   sub: SubEnvelope; isOpen: boolean; onToggle: () => void
   leafEnvelopes: (Envelope | SubEnvelope)[]
@@ -249,7 +280,17 @@ function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
           {isOpen ? '−' : '+'}
         </span>
       </button>
-      {isOpen && <AddMovementPanel envelope={sub} leafEnvelopes={leafEnvelopes} onClose={onToggle} />}
+      {isOpen && (
+        <>
+          <AddMovementPanel envelope={sub} leafEnvelopes={leafEnvelopes} onClose={onToggle} />
+          {sub.grandchildren.length > 0 && (
+            <div className="pl-9 pr-4 pb-2 pt-1 space-y-0.5 bg-white/[0.02] border-t border-white/[0.03]">
+              <p className="text-[8px] text-zinc-700 uppercase tracking-wider mb-1">Sub-sobres anidados</p>
+              {sub.grandchildren.map(gc => <GrandchildRow key={gc.id} gc={gc} />)}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
