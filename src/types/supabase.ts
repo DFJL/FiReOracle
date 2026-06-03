@@ -429,32 +429,53 @@ export type Database = {
       }
       budgets: {
         Row: {
+          budget_type: string
           category: string
           created_at: string
           effective_from: string
           id: string
           is_active: boolean
           monthly_limit: number
+          notes: string | null
+          q1_amount: number | null
+          q1_done: boolean
+          q2_amount: number | null
+          q2_done: boolean
+          sort_order: number
           updated_at: string
           user_id: string
         }
         Insert: {
+          budget_type?: string
           category: string
           created_at?: string
           effective_from?: string
           id?: string
           is_active?: boolean
           monthly_limit: number
+          notes?: string | null
+          q1_amount?: number | null
+          q1_done?: boolean
+          q2_amount?: number | null
+          q2_done?: boolean
+          sort_order?: number
           updated_at?: string
           user_id: string
         }
         Update: {
+          budget_type?: string
           category?: string
           created_at?: string
           effective_from?: string
           id?: string
           is_active?: boolean
           monthly_limit?: number
+          notes?: string | null
+          q1_amount?: number | null
+          q1_done?: boolean
+          q2_amount?: number | null
+          q2_done?: boolean
+          sort_order?: number
           updated_at?: string
           user_id?: string
         }
@@ -1425,6 +1446,39 @@ export type Database = {
           },
         ]
       }
+      transaction_audit_log: {
+        Row: {
+          changed_at: string
+          changed_fields: string[] | null
+          id: string
+          new_data: Json | null
+          old_data: Json | null
+          operation: string
+          transaction_id: string
+          user_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_fields?: string[] | null
+          id?: string
+          new_data?: Json | null
+          old_data?: Json | null
+          operation: string
+          transaction_id: string
+          user_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_fields?: string[] | null
+          id?: string
+          new_data?: Json | null
+          old_data?: Json | null
+          operation?: string
+          transaction_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       transaction_categories: {
         Row: {
           category_type: string
@@ -1923,3 +1977,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
