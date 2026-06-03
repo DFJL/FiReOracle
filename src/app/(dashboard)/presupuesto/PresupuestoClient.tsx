@@ -385,12 +385,19 @@ export function PresupuestoClient({
                 {label}
                 <span className="text-zinc-600 font-normal normal-case tracking-normal">({lines.length})</span>
               </span>
-              <span className="flex items-center gap-2 text-[10px] tabular-nums">
+              <span className="flex items-center gap-3 text-[10px] tabular-nums">
                 <span className="text-zinc-500">
-                  Plan <strong className="text-zinc-300">{fmt(sectionPlan)}</strong>
+                  Q1 <strong className="text-zinc-300">{fmt(sectionPlanQ1)}</strong>
+                  {' '}<span className={pctCls(sectionPlanQ1 > 0 ? sectionActQ1 / sectionPlanQ1 * 100 : 0)}>
+                    {fmt(sectionActQ1)}
+                  </span>
                 </span>
-                <span className={pctCls(sectionPct)}>
-                  Real <strong>{fmt(sectionAct)}</strong>
+                <span className="text-zinc-700">·</span>
+                <span className="text-zinc-500">
+                  Q2 <strong className="text-zinc-300">{fmt(sectionPlanQ2)}</strong>
+                  {' '}<span className={pctCls(sectionPlanQ2 > 0 ? sectionActQ2 / sectionPlanQ2 * 100 : 0)}>
+                    {fmt(sectionActQ2)}
+                  </span>
                 </span>
                 <span className="flex items-center gap-1">
                   <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
