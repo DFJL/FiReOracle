@@ -76,7 +76,7 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
 
   const { data: budget } = await admin
     .from('budgets')
-    .select('envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
+    .select('envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id, q1_done, q2_done')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
@@ -89,13 +89,15 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
       .eq('year', year)
       .eq('month', month)
       .maybeSingle()
+    // For the unchanged quincena: prefer the monthly record; fall back to the
+    // budget-row value (which was just updated, so the other quincena is correct).
     await admin.from('budget_monthly_done').upsert({
       user_id:  user.id,
       category: budget.category,
       year,
       month,
-      q1_done:  q === 1 ? done : (cur?.q1_done  ?? false),
-      q2_done:  q === 2 ? done : (cur?.q2_done ?? false),
+      q1_done:  q === 1 ? done : (cur?.q1_done  ?? budget.q1_done),
+      q2_done:  q === 2 ? done : (cur?.q2_done  ?? budget.q2_done),
     }, { onConflict: 'user_id,category,year,month' })
   }
 
@@ -181,7 +183,7 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
 
   const [{ data: all }, { data: monthlyDone }] = await Promise.all([
     admin.from('budgets')
-      .select('id, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
+      .select('id, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id, q1_done, q2_done')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('budget_monthly_done')
@@ -209,8 +211,8 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
       category: b.category,
       year,
       month,
-      q1_done: q === 1 ? done : (cur?.q1_done ?? false),
-      q2_done: q === 2 ? done : (cur?.q2_done ?? false),
+      q1_done: q === 1 ? done : (cur?.q1_done ?? b.q1_done),
+      q2_done: q === 2 ? done : (cur?.q2_done ?? b.q2_done),
     }
   })
   await admin.from('budget_monthly_done').upsert(doneRows, { onConflict: 'user_id,category,year,month' })
