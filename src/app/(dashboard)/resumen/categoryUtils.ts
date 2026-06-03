@@ -37,8 +37,9 @@ export function inferCategory(
 
   // ── Passive crypto income ─────────────────────────────────────────────────
   if (/miner[ií]a\s*ethereum|mining\s*eth/i.test(c)) return 'PASSIVE_CRYPTO'
-  if (/nodos?\s*crypt|farming\s*crypt|rendimientos?\s*(farming|anchor|juicy|royal|shmining|meatex|nodos?|cript)/i.test(c)) return 'PASSIVE_CRYPTO'
+  if (/nodos?\s*crypt|farming\s*crypt|rendimientos?\s*(farming|anchor|juicy|royal|sh\s*mining|shmining|meatex|nodos?|cript)/i.test(c)) return 'PASSIVE_CRYPTO'
   if (/hodl\s*cript|rendimientos?\s*(hodl|bitcoin|ethereum)/i.test(c)) return 'PASSIVE_CRYPTO'
+  if (/hybra\s*rewards?|raac\s*bots?/i.test(c) || /hybra|raac/i.test(v)) return 'PASSIVE_CRYPTO'
 
   // ── Passive fund income ───────────────────────────────────────────────────
   if (/rendimientos?\s*(fondo|transcomer|dominion|multimoney|scotiabank|inversi[oó]n)/i.test(c)) return 'PASSIVE_FUND'
@@ -71,7 +72,8 @@ export function inferCategory(
   // ── Savings / investment (objetivos_financieros) ──────────────────────────
   if (/apertura\s*fondo|fondo\s*de\s*inversi[oó]n|inversi[oó]n\s*(fondo|transcomer|dominion|scotiabank|d[oó]lar)/i.test(c)) return 'SAVINGS_FUND'
   if (/compra\s*(de\s*)?bitcoins?|compra\s*cripto|compra\s*ethereum/i.test(c)) return 'SAVINGS_CRYPTO'
-  if (/inversi[oó]n\s*(anchor|juicy|royal|shmining|meatex|nodos?)/i.test(c)) return 'SAVINGS_CRYPTO'
+  if (/inversi[oó]n\s*(en\s*)?(anchor|juicy|royal|sh\s*mining|shmining|meatex|nodos?\s*(crypt)?|crypto|cripto)/i.test(c)) return 'SAVINGS_CRYPTO'
+  if (/compra\s*(de\s*)?(criptomonedas?|ethereum|eth\b|usdt|usdc|bnb\b|solana)/i.test(c)) return 'SAVINGS_CRYPTO'
   if (/inversi[oó]n\s*(emprendimiento|startup|empresa)/i.test(c)) return 'INVESTMENT'
   if (/compra\s*bienes?\s*inmuebles/i.test(c)) return 'REAL_ESTATE'
   if (/gastos?\s*(de\s*)?casa\s*(de\s*)?alquiler|gastos?\s*propiedad/i.test(c)) return 'RENTAL_EXPENSE'
@@ -115,7 +117,7 @@ export function inferCategory(
   if (/limpieza\s*de\s*casa|servicio\s*dom[eé]stico|empleada|jardiner[ií]a/i.test(c)) return 'SERVICES_HOME'
   if (/pago\s*(julia|daniel)\b/i.test(c)) return 'SERVICES_HOME'
   if (/electricista|plomero/i.test(c)) return 'SERVICES_HOME'
-  if (/flete|env[ií]o\s*documentos|certificaci[oó]n|servicios?\s*legales|tr[aá]mite\s*(general|carro|documento)/i.test(c)) return 'SERVICES_MISC'
+  if (/flete|env[ií]o\s*documentos|certificaci[oó]n|servicios?\s*legales|tr[aá]mite\s*(general|carro|documento)|otros?\s*servicios/i.test(c)) return 'SERVICES_MISC'
   if (/cobros?\s*bancarios/i.test(c) || (/comisi[oó]n/i.test(c) && /bac|bncr|bcr|banco|popular/i.test(v))) return 'BANK_FEE'
   if (/pago\s*tarjeta|seguro\s*tarjeta/i.test(c)) return 'BANK_FEE'
 
