@@ -214,27 +214,27 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-black text-zinc-300">Buckets de inversión</p>
+          <p className="text-xs font-black text-zinc-300">Productos de inversión</p>
           <p className="text-[10px] text-zinc-600 mt-0.5">{buckets.length} activos</p>
         </div>
         {!showAdd && (
           <button onClick={() => { setShowAdd(true); setEditId(null) }}
             className="px-3 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all">
-            + Nuevo bucket
+            + Nuevo producto
           </button>
         )}
       </div>
 
       {showAdd && (
         <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-4">
-          <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-3">Nuevo bucket</p>
+          <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-3">Nuevo producto</p>
           <BucketForm accounts={accounts} onSave={handleCreate} onCancel={() => setShowAdd(false)} />
         </div>
       )}
 
       {buckets.length === 0 && !showAdd && (
         <div className="rounded-xl border border-dashed border-white/[0.08] p-6 text-center">
-          <p className="text-sm text-zinc-600">Sin buckets configurados</p>
+          <p className="text-sm text-zinc-600">Sin productos configurados</p>
         </div>
       )}
 
@@ -243,7 +243,7 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
           <div key={b.id} className="rounded-xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
             {editId === b.id ? (
               <div className="p-4">
-                <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-3">Editar bucket</p>
+                <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest mb-3">Editar producto</p>
                 <BucketForm
                   initial={b}
                   accounts={accounts}
