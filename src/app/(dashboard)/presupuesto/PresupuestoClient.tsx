@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { PlusCircle, Pencil, Trash2, X, Check, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
+import {
+  PlusCircle, Pencil, Trash2, X, Check,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
+  ArrowUpDown, ArrowUp, ArrowDown,
+} from 'lucide-react'
 import { upsertBudget, deleteBudget, toggleQuincena } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 
@@ -13,21 +17,22 @@ function fmt(n: number) {
   if (n >= 1_000)     return `₡${Math.round(n / 1_000)}K`
   return `₡${Math.round(n)}`
 }
-
 function fmtFull(n: number) {
   return new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(n)
 }
-
-function pctCls(pct: number, inverse = false) {
-  if (inverse) {
-    if (pct >= 100) return 'text-[#a3e635]'
-    if (pct >= 60)  return 'text-amber-400'
-    return 'text-rose-400'
-  }
+function pctCls(pct: number) {
   if (pct >= 100) return 'text-rose-400'
   if (pct >= 80)  return 'text-amber-400'
   return 'text-zinc-400'
 }
+function barCls(pct: number) {
+  if (pct >= 100) return 'bg-rose-500'
+  if (pct >= 80)  return 'bg-amber-400'
+  return 'bg-[#a3e635]'
+}
+
+type SortKey = 'name' | 'q1_plan' | 'q2_plan' | 'actual' | 'history' | 'pct'
+type BudgetType = 'expense' | 'savings' | 'income'
 
 interface Props {
   budgets:      Budget[]
@@ -40,27 +45,26 @@ interface Props {
   suggestions:  string[]
 }
 
-type BudgetType = 'expense' | 'savings' | 'income'
-
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  // Inline row edit
-  const [editId, setEditId]     = useState<string | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editQ1, setEditQ1]     = useState('')
-  const [editQ2, setEditQ2]     = useState('')
+  const [editId, setEditId]       = useState<string | null>(null)
+  const [editName, setEditName]   = useState('')
+  const [editQ1, setEditQ1]       = useState('')
+  const [editQ2, setEditQ2]       = useState('')
 
-  // Add new line
-  const [showAdd, setShowAdd]   = useState(false)
-  const [newName, setNewName]   = useState('')
-  const [newQ1, setNewQ1]       = useState('')
-  const [newQ2, setNewQ2]       = useState('')
-  const [newType, setNewType]   = useState<BudgetType>('expense')
+  const [showAdd, setShowAdd]     = useState(false)
+  const [newName, setNewName]     = useState('')
+  const [newQ1, setNewQ1]         = useState('')
+  const [newQ2, setNewQ2]         = useState('')
+  const [newType, setNewType]     = useState<BudgetType>('expense')
 
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [sortKey, setSortKey]     = useState<SortKey | null>(null)
+  const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('asc')
   const [showNoLimit, setShowNoLimit] = useState(false)
 
   const now = new Date()
@@ -74,26 +78,80 @@ export function PresupuestoClient({
     router.push(`/presupuesto?m=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
 
-  const expenseLines = budgets.filter(b => b.budget_type === 'expense')
-  const savingsLines = budgets.filter(b => b.budget_type === 'savings')
-  const incomeLines  = budgets.filter(b => b.budget_type === 'income')
+  // Fuzzy history lookup: exact → partial (substring in either direction)
+  function lookupHistory(category: string): number | undefined {
+    if (history[category] !== undefined) return history[category]
+    const lower = category.toLowerCase()
+    for (const [key, val] of Object.entries(history)) {
+      const kl = key.toLowerCase()
+      if (kl.includes(lower) || lower.includes(kl)) return val
+    }
+    return undefined
+  }
+
+  function sortLines(lines: Budget[]): Budget[] {
+    if (!sortKey) return lines
+    return [...lines].sort((a, b) => {
+      let va: number | string
+      let vb: number | string
+      switch (sortKey) {
+        case 'name':
+          va = a.category; vb = b.category; break
+        case 'q1_plan':
+          va = a.q1_amount ?? 0; vb = b.q1_amount ?? 0; break
+        case 'q2_plan':
+          va = a.q2_amount ?? 0; vb = b.q2_amount ?? 0; break
+        case 'actual':
+          va = (actualQ1[a.category] ?? 0) + (actualQ2[a.category] ?? 0)
+          vb = (actualQ1[b.category] ?? 0) + (actualQ2[b.category] ?? 0); break
+        case 'history':
+          va = lookupHistory(a.category) ?? -1
+          vb = lookupHistory(b.category) ?? -1; break
+        case 'pct': {
+          const planA = (a.q1_amount ?? 0) + (a.q2_amount ?? 0)
+          const planB = (b.q1_amount ?? 0) + (b.q2_amount ?? 0)
+          const actA  = (actualQ1[a.category] ?? 0) + (actualQ2[a.category] ?? 0)
+          const actB  = (actualQ1[b.category] ?? 0) + (actualQ2[b.category] ?? 0)
+          va = planA > 0 ? actA / planA : 0
+          vb = planB > 0 ? actB / planB : 0; break
+        }
+        default: va = 0; vb = 0
+      }
+      const cmp = typeof va === 'string'
+        ? (va as string).localeCompare(vb as string)
+        : (va as number) - (vb as number)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  function toggleSection(label: string) {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      next.has(label) ? next.delete(label) : next.add(label)
+      return next
+    })
+  }
+
+  const expenseLines = sortLines(budgets.filter(b => b.budget_type === 'expense'))
+  const savingsLines = sortLines(budgets.filter(b => b.budget_type === 'savings'))
+  const incomeLines  = sortLines(budgets.filter(b => b.budget_type === 'income'))
 
   const incomeExpected = incomeLines.reduce((s, b) => s + (b.monthly_limit ?? 0), 0)
   const totalPlanQ1    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q1_amount ?? 0), 0)
   const totalPlanQ2    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q2_amount ?? 0), 0)
   const totalPlan      = totalPlanQ1 + totalPlanQ2
 
-  // Only sum actuals for groups that appear in budgeted lines
   const budgetedGroups = new Set(budgets.map(b => b.category))
   let totalActQ1 = 0, totalActQ2 = 0
-  for (const g of budgetedGroups) {
-    totalActQ1 += actualQ1[g] ?? 0
-    totalActQ2 += actualQ2[g] ?? 0
-  }
+  for (const g of budgetedGroups) { totalActQ1 += actualQ1[g] ?? 0; totalActQ2 += actualQ2[g] ?? 0 }
   const totalAct = totalActQ1 + totalActQ2
   const totalPct = totalPlan > 0 ? totalAct / totalPlan * 100 : 0
 
-  // Unbudgeted groups that have actual spending
   const allActual: Record<string, number> = {}
   for (const [g, v] of Object.entries(actualQ1)) allActual[g] = (allActual[g] ?? 0) + v
   for (const [g, v] of Object.entries(actualQ2)) allActual[g] = (allActual[g] ?? 0) + v
@@ -101,20 +159,19 @@ export function PresupuestoClient({
     .filter(([g]) => !budgetedGroups.has(g))
     .sort((a, b) => b[1] - a[1])
 
+  // ── helpers ──────────────────────────────────────────────────────────────────
+
   function startEdit(b: Budget) {
-    setEditId(b.id)
-    setEditName(b.category)
-    setEditQ1(String(b.q1_amount ?? ''))
-    setEditQ2(String(b.q2_amount ?? ''))
+    setEditId(b.id); setEditName(b.category)
+    setEditQ1(String(b.q1_amount ?? '')); setEditQ2(String(b.q2_amount ?? ''))
   }
 
   function saveEdit(b: Budget) {
-    const q1 = parseFloat(editQ1) || 0
-    const q2 = parseFloat(editQ2) || 0
+    const q1   = parseFloat(editQ1) || 0
+    const q2   = parseFloat(editQ2) || 0
     const name = editName.trim() || b.category
     startTransition(async () => {
       await upsertBudget(name, q1, q2, b.budget_type)
-      // If renamed, deactivate old entry (new one has same category if name unchanged)
       if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
     })
@@ -126,9 +183,7 @@ export function PresupuestoClient({
     if (!newName.trim()) return
     startTransition(async () => {
       await upsertBudget(newName.trim(), q1, q2, newType)
-      setShowAdd(false)
-      setNewName(''); setNewQ1(''); setNewQ2('')
-      setNewType('expense')
+      setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewType('expense')
     })
   }
 
@@ -140,22 +195,77 @@ export function PresupuestoClient({
     startTransition(async () => { await deleteBudget(id) })
   }
 
-  // ── table rows ──────────────────────────────────────────────────────────────
+  // ── sort icon ─────────────────────────────────────────────────────────────────
 
-  function SectionHeader({ label }: { label: string }) {
+  function SortIcon({ k }: { k: SortKey }) {
+    if (sortKey !== k) return <ArrowUpDown size={10} className="ml-0.5 opacity-30" />
+    return sortDir === 'asc'
+      ? <ArrowUp size={10} className="ml-0.5 text-[#a3e635]" />
+      : <ArrowDown size={10} className="ml-0.5 text-[#a3e635]" />
+  }
+
+  function Th({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) {
     return (
-      <tr>
-        <td colSpan={9} className="px-3 pt-3 pb-1 text-[10px] font-bold text-zinc-500 uppercase tracking-widest bg-zinc-900/40">
-          {label}
-        </td>
-      </tr>
+      <th
+        onClick={() => handleSort(k)}
+        className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none hover:text-zinc-200 transition-colors ${right ? 'text-right' : 'text-left'} ${sortKey === k ? 'text-zinc-200' : 'text-zinc-500'}`}
+      >
+        <span className={`inline-flex items-center ${right ? 'justify-end w-full' : ''}`}>
+          {children}<SortIcon k={k} />
+        </span>
+      </th>
     )
   }
 
+  // ── section renderer ──────────────────────────────────────────────────────────
+
+  function Section({ label, lines }: { label: string; lines: Budget[] }) {
+    const isCollapsed = collapsed.has(label)
+    const sectionPlanQ1 = lines.reduce((s, b) => s + (b.q1_amount ?? 0), 0)
+    const sectionPlanQ2 = lines.reduce((s, b) => s + (b.q2_amount ?? 0), 0)
+    const sectionActQ1  = lines.reduce((s, b) => s + (actualQ1[b.category] ?? 0), 0)
+    const sectionActQ2  = lines.reduce((s, b) => s + (actualQ2[b.category] ?? 0), 0)
+
+    return (
+      <>
+        {/* Section header row */}
+        <tr
+          onClick={() => toggleSection(label)}
+          className="cursor-pointer select-none border-b border-zinc-700/60 hover:bg-zinc-800/30 transition-colors"
+        >
+          <td colSpan={9} className="px-3 py-1.5 bg-zinc-900/50">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                {isCollapsed
+                  ? <ChevronDown size={11} />
+                  : <ChevronUp size={11} />
+                }
+                {label}
+                <span className="text-zinc-600 font-normal normal-case tracking-normal">
+                  ({lines.length})
+                </span>
+              </span>
+              {isCollapsed && (
+                <span className="text-[10px] text-zinc-500 tabular-nums">
+                  Plan {fmt(sectionPlanQ1 + sectionPlanQ2)} · Real {fmt(sectionActQ1 + sectionActQ2)}
+                </span>
+              )}
+            </div>
+          </td>
+        </tr>
+
+        {/* Rows */}
+        {!isCollapsed && lines.map(b => <BudgetRow key={b.id} b={b} />)}
+      </>
+    )
+  }
+
+  // ── budget row ────────────────────────────────────────────────────────────────
+
   function BudgetRow({ b }: { b: Budget }) {
-    const q1Act = actualQ1[b.category]
-    const q2Act = actualQ2[b.category]
-    const hist  = history[b.category]
+    const q1Act  = actualQ1[b.category]
+    const q2Act  = actualQ2[b.category]
+    const hist   = lookupHistory(b.category)
     const q1Plan = b.q1_amount ?? 0
     const q2Plan = b.q2_amount ?? 0
     const plan   = q1Plan + q2Plan
@@ -171,7 +281,8 @@ export function PresupuestoClient({
         </td>
         <td className="px-2 py-2" colSpan={3}>
           <input type="number" value={editQ1} onChange={e => setEditQ1(e.target.value)}
-            placeholder="Q1 ₡" className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
+            placeholder="Q1 ₡"
+            className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
         </td>
         <td className="px-2 py-2" colSpan={3}>
           <input type="number" value={editQ2} onChange={e => setEditQ2(e.target.value)}
@@ -199,76 +310,71 @@ export function PresupuestoClient({
 
     return (
       <tr className="border-b border-zinc-800/40 hover:bg-zinc-800/20 group transition-colors">
-        {/* Name */}
-        <td className="px-3 py-2 text-xs font-medium text-white max-w-[150px]">
+        <td className="px-3 py-2 text-xs font-medium text-white">
           <span className="flex items-center gap-1.5 min-w-0">
             <button onClick={() => startEdit(b)}
               className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300">
               <Pencil size={10} />
             </button>
-            <span className="truncate" title={b.category}>{b.category}</span>
+            <span className="truncate max-w-[130px]" title={b.category}>{b.category}</span>
           </span>
         </td>
-        {/* Q1 Plan */}
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ1Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {q1Plan ? fmt(q1Plan) : <span className="text-zinc-700">—</span>}
         </td>
-        {/* Q1 Real */}
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${
-          q1Act !== undefined
-            ? (q1Plan && q1Act > q1Plan ? 'text-rose-400' : 'text-emerald-400')
-            : 'text-zinc-700'
+          q1Act !== undefined ? (q1Plan && q1Act > q1Plan ? 'text-rose-400' : 'text-emerald-400') : 'text-zinc-700'
         }`}>
           {q1Act !== undefined ? fmt(q1Act) : '—'}
         </td>
-        {/* Q1 done */}
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 1, !b.q1_done)} disabled={isPending}
             title={b.q1_done ? 'Marcar pendiente' : 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
-              b.q1_done
-                ? 'bg-[#a3e635] border-[#a3e635] text-black'
-                : 'border-zinc-700 hover:border-zinc-500'
+              b.q1_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
             {b.q1_done && <Check size={9} />}
           </button>
         </td>
-        {/* Q2 Plan */}
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ2Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {q2Plan ? fmt(q2Plan) : <span className="text-zinc-700">—</span>}
         </td>
-        {/* Q2 Real */}
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${
-          q2Act !== undefined
-            ? (q2Plan && q2Act > q2Plan ? 'text-rose-400' : 'text-emerald-400')
-            : 'text-zinc-700'
+          q2Act !== undefined ? (q2Plan && q2Act > q2Plan ? 'text-rose-400' : 'text-emerald-400') : 'text-zinc-700'
         }`}>
           {q2Act !== undefined ? fmt(q2Act) : '—'}
         </td>
-        {/* Q2 done */}
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 2, !b.q2_done)} disabled={isPending}
             title={b.q2_done ? 'Marcar pendiente' : 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
-              b.q2_done
-                ? 'bg-[#a3e635] border-[#a3e635] text-black'
-                : 'border-zinc-700 hover:border-zinc-500'
+              b.q2_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
             {b.q2_done && <Check size={9} />}
           </button>
         </td>
-        {/* Historical 3m avg */}
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${hist !== undefined ? 'text-zinc-400' : 'text-zinc-700'}`}
-          title={hist !== undefined ? `Promedio últimos 3 meses: ${fmtFull(hist)}` : 'Sin historial automático'}>
+          title={hist !== undefined ? `Promedio 3 meses: ${fmtFull(hist)}` : 'Sin match automático — nombre difiere del grupo de categoría'}>
           {hist !== undefined ? fmt(hist) : '—'}
         </td>
-        {/* % */}
-        <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${pctCls(pct)}`}>
-          {plan > 0 && (act > 0 || !isCurrentMonth) ? `${Math.round(pct)}%` : ''}
+        <td className="px-2 py-2">
+          {plan > 0 && (
+            <div className="flex items-center gap-1.5 justify-end">
+              <span className={`text-xs tabular-nums font-semibold ${pctCls(pct)}`}>
+                {Math.round(pct)}%
+              </span>
+              <div className="w-10 h-1 bg-zinc-800 rounded-full overflow-hidden shrink-0">
+                <div className={`h-full rounded-full ${barCls(pct)}`}
+                  style={{ width: `${Math.min(pct, 100)}%` }} />
+              </div>
+            </div>
+          )}
         </td>
       </tr>
     )
   }
+
+  // ── render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
@@ -276,7 +382,7 @@ export function PresupuestoClient({
         {suggestions.map(s => <option key={s} value={s} />)}
       </datalist>
 
-      {/* Header + month nav */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-black text-white">Presupuesto</h1>
         <div className="flex items-center gap-1">
@@ -294,12 +400,12 @@ export function PresupuestoClient({
         </div>
       </div>
 
-      {/* Income summary */}
+      {/* Income summary cards */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
           <p className="text-[10px] text-zinc-500 mb-0.5">Ing. esperado</p>
-          <p className="text-sm font-black text-white">{fmt(incomeExpected)}</p>
-          <p className="text-[10px] text-zinc-600 mt-0.5">
+          <p className="text-sm font-black text-white">{fmt(incomeExpected || 0)}</p>
+          <p className="text-[10px] text-zinc-600 mt-0.5 truncate">
             {incomeLines.length ? incomeLines.map(b => b.category).join(', ') : 'Agregar ingreso ↓'}
           </p>
         </div>
@@ -319,64 +425,52 @@ export function PresupuestoClient({
                 {incomeExpected >= totalPlan ? 'sobrante' : 'déficit'}
               </p>
             </>
-          ) : (
-            <p className="text-sm font-black text-zinc-600">—</p>
-          )}
+          ) : <p className="text-sm font-black text-zinc-600">—</p>}
         </div>
       </div>
 
-      {/* Main table */}
+      {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full border-collapse text-left" style={{ minWidth: 680 }}>
           <thead>
-            {/* Summary bar */}
+            {/* Progress bar row */}
             <tr className="bg-zinc-900/80 border-b border-zinc-800">
               <td colSpan={9} className="px-3 py-2">
-                <div className="flex items-center gap-4 text-xs text-zinc-500">
+                <div className="flex items-center gap-3 text-xs text-zinc-500">
                   <span>Plan <strong className="text-zinc-200">{fmt(totalPlan)}</strong></span>
                   <span>Real <strong className={pctCls(totalPct)}>{fmt(totalAct)}</strong></span>
                   <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all ${
-                      totalPct >= 100 ? 'bg-rose-500' : totalPct >= 80 ? 'bg-amber-400' : 'bg-[#a3e635]'
-                    }`} style={{ width: `${Math.min(totalPct, 100)}%` }} />
+                    <div className={`h-full rounded-full transition-all ${barCls(totalPct)}`}
+                      style={{ width: `${Math.min(totalPct, 100)}%` }} />
                   </div>
                   <strong className={pctCls(totalPct)}>{Math.round(totalPct)}%</strong>
                 </div>
               </td>
             </tr>
-            {/* Column headers */}
-            <tr className="bg-zinc-900/50 border-b border-zinc-700 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-              <th className="px-3 py-2 text-left w-[150px]">Línea</th>
-              <th className={`px-3 py-2 text-right ${isQ1Active ? 'text-[#a3e635]/80' : ''}`}>Q1 Plan</th>
-              <th className={`px-3 py-2 text-right ${isQ1Active ? 'text-[#a3e635]/80' : ''}`}>Q1 Real</th>
-              <th className={`px-2 py-2 text-center ${isQ1Active ? 'text-[#a3e635]/80' : ''}`}>✓</th>
-              <th className={`px-3 py-2 text-right ${isQ2Active ? 'text-[#a3e635]/80' : ''}`}>Q2 Plan</th>
-              <th className={`px-3 py-2 text-right ${isQ2Active ? 'text-[#a3e635]/80' : ''}`}>Q2 Real</th>
-              <th className={`px-2 py-2 text-center ${isQ2Active ? 'text-[#a3e635]/80' : ''}`}>✓</th>
-              <th className="px-3 py-2 text-right" title="Promedio últimos 3 meses">3m Avg</th>
-              <th className="px-3 py-2 text-right">%</th>
+            {/* Column headers — all sortable */}
+            <tr className="bg-zinc-900/50 border-b border-zinc-700">
+              <Th k="name">Línea</Th>
+              <Th k="q1_plan" right>
+                <span className={isQ1Active ? 'text-[#a3e635]/80' : ''}>Q1 Plan</span>
+              </Th>
+              <Th k="actual" right>
+                <span className={isQ1Active ? 'text-[#a3e635]/80' : ''}>Q1 Real</span>
+              </Th>
+              <th className={`px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-center ${isQ1Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>✓</th>
+              <Th k="q2_plan" right>
+                <span className={isQ2Active ? 'text-[#a3e635]/80' : ''}>Q2 Plan</span>
+              </Th>
+              <th className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-right ${isQ2Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>Q2 Real</th>
+              <th className={`px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-center ${isQ2Active ? 'text-[#a3e635]/60' : 'text-zinc-600'}`}>✓</th>
+              <Th k="history" right>3m Avg</Th>
+              <Th k="pct" right>%</Th>
             </tr>
           </thead>
 
           <tbody className="bg-zinc-900/10">
-            {expenseLines.length > 0 && (
-              <>
-                <SectionHeader label="Gastos" />
-                {expenseLines.map(b => <BudgetRow key={b.id} b={b} />)}
-              </>
-            )}
-            {savingsLines.length > 0 && (
-              <>
-                <SectionHeader label="Ahorros / Inversión" />
-                {savingsLines.map(b => <BudgetRow key={b.id} b={b} />)}
-              </>
-            )}
-            {incomeLines.length > 0 && (
-              <>
-                <SectionHeader label="Ingresos esperados" />
-                {incomeLines.map(b => <BudgetRow key={b.id} b={b} />)}
-              </>
-            )}
+            {expenseLines.length > 0 && <Section label="Gastos" lines={expenseLines} />}
+            {savingsLines.length > 0 && <Section label="Ahorros / Inversión" lines={savingsLines} />}
+            {incomeLines.length  > 0 && <Section label="Ingresos esperados"  lines={incomeLines}  />}
           </tbody>
 
           <tfoot>
@@ -408,21 +502,26 @@ export function PresupuestoClient({
             </select>
           </div>
           <input type="text" list="budget-cat-list" autoFocus
-            placeholder="Nombre (ej. CrossFit, Ahorro prima casa, Salario…)"
+            placeholder="Nombre — escribe lo que quieras (CrossFit, Préstamo casa 2, Alquiler…)"
             value={newName} onChange={e => setNewName(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635]"
           />
           <div className="grid grid-cols-2 gap-2">
-            <input type="number" placeholder="₡ Quincena 1"
-              value={newQ1} onChange={e => setNewQ1(e.target.value)}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]"
-            />
-            <input type="number" placeholder="₡ Quincena 2"
-              value={newQ2} onChange={e => setNewQ2(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]"
-            />
+            <div>
+              <label className="text-[10px] text-zinc-500 mb-1 block">₡ Quincena 1</label>
+              <input type="number" value={newQ1} onChange={e => setNewQ1(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
+            </div>
+            <div>
+              <label className="text-[10px] text-zinc-500 mb-1 block">₡ Quincena 2</label>
+              <input type="number" value={newQ2} onChange={e => setNewQ2(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
+            </div>
           </div>
+          <p className="text-[10px] text-zinc-600">
+            Si el nombre coincide con un grupo de categoría (ej. "Supermercado", "Mariam") el Real y el 3m Avg se calculan automáticamente.
+          </p>
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={!newName.trim() || isPending}
               className="flex-1 py-2 rounded-lg bg-[#a3e635] text-black text-sm font-bold disabled:opacity-40 transition-opacity">
@@ -438,7 +537,7 @@ export function PresupuestoClient({
         <button onClick={() => setShowAdd(true)}
           className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-zinc-700 rounded-xl text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 text-sm transition-colors">
           <PlusCircle size={14} />
-          Agregar línea
+          Agregar línea de presupuesto
         </button>
       )}
 
@@ -451,7 +550,7 @@ export function PresupuestoClient({
             Categorías sin línea de presupuesto ({unbudgeted.length})
           </button>
           {showNoLimit && (
-            <div className="rounded-xl border border-zinc-800 overflow-x-auto">
+            <div className="rounded-xl border border-zinc-800 overflow-hidden">
               <table className="w-full text-xs">
                 <tbody>
                   {unbudgeted.map(([g, v]) => (
