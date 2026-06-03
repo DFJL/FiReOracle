@@ -218,8 +218,23 @@ export function PresupuestoClient({
   const budgetedGroups = new Set(optimisticBudgets.map(b => b.category))
   const totalActQ1 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ1(b), 0)
   const totalActQ2 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ2(b), 0)
-  const totalAct = totalActQ1 + totalActQ2
-  const totalPct = totalPlan > 0 ? totalAct / totalPlan * 100 : 0
+  const totalAct   = totalActQ1 + totalActQ2
+  const totalPct   = totalPlan > 0 ? totalAct / totalPlan * 100 : 0
+
+  // Income per quincena (plan + effective)
+  const incQ1Plan = incomeLines.reduce((s, b) => s + (b.q1_amount ?? 0), 0)
+  const incQ2Plan = incomeLines.reduce((s, b) => s + (b.q2_amount ?? 0), 0)
+  const incQ1Eff  = incomeLines.reduce((s, b) => s + effActQ1(b), 0)
+  const incQ2Eff  = incomeLines.reduce((s, b) => s + effActQ2(b), 0)
+
+  // Gap = income – egresos, per quincena
+  const gapQ1Plan = incQ1Plan - totalPlanQ1
+  const gapQ2Plan = incQ2Plan - totalPlanQ2
+  const gapQ1Real = incQ1Eff  - totalActQ1
+  const gapQ2Real = incQ2Eff  - totalActQ2
+
+  function fmtGap(n: number) { return `${n >= 0 ? '+' : ''}${fmt(n)}` }
+  function gapCls(n: number)  { return n >= 0 ? 'text-emerald-400' : 'text-rose-400' }
 
   const allActual: Record<string, number> = {}
   for (const [g, v] of Object.entries(actualQ1)) allActual[g] = (allActual[g] ?? 0) + v
@@ -360,6 +375,46 @@ export function PresupuestoClient({
           {children}<SortIcon k={k} />
         </span>
       </th>
+    )
+  }
+
+  // ── egresos parent header (expense + savings combined) ───────────────────────
+
+  function renderEgresosHeader() {
+    const egCollapsed = collapsed.has('egresos')
+    const q1Plan = totalPlanQ1, q2Plan = totalPlanQ2
+    const q1Real = totalActQ1,  q2Real = totalActQ2
+    const pct    = totalPct
+    return (
+      <tr key="egresos-header"
+        onClick={() => toggleSection('egresos')}
+        className="cursor-pointer select-none border-b border-zinc-600 hover:bg-zinc-800/40 transition-colors"
+      >
+        <td className="px-3 py-2 bg-zinc-900/80">
+          <span className="flex items-center gap-1.5 text-[11px] font-black text-zinc-300 uppercase tracking-widest">
+            {egCollapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+            Egresos
+            <span className="text-zinc-600 font-normal normal-case tracking-normal text-[10px]">
+              ({expenseLines.length + savingsLines.length})
+            </span>
+          </span>
+        </td>
+        <td className="px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold text-zinc-200">{fmt(q1Plan)}</td>
+        <td className={`px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold ${pctCls(q1Plan > 0 ? q1Real / q1Plan * 100 : 0)}`}>{fmt(q1Real)}</td>
+        <td className="bg-zinc-900/80" />
+        <td className="px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold text-zinc-200">{fmt(q2Plan)}</td>
+        <td className={`px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold ${pctCls(q2Plan > 0 ? q2Real / q2Plan * 100 : 0)}`}>{fmt(q2Real)}</td>
+        <td className="bg-zinc-900/80" />
+        <td className="bg-zinc-900/80" />
+        <td className="px-2 py-2 bg-zinc-900/80">
+          <div className="flex items-center gap-1 justify-end">
+            <strong className={`text-xs tabular-nums ${pctCls(pct)}`}>{Math.round(pct)}%</strong>
+            <div className="w-10 h-1 bg-zinc-800 rounded-full overflow-hidden shrink-0">
+              <div className={`h-full rounded-full ${barCls(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+            </div>
+          </div>
+        </td>
+      </tr>
     )
   }
 
@@ -660,22 +715,36 @@ export function PresupuestoClient({
           </thead>
 
           <tbody className="bg-zinc-900/10">
-            {expenseLines.length > 0 && renderSection('Gastos', expenseLines)}
-            {savingsLines.length > 0 && renderSection('Ahorros / Inversión', savingsLines)}
-            {incomeLines.length  > 0 && renderSection('Ingresos esperados',  incomeLines)}
+            {renderEgresosHeader()}
+            {!collapsed.has('egresos') && expenseLines.length > 0 && renderSection('Gastos', expenseLines)}
+            {!collapsed.has('egresos') && savingsLines.length > 0 && renderSection('Ahorros / Inversión', savingsLines)}
+            {incomeLines.length > 0 && renderSection('Ingresos esperados', incomeLines)}
           </tbody>
 
           <tfoot>
             <tr className="border-t border-zinc-700 bg-zinc-900/60 text-xs font-bold">
-              <td className="px-3 py-2.5 text-zinc-300">TOTAL</td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-zinc-300">{fmt(totalPlanQ1)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-emerald-400">{fmt(totalActQ1)}</td>
+              <td className="px-3 py-2 text-zinc-400">Egresos</td>
+              <td className="px-3 py-2 text-right tabular-nums text-zinc-300">{fmt(totalPlanQ1)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums ${pctCls(totalPlanQ1 > 0 ? totalActQ1 / totalPlanQ1 * 100 : 0)}`}>{fmt(totalActQ1)}</td>
               <td />
-              <td className="px-3 py-2.5 text-right tabular-nums text-zinc-300">{fmt(totalPlanQ2)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-emerald-400">{fmt(totalActQ2)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-zinc-300">{fmt(totalPlanQ2)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums ${pctCls(totalPlanQ2 > 0 ? totalActQ2 / totalPlanQ2 * 100 : 0)}`}>{fmt(totalActQ2)}</td>
               <td />
               <td />
-              <td className={`px-3 py-2.5 text-right ${pctCls(totalPct)}`}>{Math.round(totalPct)}%</td>
+              <td className={`px-3 py-2 text-right ${pctCls(totalPct)}`}>{Math.round(totalPct)}%</td>
+            </tr>
+            <tr className="border-t-2 border-zinc-500 bg-zinc-900/80 text-xs font-black">
+              <td className="px-3 py-2.5 text-zinc-200 tracking-wide">SOBRANTE</td>
+              <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ1Plan)}`}>{fmtGap(gapQ1Plan)}</td>
+              <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ1Real)}`}>{fmtGap(gapQ1Real)}</td>
+              <td />
+              <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ2Plan)}`}>{fmtGap(gapQ2Plan)}</td>
+              <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ2Real)}`}>{fmtGap(gapQ2Real)}</td>
+              <td />
+              <td />
+              <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ1Plan + gapQ2Plan)}`}>
+                {fmtGap(gapQ1Plan + gapQ2Plan)}
+              </td>
             </tr>
           </tfoot>
         </table>
