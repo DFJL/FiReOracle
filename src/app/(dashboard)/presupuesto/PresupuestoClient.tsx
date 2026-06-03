@@ -367,6 +367,10 @@ export function PresupuestoClient({
     const sectionActQ1  = lines.reduce((s, b) => s + effActQ1(b), 0)
     const sectionActQ2  = lines.reduce((s, b) => s + effActQ2(b), 0)
 
+    const sectionPlan = sectionPlanQ1 + sectionPlanQ2
+    const sectionAct  = sectionActQ1  + sectionActQ2
+    const sectionPct  = sectionPlan > 0 ? sectionAct / sectionPlan * 100 : 0
+
     return (
       <>
         <tr
@@ -375,17 +379,27 @@ export function PresupuestoClient({
           className="cursor-pointer select-none border-b border-zinc-700/60 hover:bg-zinc-800/30 transition-colors"
         >
           <td colSpan={9} className="px-3 py-1.5 bg-zinc-900/50">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest shrink-0">
                 {isCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
                 {label}
                 <span className="text-zinc-600 font-normal normal-case tracking-normal">({lines.length})</span>
               </span>
-              {isCollapsed && (
-                <span className="text-[10px] text-zinc-500 tabular-nums">
-                  Plan {fmt(sectionPlanQ1 + sectionPlanQ2)} · Real {fmt(sectionActQ1 + sectionActQ2)}
+              <span className="flex items-center gap-2 text-[10px] tabular-nums min-w-0">
+                <span className="text-zinc-500 shrink-0">
+                  Plan <strong className="text-zinc-300">{fmt(sectionPlan)}</strong>
                 </span>
-              )}
+                <span className={`shrink-0 ${pctCls(sectionPct)}`}>
+                  Real <strong>{fmt(sectionAct)}</strong>
+                </span>
+                <span className="flex items-center gap-1 shrink-0">
+                  <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${barCls(sectionPct)}`}
+                      style={{ width: `${Math.min(sectionPct, 100)}%` }} />
+                  </div>
+                  <strong className={pctCls(sectionPct)}>{Math.round(sectionPct)}%</strong>
+                </span>
+              </span>
             </div>
           </td>
         </tr>
