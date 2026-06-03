@@ -98,8 +98,9 @@ export default async function AuditoriaPage() {
     else if (tx.movement_type === 'cash_withdrawal')             cashWithdrawals  += amt
   }
 
+  const activeLeafIds = new Set((envelopes ?? []).filter(e => !parentIds.has(e.id)).map(e => e.id))
   const envelopeTotal = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes')
+    .filter(m => m.movement_type !== 'interes' && activeLeafIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
 
   const flowData: FlowData = {

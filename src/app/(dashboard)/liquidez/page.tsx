@@ -109,7 +109,7 @@ export default async function LiquidezPage() {
     .map(e => {
       const children = childMap[e.id] ?? []
       const balance = children.length > 0
-        ? children.reduce((s, c) => s + c.balance + c.interest, 0)
+        ? children.reduce((s, c) => s + c.balance, 0)
         : (ownBalance[e.id] ?? 0)
       const interest = children.length > 0
         ? children.reduce((s, c) => s + c.interest, 0)
