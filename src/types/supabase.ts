@@ -429,6 +429,8 @@ export type Database = {
       }
       budgets: {
         Row: {
+          auto_tx_account_id: string | null
+          auto_tx_category_code: string | null
           budget_type: string
           category: string
           created_at: string
@@ -447,6 +449,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_tx_account_id?: string | null
+          auto_tx_category_code?: string | null
           budget_type?: string
           category: string
           created_at?: string
@@ -465,6 +469,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_tx_account_id?: string | null
+          auto_tx_category_code?: string | null
           budget_type?: string
           category?: string
           created_at?: string
@@ -483,6 +489,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "budgets_auto_tx_account_id_fkey"
+            columns: ["auto_tx_account_id"]
+            isOneToOne: false
+            referencedRelation: "financial_accounts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "budgets_envelope_id_fkey"
             columns: ["envelope_id"]

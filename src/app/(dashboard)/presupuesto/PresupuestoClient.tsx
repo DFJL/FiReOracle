@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   PlusCircle, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  ArrowUpDown, ArrowUp, ArrowDown, Link2,
+  ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
 import { upsertBudget, deleteBudget, toggleQuincena } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
@@ -14,6 +14,17 @@ export type Envelope = {
   id: string
   name: string
   parent_envelope_id: string | null
+}
+
+export type TxCategory = {
+  code: string
+  name: string
+}
+
+export type FinancialAccount = {
+  id: string
+  name: string
+  account_type: string
 }
 
 const MONTH_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -50,26 +61,32 @@ interface Props {
   month:        number
   suggestions:  string[]
   envelopes:    Envelope[]
+  txCategories: TxCategory[]
+  accounts:     FinancialAccount[]
 }
 
 export function PresupuestoClient({
-  budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes,
+  budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  const [editId, setEditId]               = useState<string | null>(null)
-  const [editName, setEditName]           = useState('')
-  const [editQ1, setEditQ1]               = useState('')
-  const [editQ2, setEditQ2]               = useState('')
-  const [editEnvelopeId, setEditEnvelopeId] = useState<string>('')
+  const [editId, setEditId]                       = useState<string | null>(null)
+  const [editName, setEditName]                   = useState('')
+  const [editQ1, setEditQ1]                       = useState('')
+  const [editQ2, setEditQ2]                       = useState('')
+  const [editEnvelopeId, setEditEnvelopeId]       = useState<string>('')
+  const [editAutoTxCat, setEditAutoTxCat]         = useState<string>('')
+  const [editAutoTxAccount, setEditAutoTxAccount] = useState<string>('')
 
-  const [showAdd, setShowAdd]             = useState(false)
-  const [newName, setNewName]             = useState('')
-  const [newQ1, setNewQ1]                 = useState('')
-  const [newQ2, setNewQ2]                 = useState('')
-  const [newType, setNewType]             = useState<BudgetType>('expense')
-  const [newEnvelopeId, setNewEnvelopeId] = useState<string>('')
+  const [showAdd, setShowAdd]                     = useState(false)
+  const [newName, setNewName]                     = useState('')
+  const [newQ1, setNewQ1]                         = useState('')
+  const [newQ2, setNewQ2]                         = useState('')
+  const [newType, setNewType]                     = useState<BudgetType>('expense')
+  const [newEnvelopeId, setNewEnvelopeId]         = useState<string>('')
+  const [newAutoTxCat, setNewAutoTxCat]           = useState<string>('')
+  const [newAutoTxAccount, setNewAutoTxAccount]   = useState<string>('')
 
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
   const [sortKey, setSortKey]             = useState<SortKey | null>(null)
@@ -187,15 +204,20 @@ export function PresupuestoClient({
     setEditId(b.id); setEditName(b.category)
     setEditQ1(String(b.q1_amount ?? '')); setEditQ2(String(b.q2_amount ?? ''))
     setEditEnvelopeId(b.envelope_id ?? '')
+    setEditAutoTxCat(b.auto_tx_category_code ?? '')
+    setEditAutoTxAccount(b.auto_tx_account_id ?? '')
   }
 
   function saveEdit(b: Budget) {
     const q1   = parseFloat(editQ1) || 0
     const q2   = parseFloat(editQ2) || 0
     const name = editName.trim() || b.category
-    const envId = editEnvelopeId || null
     startTransition(async () => {
-      await upsertBudget(name, q1, q2, b.budget_type, envId)
+      await upsertBudget(name, q1, q2, b.budget_type,
+        editEnvelopeId || null,
+        editAutoTxCat || null,
+        editAutoTxAccount || null,
+      )
       if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
     })
@@ -205,10 +227,14 @@ export function PresupuestoClient({
     const q1 = parseFloat(newQ1) || 0
     const q2 = parseFloat(newQ2) || 0
     if (!newName.trim()) return
-    const envId = newEnvelopeId || null
     startTransition(async () => {
-      await upsertBudget(newName.trim(), q1, q2, newType, envId)
-      setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewType('expense'); setNewEnvelopeId('')
+      await upsertBudget(newName.trim(), q1, q2, newType,
+        newEnvelopeId || null,
+        newAutoTxCat || null,
+        newAutoTxAccount || null,
+      )
+      setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2('')
+      setNewType('expense'); setNewEnvelopeId(''); setNewAutoTxCat(''); setNewAutoTxAccount('')
     })
   }
 
@@ -239,6 +265,30 @@ export function PresupuestoClient({
               </>
             ))}
           </>
+        ))}
+      </select>
+    )
+  }
+
+  function TxCategorySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    return (
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-amber-400">
+        <option value="">Sin tx automática</option>
+        {txCategories.map(c => (
+          <option key={c.code} value={c.code}>{c.name}</option>
+        ))}
+      </select>
+    )
+  }
+
+  function AccountSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    return (
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-amber-400">
+        <option value="">Sin cuenta específica</option>
+        {accounts.map(a => (
+          <option key={a.id} value={a.id}>{a.name} ({a.account_type})</option>
         ))}
       </select>
     )
@@ -312,8 +362,9 @@ export function PresupuestoClient({
     const plan   = q1Plan + q2Plan
     const act    = (q1Act ?? 0) + (q2Act ?? 0)
     const pct    = plan > 0 ? act / plan * 100 : 0
-    const isEdit = editId === b.id
-    const envName = b.envelope_id ? envelopeMap.get(b.envelope_id)?.name : undefined
+    const isEdit   = editId === b.id
+    const envName  = b.envelope_id ? envelopeMap.get(b.envelope_id)?.name : undefined
+    const hasTxAuto = !!b.auto_tx_category_code
 
     if (isEdit) return (
       <tr className="bg-zinc-800/50 border-b border-zinc-700">
@@ -321,6 +372,8 @@ export function PresupuestoClient({
           <input value={editName} onChange={e => setEditName(e.target.value)} list="budget-cat-list"
             className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635]" />
           <EnvelopeSelect value={editEnvelopeId} onChange={setEditEnvelopeId} />
+          <TxCategorySelect value={editAutoTxCat} onChange={setEditAutoTxCat} />
+          {editAutoTxCat && <AccountSelect value={editAutoTxAccount} onChange={setEditAutoTxAccount} />}
         </td>
         <td className="px-2 py-2" colSpan={3}>
           <input type="number" value={editQ1} onChange={e => setEditQ1(e.target.value)}
@@ -366,6 +419,11 @@ export function PresupuestoClient({
                 <Link2 size={8} />{envName}
               </span>
             )}
+            {hasTxAuto && (
+              <span className="shrink-0 text-amber-400/70" title="Crea transacción al marcar ✓">
+                <Receipt size={9} />
+              </span>
+            )}
           </span>
         </td>
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ1Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
@@ -379,8 +437,8 @@ export function PresupuestoClient({
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 1, !b.q1_done)} disabled={isPending}
             title={b.q1_done
-              ? envName ? `Quincena 1 lista · undo retirará movimiento de "${envName}"` : 'Marcar pendiente'
-              : envName ? `Marcar listo · registrará movimiento en "${envName}"` : 'Marcar listo'}
+              ? [envName && `undo retira de "${envName}"`, hasTxAuto && 'undo elimina tx del ledger'].filter(Boolean).join(' · ') || 'Marcar pendiente'
+              : [envName && `registra en "${envName}"`, hasTxAuto && 'crea tx en ledger'].filter(Boolean).join(' · ') || 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
               b.q1_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
@@ -398,8 +456,8 @@ export function PresupuestoClient({
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 2, !b.q2_done)} disabled={isPending}
             title={b.q2_done
-              ? envName ? `Quincena 2 lista · undo retirará movimiento de "${envName}"` : 'Marcar pendiente'
-              : envName ? `Marcar listo · registrará movimiento en "${envName}"` : 'Marcar listo'}
+              ? [envName && `undo retira de "${envName}"`, hasTxAuto && 'undo elimina tx del ledger'].filter(Boolean).join(' · ') || 'Marcar pendiente'
+              : [envName && `registra en "${envName}"`, hasTxAuto && 'crea tx en ledger'].filter(Boolean).join(' · ') || 'Marcar listo'}
             className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
               b.q2_done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-700 hover:border-zinc-400'
             }`}>
@@ -570,16 +628,30 @@ export function PresupuestoClient({
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
             </div>
           </div>
-          <div>
-            <label className="text-[10px] text-zinc-500 mb-1 flex items-center gap-1 block">
-              <Link2 size={9} /> Vincular sobre (opcional)
-            </label>
-            <EnvelopeSelect value={newEnvelopeId} onChange={setNewEnvelopeId} />
-            {newEnvelopeId && (
-              <p className="text-[10px] text-violet-400 mt-1">
-                Al marcar ✓ se registrará automáticamente un movimiento en el sobre seleccionado.
-              </p>
-            )}
+          <div className="space-y-2">
+            <div>
+              <label className="text-[10px] text-zinc-500 mb-1 flex items-center gap-1 block">
+                <Link2 size={9} /> Vincular sobre (opcional)
+              </label>
+              <EnvelopeSelect value={newEnvelopeId} onChange={setNewEnvelopeId} />
+            </div>
+            <div>
+              <label className="text-[10px] text-zinc-500 mb-1 flex items-center gap-1 block">
+                <Receipt size={9} /> Crear transacción en ledger (opcional)
+              </label>
+              <TxCategorySelect value={newAutoTxCat} onChange={setNewAutoTxCat} />
+              {newAutoTxCat && (
+                <>
+                  <p className="text-[10px] text-amber-400 mt-1">
+                    Al marcar ✓ se creará una transacción real que afecta el balance.
+                  </p>
+                  <div className="mt-1.5">
+                    <label className="text-[10px] text-zinc-500 mb-1 block">Cuenta a debitar</label>
+                    <AccountSelect value={newAutoTxAccount} onChange={setNewAutoTxAccount} />
+                  </div>
+                </>
+              )}
+            </div>
           </div>
           <p className="text-[10px] text-zinc-600">
             Si el nombre coincide con un grupo de categoría (ej. "Supermercado", "Mariam") el Real y el 3m Avg se calculan automáticamente.
@@ -589,7 +661,7 @@ export function PresupuestoClient({
               className="flex-1 py-2 rounded-lg bg-[#a3e635] text-black text-sm font-bold disabled:opacity-40 transition-opacity">
               Agregar
             </button>
-            <button onClick={() => { setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewEnvelopeId('') }}
+            <button onClick={() => { setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2(''); setNewEnvelopeId(''); setNewAutoTxCat(''); setNewAutoTxAccount('') }}
               className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm hover:bg-zinc-700 transition-colors">
               Cancelar
             </button>

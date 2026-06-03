@@ -17,6 +17,8 @@ export type Budget = {
   effective_from: string
   notes: string | null
   envelope_id: string | null
+  auto_tx_category_code: string | null
+  auto_tx_account_id: string | null
 }
 
 export async function upsertBudget(
@@ -25,6 +27,8 @@ export async function upsertBudget(
   q2Amount: number,
   budgetType = 'expense',
   envelopeId: string | null = null,
+  autoTxCategoryCode: string | null = null,
+  autoTxAccountId: string | null = null,
 ): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -48,6 +52,8 @@ export async function upsertBudget(
     effective_from: new Date().toISOString().slice(0, 10),
     is_active: true,
     envelope_id: envelopeId || null,
+    auto_tx_category_code: autoTxCategoryCode || null,
+    auto_tx_account_id: autoTxAccountId || null,
   })
 
   revalidatePath('/presupuesto')
@@ -66,19 +72,20 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promi
     .eq('id', id)
     .eq('user_id', user.id)
 
-  // Auto-create / remove envelope movement when checking done
   const { data: budget } = await admin
     .from('budgets')
-    .select('envelope_id, q1_amount, q2_amount, budget_type')
+    .select('envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
-  const movementRef = `presupuesto_q${q}:${id}`
+  const envelopeRef = `presupuesto_q${q}:${id}`
+  const txRef       = `budget_tx_q${q}:${id}`
 
+  // ── Envelope movement ───────────────────────────────────────────────────────
   if (budget?.envelope_id) {
     if (done) {
-      const amount     = Number(q === 1 ? budget.q1_amount : budget.q2_amount) || 0
+      const amount       = Number(q === 1 ? budget.q1_amount : budget.q2_amount) || 0
       const movementType = budget.budget_type === 'expense' ? 'retiro' : 'deposito'
       await admin.from('envelope_movements').insert({
         user_id:       user.id,
@@ -86,13 +93,59 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promi
         date:          new Date().toISOString().slice(0, 10),
         amount,
         movement_type: movementType,
-        notes:         movementRef,
+        notes:         envelopeRef,
       })
     } else {
       await admin.from('envelope_movements')
         .delete()
         .eq('user_id', user.id)
-        .eq('notes', movementRef)
+        .eq('notes', envelopeRef)
+    }
+  }
+
+  // ── Auto-create transaction in ledger ────────────────────────────────────────
+  if (budget?.auto_tx_category_code) {
+    if (done) {
+      const { data: cat } = await admin
+        .from('transaction_categories')
+        .select('group_gasto, is_passive_income, is_survival_expense')
+        .eq('code', budget.auto_tx_category_code)
+        .maybeSingle()
+
+      const today      = new Date()
+      const movType    = budget.budget_type === 'income'  ? 'income'
+                       : budget.budget_type === 'savings' ? 'transfer'
+                       : 'expense'
+      const amount     = Number(q === 1 ? budget.q1_amount : budget.q2_amount) || 0
+
+      await admin.from('transactions').insert({
+        user_id:            user.id,
+        external_id:        txRef,
+        date:               today.toISOString().slice(0, 10),
+        year:               today.getFullYear(),
+        month:              today.getMonth() + 1,
+        day:                today.getDate(),
+        weekday:            today.getDay(),
+        concept:            budget.category,
+        vendor:             budget.category,
+        category_code:      budget.auto_tx_category_code,
+        movement_type:      movType,
+        amount,
+        currency_code:      'CRC',
+        account_id:         budget.auto_tx_account_id ?? null,
+        expense_group:      cat?.group_gasto ?? null,
+        is_passive_income:  cat?.is_passive_income  ?? false,
+        is_survival_expense: cat?.is_survival_expense ?? false,
+        is_settlement:      false,
+        source:             'budget',
+        notes:              txRef,
+      })
+    } else {
+      await admin.from('transactions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('external_id', txRef)
+        .eq('source', 'budget')
     }
   }
 
