@@ -3,6 +3,7 @@
 import { useState, useMemo, useTransition, useEffect } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { updateTransaction, deleteTransaction, type UpdateTransactionInput } from '@/app/actions/transactions'
@@ -840,10 +841,33 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   function selectEgresosSub(s: EgresosSubtab)  { setEgresosSub(s); setSelCat(null); setSelSub(null) }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
 
+  // AI-classified overrides for MISC transactions (populated asynchronously)
+  const [aiCodes, setAiCodes] = useState<Record<string, string>>({})
+
   // Build learning maps from ALL transactions (full history, not period-filtered)
   const vMap = useMemo(() => buildVendorCatMap(transactions), [transactions])
   const cMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
-  const getCat = (tx: TxClient) => resolveCategory(tx, vMap, cMap)
+  const getCat = (tx: TxClient) => {
+    const code = resolveCategory(tx, vMap, cMap)
+    if (code === 'MISC' && aiCodes[tx.id]) return aiCodes[tx.id]
+    return code
+  }
+
+  // Classify MISC transactions with Claude Haiku on mount
+  useEffect(() => {
+    const miscTxs = transactions.filter(tx => resolveCategory(tx, vMap, cMap) === 'MISC')
+    if (!miscTxs.length) return
+    classifyTransactions(miscTxs.map(tx => ({
+      id: tx.id,
+      vendor: tx.vendor,
+      concept: tx.concept,
+      movement_type: tx.movement_type,
+      expense_group: tx.expense_group,
+    }))).then(result => {
+      if (Object.keys(result).length) setAiCodes(prev => ({ ...prev, ...result }))
+    }).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions])
 
   // Period filter — client-side, no page reload
   const cutoff = useMemo(() => periodCutoff(period), [period])
