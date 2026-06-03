@@ -68,6 +68,7 @@ type SideEffects = {
   debit_envelope_id?: string    // retiro from this envelope
   loan_id?: string              // add amount to this existing self_loan
   new_loan_description?: string // create a new self_loan with this description
+  mortgage_loan_id?: string     // tag transaction with a mortgage/bank loan (loans table)
 }
 
 export type CreateTransactionInput =
@@ -218,6 +219,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       is_passive_income: false,
       is_settlement: input.is_settlement ?? false,
       is_survival_expense: input.is_survival_expense ?? false,
+      loan_id: input.mortgage_loan_id ?? null,
       source: 'manual',
       notes: input.notes?.trim() || null,
     })
@@ -246,6 +248,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       is_passive_income: input.is_passive_income,
       is_settlement: input.is_settlement ?? false,
       is_survival_expense: false,
+      loan_id: input.mortgage_loan_id ?? null,
       source: 'manual',
       notes: input.notes?.trim() || null,
     })

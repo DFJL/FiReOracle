@@ -71,3 +71,74 @@ export async function updateLoanBalance(
   revalidatePath('/prestamos')
   return { error: null }
 }
+
+export type CreateLoanInput = {
+  name: string
+  lender: string
+  loan_type?: string
+  currency_code?: string
+  original_amount: number
+  current_balance: number
+  interest_rate: number
+  monthly_insurance?: number
+  start_date: string
+  end_date: string
+  payment_day?: number
+  notes?: string
+}
+
+export async function createLoan(
+  input: CreateLoanInput,
+): Promise<{ error: string | null; id?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  const { data, error } = await admin
+    .from('loans')
+    .insert({
+      user_id: user.id,
+      name: input.name.trim(),
+      lender: input.lender.trim(),
+      loan_type: input.loan_type ?? 'mortgage',
+      currency_code: input.currency_code ?? 'CRC',
+      original_amount: input.original_amount,
+      current_balance: input.current_balance,
+      interest_rate: input.interest_rate,
+      monthly_insurance: input.monthly_insurance ?? 0,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      payment_day: input.payment_day ?? 5,
+      is_active: true,
+      notes: input.notes?.trim() || null,
+      sort_order: 0,  // new loans always appear first
+    })
+    .select('id')
+    .single()
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/prestamos')
+  return { error: null, id: data.id }
+}
+
+export async function updateLoanSortOrder(
+  loanId: string,
+  sortOrder: number,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const { error } = await createAdminClient()
+    .from('loans')
+    .update({ sort_order: sortOrder })
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/prestamos')
+  return { error: null }
+}

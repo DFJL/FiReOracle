@@ -62,11 +62,13 @@ const TYPE_OPTIONS: { value: TxEntryType; label: string; desc: string; color: st
 ]
 
 type Loan = { id: string; description: string; original_amount: number | string; amount_repaid: number | string; status: string }
+type MortgageLoan = { id: string; name: string; lender: string | null; currency_code: string; current_balance: number | string }
 
 export function TransactionEntryFAB({
-  envelopes, categories, buckets, loans,
+  envelopes, categories, buckets, loans, mortgageLoans,
 }: {
-  envelopes: Envelope[]; categories: Category[]; buckets: InvestmentBucket[]; loans: Loan[]
+  envelopes: Envelope[]; categories: Category[]; buckets: InvestmentBucket[]
+  loans: Loan[]; mortgageLoans: MortgageLoan[]
 }) {
   const [open, setOpen]               = useState(false)
   const [type, setType]               = useState<TxEntryType>('gasto')
@@ -104,6 +106,7 @@ export function TransactionEntryFAB({
   const [debitEnvelopeId, setDebitEnvelope] = useState('')
   const [loanMode, setLoanMode]             = useState<'' | 'new' | string>('')  // '' | 'new' | <loanId>
   const [newLoanDesc, setNewLoanDesc]       = useState('')
+  const [mortgageLoanId, setMortgageLoanId] = useState('')
 
   // ── Duplicate detection ──────────────────────────────────────────────────────
   const [dupHits, setDupHits]         = useState<DuplicateHit[]>([])
@@ -171,7 +174,7 @@ export function TransactionEntryFAB({
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setInvestmentBucketId('')
     setAhorroVendor(''); setAhorroConcepto('')
-    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc('')
+    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId('')
     setError(null)
     // reset AI state
     setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
@@ -307,6 +310,7 @@ export function TransactionEntryFAB({
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
+          mortgage_loan_id: mortgageLoanId || undefined,
         })
       } else if (type === 'ingreso') {
         result = await createTransaction({
@@ -323,6 +327,7 @@ export function TransactionEntryFAB({
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
+          mortgage_loan_id: mortgageLoanId || undefined,
         })
       } else if (type === 'ahorro') {
         if (!envelopeId) { setError('Seleccioná un sobre'); return }
@@ -373,6 +378,7 @@ export function TransactionEntryFAB({
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
+          mortgage_loan_id: mortgageLoanId || undefined,
         })
       } else if (type === 'ingreso') {
         result = await createTransaction({
@@ -389,6 +395,7 @@ export function TransactionEntryFAB({
           debit_envelope_id: debitEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
+          mortgage_loan_id: mortgageLoanId || undefined,
         })
       } else if (type === 'ahorro') {
         if (!envelopeId) { setError('Seleccioná un sobre'); return }
@@ -801,6 +808,19 @@ export function TransactionEntryFAB({
                       <label className={lbl}>Nombre del nuevo autopréstamo</label>
                       <input type="text" value={newLoanDesc} onChange={e => setNewLoanDesc(e.target.value)}
                         placeholder="Dejar vacío para usar concepto/vendor…" className={inputCls} />
+                    </div>
+                  )}
+                  {mortgageLoans.length > 0 && (
+                    <div>
+                      <label className={lbl}>Préstamo bancario <span className="text-zinc-700 normal-case tracking-normal">(opcional — etiqueta la tx)</span></label>
+                      <select value={mortgageLoanId} onChange={e => setMortgageLoanId(e.target.value)} className={inputCls}>
+                        <option value="">— ninguno —</option>
+                        {mortgageLoans.map(l => (
+                          <option key={l.id} value={l.id}>
+                            {l.name} · {l.lender} · {l.currency_code === 'USD' ? '$' : '₡'}{Number(l.current_balance).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>

@@ -25,10 +25,11 @@ export default async function PrestamosPage() {
   const [{ data: loansRaw }, { data: paymentsRaw }, { data: ratesRaw }] = await Promise.all([
     admin
       .from('loans')
-      .select('id, name, lender, currency_code, original_amount, current_balance, interest_rate, monthly_insurance, start_date, end_date, payment_day, notes')
+      .select('id, name, lender, currency_code, original_amount, current_balance, interest_rate, monthly_insurance, start_date, end_date, payment_day, notes, sort_order')
       .eq('user_id', user.id)
       .eq('is_active', true)
-      .order('start_date'),
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false }),
     admin
       .from('loan_payments')
       .select('id, loan_id, payment_date, payment_type, amount, principal, interest, insurance, balance_before, balance_after, rate_applied, notes')
@@ -54,6 +55,7 @@ export default async function PrestamosPage() {
     endDate:          l.end_date as string,
     paymentDay:       Number(l.payment_day),
     notes:            l.notes as string | null,
+    sortOrder:        Number(l.sort_order ?? 0),
     remainingMonths:  remainingMonths(l.end_date as string),
     startYearMonth:   currentYM(),
     payments: (paymentsRaw ?? [])

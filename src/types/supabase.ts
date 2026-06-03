@@ -1017,6 +1017,7 @@ export type Database = {
           notes: string | null
           original_amount: number
           payment_day: number
+          sort_order: number
           start_date: string
           updated_at: string
           user_id: string
@@ -1036,6 +1037,7 @@ export type Database = {
           notes?: string | null
           original_amount: number
           payment_day?: number
+          sort_order?: number
           start_date: string
           updated_at?: string
           user_id: string
@@ -1055,6 +1057,7 @@ export type Database = {
           notes?: string | null
           original_amount?: number
           payment_day?: number
+          sort_order?: number
           start_date?: string
           updated_at?: string
           user_id?: string
@@ -1769,6 +1772,7 @@ export type Database = {
           is_passive_income: boolean
           is_settlement: boolean
           is_survival_expense: boolean
+          loan_id: string | null
           month: number | null
           movement_type: string | null
           notes: string | null
@@ -1803,6 +1807,7 @@ export type Database = {
           is_passive_income?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
+          loan_id?: string | null
           month?: number | null
           movement_type?: string | null
           notes?: string | null
@@ -1837,6 +1842,7 @@ export type Database = {
           is_passive_income?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
+          loan_id?: string | null
           month?: number | null
           movement_type?: string | null
           notes?: string | null
@@ -1876,6 +1882,13 @@ export type Database = {
             columns: ["investment_bucket_id"]
             isOneToOne: false
             referencedRelation: "user_investment_buckets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
             referencedColumns: ["id"]
           },
         ]
