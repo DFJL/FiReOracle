@@ -303,7 +303,7 @@ export function PresupuestoClient({
   function handleToggle(id: string, q: 1 | 2, done: boolean) {
     startTransition(async () => {
       dispatchOptimistic({ type: 'toggle', id, q, done })
-      await toggleQuincena(id, q, done)
+      await toggleQuincena(id, q, done, year, month)
     })
   }
 
@@ -312,7 +312,7 @@ export function PresupuestoClient({
     const done = !allDone
     startTransition(async () => {
       dispatchOptimistic({ type: 'bulk', q, done })
-      await bulkToggleQuincena(q, done)
+      await bulkToggleQuincena(q, done, year, month)
     })
   }
 

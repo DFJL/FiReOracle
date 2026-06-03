@@ -63,18 +63,12 @@ export async function upsertBudget(
   revalidatePath('/presupuesto')
 }
 
-export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promise<void> {
+export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: number, month: number): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No autorizado')
 
   const admin = createAdminClient()
-
-  const patch = q === 1 ? { q1_done: done } : { q2_done: done }
-  await admin.from('budgets')
-    .update(patch)
-    .eq('id', id)
-    .eq('user_id', user.id)
 
   const { data: budget } = await admin
     .from('budgets')
@@ -82,6 +76,24 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promi
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
+
+  if (budget) {
+    const { data: cur } = await admin.from('budget_monthly_done')
+      .select('q1_done, q2_done')
+      .eq('user_id', user.id)
+      .eq('category', budget.category)
+      .eq('year', year)
+      .eq('month', month)
+      .maybeSingle()
+    await admin.from('budget_monthly_done').upsert({
+      user_id:  user.id,
+      category: budget.category,
+      year,
+      month,
+      q1_done:  q === 1 ? done : (cur?.q1_done  ?? false),
+      q2_done:  q === 2 ? done : (cur?.q2_done ?? false),
+    }, { onConflict: 'user_id,category,year,month' })
+  }
 
   const envelopeRef = `presupuesto_q${q}:${id}`
   const txRef       = `budget_tx_q${q}:${id}`
@@ -156,26 +168,44 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean): Promi
   revalidatePath('/presupuesto')
 }
 
-export async function bulkToggleQuincena(q: 1 | 2, done: boolean): Promise<void> {
+export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, month: number): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No autorizado')
 
   const admin = createAdminClient()
 
-  const { data: all } = await admin.from('budgets')
-    .select('id, q1_done, q2_done, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
+  const [{ data: all }, { data: monthlyDone }] = await Promise.all([
+    admin.from('budgets')
+      .select('id, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true),
+    admin.from('budget_monthly_done')
+      .select('category, q1_done, q2_done')
+      .eq('user_id', user.id)
+      .eq('year', year)
+      .eq('month', month),
+  ])
 
-  const changing = (all ?? []).filter(b => (q === 1 ? b.q1_done : b.q2_done) !== done)
+  const doneMap = new Map((monthlyDone ?? []).map(d => [d.category, d]))
+  const changing = (all ?? []).filter(b => {
+    const cur = doneMap.get(b.category)
+    return (cur ? (q === 1 ? cur.q1_done : cur.q2_done) : false) !== done
+  })
   if (!changing.length) { revalidatePath('/presupuesto'); return }
 
-  const patch = q === 1 ? { q1_done: done } : { q2_done: done }
-  await admin.from('budgets')
-    .update(patch)
-    .in('id', changing.map(b => b.id))
-    .eq('user_id', user.id)
+  const doneRows = changing.map(b => {
+    const cur = doneMap.get(b.category)
+    return {
+      user_id:  user.id,
+      category: b.category,
+      year,
+      month,
+      q1_done: q === 1 ? done : (cur?.q1_done ?? false),
+      q2_done: q === 2 ? done : (cur?.q2_done ?? false),
+    }
+  })
+  await admin.from('budget_monthly_done').upsert(doneRows, { onConflict: 'user_id,category,year,month' })
 
   const today     = new Date()
   const todayStr  = today.toISOString().slice(0, 10)

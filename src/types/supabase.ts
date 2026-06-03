@@ -385,6 +385,33 @@ export type Database = {
           },
         ]
       }
+      budget_monthly_done: {
+        Row: {
+          category: string
+          month: number
+          q1_done: boolean
+          q2_done: boolean
+          user_id: string
+          year: number
+        }
+        Insert: {
+          category: string
+          month: number
+          q1_done?: boolean
+          q2_done?: boolean
+          user_id: string
+          year: number
+        }
+        Update: {
+          category?: string
+          month?: number
+          q1_done?: boolean
+          q2_done?: boolean
+          user_id?: string
+          year?: number
+        }
+        Relationships: []
+      }
       budget_periods: {
         Row: {
           created_at: string

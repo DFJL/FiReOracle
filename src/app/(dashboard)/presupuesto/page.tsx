@@ -44,6 +44,7 @@ export default async function PresupuestoPage({
     { data: catRows },
     { data: envelopeRows },
     { data: accountRows },
+    { data: monthlyDoneRows },
   ] = await Promise.all([
     admin.from('budgets')
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
@@ -98,15 +99,27 @@ export default async function PresupuestoPage({
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),
+
+    // Per-month done state (source of truth for checkbox display)
+    admin.from('budget_monthly_done')
+      .select('category, q1_done, q2_done')
+      .eq('user_id', user.id)
+      .eq('year', year)
+      .eq('month', month),
   ])
 
   // Dedup: keep only the most recent effective row per category
   // (rows are already sorted effective_from DESC, so first occurrence wins)
+  // Override q1_done/q2_done with per-month state so marks from other months don't bleed through.
   const seen = new Set<string>()
+  const monthlyDoneMap = new Map((monthlyDoneRows ?? []).map(d => [d.category, d]))
   const budgetRows = (allBudgetRows ?? []).filter(b => {
     if (seen.has(b.category)) return false
     seen.add(b.category)
     return true
+  }).map(b => {
+    const md = monthlyDoneMap.get(b.category)
+    return { ...b, q1_done: md?.q1_done ?? false, q2_done: md?.q2_done ?? false }
   })
 
   function toCRC(tx: { amount: number | null; currency_code: string | null; amount_usd: number | null }) {
