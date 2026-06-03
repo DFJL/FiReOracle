@@ -187,13 +187,19 @@ function isSavings(tx: TxClient) {
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
   if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false
   // Exclude valuation/accounting entries (pérdida/aumento valor) — not real cash savings
-  if (!tx.category_code && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
+  // Check covers both null category_code and generic codes (MISC, etc.) that reach inferCategory
+  if ((!tx.category_code || GENERIC_CODES.has(tx.category_code)) && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
   return true
 }
 
 const INVEST_CODES = new Set(['SAVINGS_FUND', 'SAVINGS_CRYPTO', 'SAVINGS_PENSION', 'INVESTMENT', 'REAL_ESTATE', 'SAVINGS_INVESTMENT'])
-const isInvestment = (tx: TxClient) =>
-  INVEST_CODES.has(tx.category_code ?? inferCategory(tx.vendor, tx.concept, null))
+const isInvestment = (tx: TxClient) => {
+  // Use same GENERIC_CODES logic as resolveCategory to avoid inconsistency
+  const code = (tx.category_code && !GENERIC_CODES.has(tx.category_code))
+    ? tx.category_code
+    : inferCategory(tx.vendor, tx.concept, null)
+  return INVEST_CODES.has(code)
+}
 
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
   gastos:   isOutflow,
@@ -917,11 +923,17 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
 
   // Resolves L1 display group for category breakdown.
   // getCat returns a code; getGroupLabel maps it to the L1 non-overlapping group.
+  const INCOME_GROUPS = new Set(['Ingreso pasivo', 'Valorización', 'Salario y trabajo', 'Otros ingresos'])
   const getDisplayCat = (tx: TxClient) => {
     if (tx.is_settlement) return 'Liquidaciones'
     // Loan payments always → Préstamos, regardless of bucket/category_code
     if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
-    return getGroupLabel(getCat(tx))
+    const group = getGroupLabel(getCat(tx))
+    // Expense with income group = data mismatch (wrong category_code in DB) → re-infer from text
+    if ((tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') && INCOME_GROUPS.has(group)) {
+      return getGroupLabel(inferCategory(tx.vendor, tx.concept, null))
+    }
+    return group
   }
 
   // Normalize concept label for grouping: trim + collapse spaces + title case
