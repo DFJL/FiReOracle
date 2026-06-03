@@ -180,7 +180,10 @@ const isInflow = isLiquidIncome
 function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false
+  // Exclude valuation/accounting entries (pérdida/aumento valor) — not real cash savings
+  if (!tx.category_code && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
+  return true
 }
 
 const INVEST_CODES = new Set(['SAVINGS_INVESTMENT'])

@@ -56,7 +56,7 @@ function monthlyAggregates(txs: TxRow[]): (MonthData & { hasData: boolean })[] {
     const key = tx.date.slice(0, 7)
     if (!map[key]) map[key] = { income: 0, expenses: 0, withdrawals: 0 }
     const amt = Number(tx.amount ?? 0)
-    if (tx.movement_type === 'income') {
+    if (tx.movement_type === 'income' && !tx.is_settlement) {
       map[key].income += amt
     } else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') {
       const isSavings = tx.expense_group === SAVINGS_EXPENSE_GROUP
