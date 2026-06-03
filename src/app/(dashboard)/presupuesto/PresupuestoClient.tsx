@@ -378,36 +378,38 @@ export function PresupuestoClient({
           onClick={() => toggleSection(label)}
           className="cursor-pointer select-none border-b border-zinc-700/60 hover:bg-zinc-800/30 transition-colors"
         >
-          <td colSpan={9} className="px-3 py-1.5 bg-zinc-900/50">
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest shrink-0">
-                {isCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
-                {label}
-                <span className="text-zinc-600 font-normal normal-case tracking-normal">({lines.length})</span>
-              </span>
-              <span className="flex items-center gap-3 text-[10px] tabular-nums">
-                <span className="text-zinc-500">
-                  Q1 <strong className="text-zinc-300">{fmt(sectionPlanQ1)}</strong>
-                  {' '}<span className={pctCls(sectionPlanQ1 > 0 ? sectionActQ1 / sectionPlanQ1 * 100 : 0)}>
-                    {fmt(sectionActQ1)}
-                  </span>
-                </span>
-                <span className="text-zinc-700">·</span>
-                <span className="text-zinc-500">
-                  Q2 <strong className="text-zinc-300">{fmt(sectionPlanQ2)}</strong>
-                  {' '}<span className={pctCls(sectionPlanQ2 > 0 ? sectionActQ2 / sectionPlanQ2 * 100 : 0)}>
-                    {fmt(sectionActQ2)}
-                  </span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${barCls(sectionPct)}`}
-                      style={{ width: `${Math.min(sectionPct, 100)}%` }} />
-                  </div>
-                  <strong className={pctCls(sectionPct)}>{Math.round(sectionPct)}%</strong>
-                </span>
-              </span>
-            </div>
+          <td className="px-3 py-1.5 bg-zinc-900/50">
+            <span className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+              {isCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+              {label}
+              <span className="text-zinc-600 font-normal normal-case tracking-normal">({lines.length})</span>
+            </span>
+          </td>
+          <td className="px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold text-zinc-300">
+            {sectionPlanQ1 ? fmt(sectionPlanQ1) : ''}
+          </td>
+          <td className={`px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold ${pctCls(sectionPlanQ1 > 0 ? sectionActQ1 / sectionPlanQ1 * 100 : 0)}`}>
+            {sectionActQ1 ? fmt(sectionActQ1) : ''}
+          </td>
+          <td className="bg-zinc-900/50" />
+          <td className="px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold text-zinc-300">
+            {sectionPlanQ2 ? fmt(sectionPlanQ2) : ''}
+          </td>
+          <td className={`px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold ${pctCls(sectionPlanQ2 > 0 ? sectionActQ2 / sectionPlanQ2 * 100 : 0)}`}>
+            {sectionActQ2 ? fmt(sectionActQ2) : ''}
+          </td>
+          <td className="bg-zinc-900/50" />
+          <td className="bg-zinc-900/50" />
+          <td className="px-2 py-1.5 bg-zinc-900/50">
+            {sectionPlan > 0 && (
+              <div className="flex items-center gap-1 justify-end">
+                <strong className={`text-xs tabular-nums ${pctCls(sectionPct)}`}>{Math.round(sectionPct)}%</strong>
+                <div className="w-10 h-1 bg-zinc-800 rounded-full overflow-hidden shrink-0">
+                  <div className={`h-full rounded-full ${barCls(sectionPct)}`}
+                    style={{ width: `${Math.min(sectionPct, 100)}%` }} />
+                </div>
+              </div>
+            )}
           </td>
         </tr>
         {!isCollapsed && lines.map(b => renderBudgetRow(b))}
