@@ -200,14 +200,24 @@ export function PresupuestoClient({
   const allQ1Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q1_done)
   const allQ2Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q2_done)
 
+  // If a quincena is marked done but has no real transaction, treat plan as effective actual
+  function effActQ1(b: Budget) {
+    const raw = actualQ1[b.category]
+    return raw !== undefined ? raw : (b.q1_done ? (b.q1_amount ?? 0) : 0)
+  }
+  function effActQ2(b: Budget) {
+    const raw = actualQ2[b.category]
+    return raw !== undefined ? raw : (b.q2_done ? (b.q2_amount ?? 0) : 0)
+  }
+
   const incomeExpected = incomeLines.reduce((s, b) => s + (b.monthly_limit ?? 0), 0)
   const totalPlanQ1    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q1_amount ?? 0), 0)
   const totalPlanQ2    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q2_amount ?? 0), 0)
   const totalPlan      = totalPlanQ1 + totalPlanQ2
 
   const budgetedGroups = new Set(optimisticBudgets.map(b => b.category))
-  let totalActQ1 = 0, totalActQ2 = 0
-  for (const g of budgetedGroups) { totalActQ1 += actualQ1[g] ?? 0; totalActQ2 += actualQ2[g] ?? 0 }
+  const totalActQ1 = optimisticBudgets.reduce((s, b) => s + effActQ1(b), 0)
+  const totalActQ2 = optimisticBudgets.reduce((s, b) => s + effActQ2(b), 0)
   const totalAct = totalActQ1 + totalActQ2
   const totalPct = totalPlan > 0 ? totalAct / totalPlan * 100 : 0
 
@@ -354,8 +364,8 @@ export function PresupuestoClient({
     const isCollapsed = collapsed.has(label)
     const sectionPlanQ1 = lines.reduce((s, b) => s + (b.q1_amount ?? 0), 0)
     const sectionPlanQ2 = lines.reduce((s, b) => s + (b.q2_amount ?? 0), 0)
-    const sectionActQ1  = lines.reduce((s, b) => s + (actualQ1[b.category] ?? 0), 0)
-    const sectionActQ2  = lines.reduce((s, b) => s + (actualQ2[b.category] ?? 0), 0)
+    const sectionActQ1  = lines.reduce((s, b) => s + effActQ1(b), 0)
+    const sectionActQ2  = lines.reduce((s, b) => s + effActQ2(b), 0)
 
     return (
       <>
@@ -393,7 +403,7 @@ export function PresupuestoClient({
     const q1Plan = b.q1_amount ?? 0
     const q2Plan = b.q2_amount ?? 0
     const plan   = q1Plan + q2Plan
-    const act    = (q1Act ?? 0) + (q2Act ?? 0)
+    const act    = effActQ1(b) + effActQ2(b)
     const pct    = plan > 0 ? act / plan * 100 : 0
     const isEdit   = editId === b.id
     const envName  = b.envelope_id ? envelopeMap.get(b.envelope_id)?.name : undefined
