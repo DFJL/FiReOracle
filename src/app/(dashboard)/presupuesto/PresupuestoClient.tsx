@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
+import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
 export type Envelope = {
   id: string
@@ -159,8 +160,8 @@ export function PresupuestoClient({
         case 'q2_plan':
           va = a.q2_amount ?? 0; vb = b.q2_amount ?? 0; break
         case 'actual':
-          va = (actualQ1[a.category] ?? 0) + (actualQ2[a.category] ?? 0)
-          vb = (actualQ1[b.category] ?? 0) + (actualQ2[b.category] ?? 0); break
+          va = (actualQ1[resolveKey(a)] ?? 0) + (actualQ2[resolveKey(a)] ?? 0)
+          vb = (actualQ1[resolveKey(b)] ?? 0) + (actualQ2[resolveKey(b)] ?? 0); break
         case 'history':
           va = (lookupHist(a.category, histQ1) ?? 0) + (lookupHist(a.category, histQ2) ?? 0)
           vb = (lookupHist(b.category, histQ1) ?? 0) + (lookupHist(b.category, histQ2) ?? 0); break
@@ -201,13 +202,19 @@ export function PresupuestoClient({
   const allQ1Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q1_done)
   const allQ2Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q2_done)
 
+  // Resolve lookup key: prefer the group label derived from auto_tx_category_code so that
+  // a budget line named "Abarrotes" (code FOOD_SUPER → "Supermercado") matches transaction actuals.
+  function resolveKey(b: Budget) {
+    return b.auto_tx_category_code ? getGroupLabel(b.auto_tx_category_code) : b.category
+  }
+
   // If a quincena is marked done but has no real transaction, treat plan as effective actual
   function effActQ1(b: Budget) {
-    const raw = actualQ1[b.category]
+    const raw = actualQ1[resolveKey(b)]
     return raw !== undefined ? raw : (b.q1_done ? (b.q1_amount ?? 0) : 0)
   }
   function effActQ2(b: Budget) {
-    const raw = actualQ2[b.category]
+    const raw = actualQ2[resolveKey(b)]
     return raw !== undefined ? raw : (b.q2_done ? (b.q2_amount ?? 0) : 0)
   }
 
@@ -216,7 +223,11 @@ export function PresupuestoClient({
   const totalPlanQ2    = [...expenseLines, ...savingsLines].reduce((s, b) => s + (b.q2_amount ?? 0), 0)
   const totalPlan      = totalPlanQ1 + totalPlanQ2
 
-  const budgetedGroups = new Set(optimisticBudgets.map(b => b.category))
+  const budgetedGroups = new Set<string>()
+  for (const b of optimisticBudgets) {
+    budgetedGroups.add(b.category)
+    if (b.auto_tx_category_code) budgetedGroups.add(getGroupLabel(b.auto_tx_category_code))
+  }
   const totalActQ1 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ1(b), 0)
   const totalActQ2 = [...expenseLines, ...savingsLines].reduce((s, b) => s + effActQ2(b), 0)
   const totalAct   = totalActQ1 + totalActQ2
@@ -483,10 +494,11 @@ export function PresupuestoClient({
   // ── budget row (called as function, not component, to avoid remount) ──────────
 
   function renderBudgetRow(b: Budget) {
-    const q1Act    = actualQ1[b.category]
-    const q2Act    = actualQ2[b.category]
-    const histQ1Val = lookupHist(b.category, histQ1)
-    const histQ2Val = lookupHist(b.category, histQ2)
+    const key      = resolveKey(b)
+    const q1Act    = actualQ1[key]
+    const q2Act    = actualQ2[key]
+    const histQ1Val = lookupHist(key, histQ1)
+    const histQ2Val = lookupHist(key, histQ2)
     const q1Plan = b.q1_amount ?? 0
     const q2Plan = b.q2_amount ?? 0
     const plan   = q1Plan + q2Plan
