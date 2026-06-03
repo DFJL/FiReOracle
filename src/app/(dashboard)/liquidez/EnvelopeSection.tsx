@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import type { Envelope, SubEnvelope } from './page'
-import { addMovement, distributeInterest } from './actions'
+import { addMovement, distributeInterest, transferBetweenEnvelopes } from './actions'
 import { createEnvelope, createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
@@ -20,21 +20,46 @@ const MOV_TYPES: { v: MovType; l: string }[] = [
   { v: 'traslado_out', l: 'Traslado ↑' },
 ]
 
-function AddMovementPanel({ envelope, onClose }: { envelope: Envelope | SubEnvelope; onClose: () => void }) {
-  const [type, setType]     = useState<MovType>('deposito')
-  const [amount, setAmount] = useState('')
-  const [date, setDate]     = useState(new Date().toISOString().slice(0, 10))
-  const [notes, setNotes]   = useState('')
-  const [error, setError]   = useState('')
-  const [isPending, start]  = useTransition()
+function AddMovementPanel({
+  envelope,
+  leafEnvelopes = [],
+  onClose,
+}: {
+  envelope: Envelope | SubEnvelope
+  leafEnvelopes?: (Envelope | SubEnvelope)[]
+  onClose: () => void
+}) {
+  const [type, setType]             = useState<MovType>('deposito')
+  const [amount, setAmount]         = useState('')
+  const [date, setDate]             = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes]           = useState('')
+  const [counterpartId, setCpart]   = useState('')
+  const [error, setError]           = useState('')
+  const [isPending, start]          = useTransition()
+
+  const isTraslado    = type === 'traslado_out' || type === 'traslado_in'
+  const otherEnvelopes = leafEnvelopes.filter(e => e.id !== envelope.id)
+
+  function handleSetType(v: MovType) {
+    setType(v)
+    if (v !== 'traslado_out' && v !== 'traslado_in') setCpart('')
+  }
 
   function submit() {
     const amt = parseFloat(amount.replace(/,/g, ''))
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    if (isTraslado && !counterpartId) { setError('Seleccioná el sobre contrapartida'); return }
     setError('')
     start(async () => {
-      const res = await addMovement(envelope.id, { date, amount: amt, type, notes })
-      if (res?.error) { setError(res.error); return }
+      if (isTraslado && counterpartId) {
+        const fromId = type === 'traslado_out' ? envelope.id : counterpartId
+        const toId   = type === 'traslado_out' ? counterpartId : envelope.id
+        const res = await transferBetweenEnvelopes(fromId, toId, { date, amount: amt, notes })
+        if (res?.error) { setError(res.error); return }
+      } else {
+        const res = await addMovement(envelope.id, { date, amount: amt, type, notes })
+        if (res?.error) { setError(res.error); return }
+      }
       onClose()
     })
   }
@@ -43,12 +68,30 @@ function AddMovementPanel({ envelope, onClose }: { envelope: Envelope | SubEnvel
     <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
       <div className="flex gap-1 flex-wrap">
         {MOV_TYPES.map(({ v, l }) => (
-          <button key={v} onClick={() => setType(v)}
+          <button key={v} onClick={() => handleSetType(v)}
             className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
               type === v ? 'bg-[#a3e635] text-black' : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200'
             }`}>{l}</button>
         ))}
       </div>
+      {isTraslado && (
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">
+            {type === 'traslado_out' ? 'Sobre destino' : 'Sobre origen'}
+          </p>
+          <select
+            value={counterpartId}
+            onChange={e => setCpart(e.target.value)}
+            className="w-full bg-[#0d120d] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40">
+            <option value="">— Seleccionar sobre —</option>
+            {otherEnvelopes.map(e => (
+              <option key={e.id} value={e.id}>
+                {e.name} · {fmtCRC(e.balance + e.interest)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <div>
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Monto ₡</p>
@@ -160,8 +203,9 @@ function InterestModal({
   )
 }
 
-function SubEnvelopeRow({ sub, isOpen, onToggle }: {
+function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
   sub: SubEnvelope; isOpen: boolean; onToggle: () => void
+  leafEnvelopes: (Envelope | SubEnvelope)[]
 }) {
   const [deleting, startDelete] = useTransition()
   const [confirmDel, setConfirmDel] = useState(false)
@@ -205,7 +249,7 @@ function SubEnvelopeRow({ sub, isOpen, onToggle }: {
           {isOpen ? '−' : '+'}
         </span>
       </button>
-      {isOpen && <AddMovementPanel envelope={sub} onClose={onToggle} />}
+      {isOpen && <AddMovementPanel envelope={sub} leafEnvelopes={leafEnvelopes} onClose={onToggle} />}
     </div>
   )
 }
@@ -488,7 +532,7 @@ export function EnvelopeSection({
 
               {!hasChildren && isOpen && subAddLeafId !== env.id && (
                 <>
-                  <AddMovementPanel envelope={env} onClose={() => setOpenId(null)} />
+                  <AddMovementPanel envelope={env} leafEnvelopes={leafEnvelopes} onClose={() => setOpenId(null)} />
                   <div className="flex justify-end pl-9 pr-4 py-1.5 bg-white/[0.02] border-t border-white/[0.03]">
                     <button
                       onClick={() => { setSubAddLeaf(env.id); setOpenId(null) }}
@@ -513,6 +557,7 @@ export function EnvelopeSection({
                         sub={sub}
                         isOpen={openId === sub.id}
                         onToggle={() => setOpenId(openId === sub.id ? null : sub.id)}
+                        leafEnvelopes={leafEnvelopes}
                       />
                     </div>
                   ))}

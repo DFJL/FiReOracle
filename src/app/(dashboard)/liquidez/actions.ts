@@ -45,6 +45,52 @@ export async function addMovement(
   return { ok: true }
 }
 
+export async function transferBetweenEnvelopes(
+  fromId: string,
+  toId: string,
+  data: { date: string; amount: number; notes?: string },
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const { data: rows, error: sumErr } = await supabase
+    .from('envelope_movements')
+    .select('amount')
+    .eq('user_id', user.id)
+    .eq('envelope_id', fromId)
+    .neq('movement_type', 'interes')
+
+  if (sumErr) return { error: sumErr.message }
+  const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
+  if (current - data.amount < 0) {
+    return { error: `Saldo insuficiente — el sobre origen tiene ₡${Math.round(current).toLocaleString('es-CR')}` }
+  }
+
+  const { error: outErr } = await supabase.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: fromId,
+    date: data.date,
+    amount: -Math.abs(data.amount),
+    movement_type: 'traslado_out',
+    notes: data.notes || null,
+  })
+  if (outErr) return { error: outErr.message }
+
+  const { error: inErr } = await supabase.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: toId,
+    date: data.date,
+    amount: Math.abs(data.amount),
+    movement_type: 'traslado_in',
+    notes: data.notes || null,
+  })
+  if (inErr) return { error: inErr.message }
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
 export async function distributeInterest(
   allocations: { envelopeId: string; amount: number }[],
   date: string,
