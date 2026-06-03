@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
@@ -56,8 +56,7 @@ interface Props {
   budgets:      Budget[]
   actualQ1:     Record<string, number>
   actualQ2:     Record<string, number>
-  histQ1:       Record<string, number>
-  histQ2:       Record<string, number>
+  history:      Record<string, number>
   incomeActual: number
   year:         number
   month:        number
@@ -68,7 +67,7 @@ interface Props {
 }
 
 export function PresupuestoClient({
-  budgets, actualQ1, actualQ2, histQ1, histQ2, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
+  budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -111,6 +110,8 @@ export function PresupuestoClient({
   const [sortKey, setSortKey]             = useState<SortKey | null>(null)
   const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
   const [showNoLimit, setShowNoLimit]     = useState(false)
+  const [editRealCell, setEditRealCell]   = useState<{ id: string; q: 1 | 2 } | null>(null)
+  const [editRealVal, setEditRealVal]     = useState('')
 
   const now             = new Date()
   const isCurrentMonth  = year === now.getFullYear() && month === now.getMonth() + 1
@@ -163,8 +164,8 @@ export function PresupuestoClient({
           va = (actualQ1[resolveKey(a)] ?? 0) + (actualQ2[resolveKey(a)] ?? 0)
           vb = (actualQ1[resolveKey(b)] ?? 0) + (actualQ2[resolveKey(b)] ?? 0); break
         case 'history':
-          va = (lookupHist(a.category, histQ1) ?? 0) + (lookupHist(a.category, histQ2) ?? 0)
-          vb = (lookupHist(b.category, histQ1) ?? 0) + (lookupHist(b.category, histQ2) ?? 0); break
+          va = lookupHist(resolveKey(a), history) ?? 0
+          vb = lookupHist(resolveKey(b), history) ?? 0; break
         case 'pct': {
           const planA = (a.q1_amount ?? 0) + (a.q2_amount ?? 0)
           const planB = (b.q1_amount ?? 0) + (b.q2_amount ?? 0)
@@ -208,12 +209,14 @@ export function PresupuestoClient({
     return b.auto_tx_category_code ? getGroupLabel(b.auto_tx_category_code) : b.category
   }
 
-  // If a quincena is marked done but has no real transaction, treat plan as effective actual
+  // Manual override > transaction actual > plan-if-done fallback
   function effActQ1(b: Budget) {
+    if (b.q1_actual !== null && b.q1_actual !== undefined) return b.q1_actual
     const raw = actualQ1[resolveKey(b)]
     return raw !== undefined ? raw : (b.q1_done ? (b.q1_amount ?? 0) : 0)
   }
   function effActQ2(b: Budget) {
+    if (b.q2_actual !== null && b.q2_actual !== undefined) return b.q2_actual
     const raw = actualQ2[resolveKey(b)]
     return raw !== undefined ? raw : (b.q2_done ? (b.q2_amount ?? 0) : 0)
   }
@@ -320,6 +323,15 @@ export function PresupuestoClient({
     startTransition(async () => { await deleteBudget(id) })
   }
 
+  function handleSaveReal(b: Budget, q: 1 | 2) {
+    const val    = parseFloat(editRealVal)
+    const actual = isNaN(val) ? null : val
+    setEditRealCell(null)
+    startTransition(async () => {
+      await updateBudgetActual(b.category, q, actual, year, month)
+    })
+  }
+
   // ── envelope select ───────────────────────────────────────────────────────────
 
   function EnvelopeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -418,7 +430,6 @@ export function PresupuestoClient({
         <td className={`px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold ${pctCls(q2Plan > 0 ? q2Real / q2Plan * 100 : 0)}`}>{fmt(q2Real)}</td>
         <td className="bg-zinc-900/80" />
         <td className="bg-zinc-900/80" />
-        <td className="bg-zinc-900/80" />
         <td className="px-2 py-2 bg-zinc-900/80">
           <div className="flex items-center gap-1 justify-end">
             <strong className={`text-xs tabular-nums ${pctCls(pct)}`}>{Math.round(pct)}%</strong>
@@ -473,7 +484,6 @@ export function PresupuestoClient({
           </td>
           <td className="bg-zinc-900/50" />
           <td className="bg-zinc-900/50" />
-          <td className="bg-zinc-900/50" />
           <td className="px-2 py-1.5 bg-zinc-900/50">
             {sectionPlan > 0 && (
               <div className="flex items-center gap-1 justify-end">
@@ -494,19 +504,34 @@ export function PresupuestoClient({
   // ── budget row (called as function, not component, to avoid remount) ──────────
 
   function renderBudgetRow(b: Budget) {
-    const key      = resolveKey(b)
-    const q1Act    = actualQ1[key]
-    const q2Act    = actualQ2[key]
-    const histQ1Val = lookupHist(key, histQ1)
-    const histQ2Val = lookupHist(key, histQ2)
+    const key    = resolveKey(b)
+    const q1Act  = actualQ1[key]
+    const q2Act  = actualQ2[key]
+    const histVal = lookupHist(key, history)
     const q1Plan = b.q1_amount ?? 0
     const q2Plan = b.q2_amount ?? 0
+    const effQ1  = effActQ1(b)
+    const effQ2  = effActQ2(b)
     const plan   = q1Plan + q2Plan
-    const act    = effActQ1(b) + effActQ2(b)
+    const act    = effQ1 + effQ2
     const pct    = plan > 0 ? act / plan * 100 : 0
-    const isEdit   = editId === b.id
+    const isEdit = editId === b.id
     const envName  = b.envelope_id ? envelopeMap.get(b.envelope_id)?.name : undefined
     const hasTxAuto = !!b.auto_tx_category_code
+
+    const q1HasOverride = b.q1_actual !== null && b.q1_actual !== undefined
+    const q2HasOverride = b.q2_actual !== null && b.q2_actual !== undefined
+    const q1HasData  = q1HasOverride || q1Act !== undefined || b.q1_done
+    const q2HasData  = q2HasOverride || q2Act !== undefined || b.q2_done
+    const q1Fallback = b.q1_done && q1Act === undefined && !q1HasOverride
+    const q2Fallback = b.q2_done && q2Act === undefined && !q2HasOverride
+
+    const q1Cls = !q1HasData ? 'text-zinc-700'
+      : q1Fallback ? 'text-zinc-500'
+      : (q1Plan && effQ1 > q1Plan ? 'text-rose-400' : 'text-emerald-400')
+    const q2Cls = !q2HasData ? 'text-zinc-700'
+      : q2Fallback ? 'text-zinc-500'
+      : (q2Plan && effQ2 > q2Plan ? 'text-rose-400' : 'text-emerald-400')
 
     if (isEdit) return (
       <tr key={b.id} className="bg-zinc-800/50 border-b border-zinc-700">
@@ -527,7 +552,7 @@ export function PresupuestoClient({
             placeholder="Q2 ₡" onKeyDown={e => { if (e.key === 'Enter') saveEdit(b) }}
             className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
         </td>
-        <td colSpan={3} className="px-2 py-2">
+        <td colSpan={2} className="px-2 py-2">
           <div className="flex gap-1">
             <button onClick={() => saveEdit(b)} disabled={isPending}
               className="p-1.5 rounded bg-[#a3e635]/20 text-[#a3e635] hover:bg-[#a3e635]/30 transition-colors">
@@ -571,10 +596,26 @@ export function PresupuestoClient({
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ1Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {q1Plan ? fmt(q1Plan) : <span className="text-zinc-700">—</span>}
         </td>
-        <td className={`px-3 py-2 text-xs text-right tabular-nums ${
-          q1Act !== undefined ? (q1Plan && q1Act > q1Plan ? 'text-rose-400' : 'text-emerald-400') : 'text-zinc-700'
-        }`}>
-          {q1Act !== undefined ? fmt(q1Act) : '—'}
+        <td className={`px-2 py-2 text-xs text-right tabular-nums group/q1r ${q1Cls}`}>
+          {editRealCell?.id === b.id && editRealCell.q === 1 ? (
+            <input autoFocus type="number" value={editRealVal}
+              onChange={e => setEditRealVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveReal(b, 1); if (e.key === 'Escape') setEditRealCell(null) }}
+              onBlur={() => handleSaveReal(b, 1)}
+              className="w-16 bg-zinc-800 border border-zinc-600 rounded px-1 py-0.5 text-xs text-white text-right focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
+          ) : (
+            <span className="inline-flex items-center gap-0.5 justify-end w-full">
+              <span>{q1HasData ? fmt(effQ1) : '—'}</span>
+              <button
+                onClick={() => {
+                  const pre = b.q1_actual !== null ? String(b.q1_actual) : q1Act !== undefined ? String(Math.round(q1Act)) : String(q1Plan)
+                  setEditRealCell({ id: b.id, q: 1 }); setEditRealVal(pre)
+                }}
+                className="opacity-0 group-hover/q1r:opacity-100 text-zinc-600 hover:text-zinc-300 transition-opacity shrink-0 ml-0.5">
+                <Pencil size={7} />
+              </button>
+            </span>
+          )}
         </td>
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 1, !b.q1_done)} disabled={isPending}
@@ -590,10 +631,26 @@ export function PresupuestoClient({
         <td className={`px-3 py-2 text-xs text-right tabular-nums ${isQ2Active ? 'text-zinc-200' : 'text-zinc-500'}`}>
           {q2Plan ? fmt(q2Plan) : <span className="text-zinc-700">—</span>}
         </td>
-        <td className={`px-3 py-2 text-xs text-right tabular-nums ${
-          q2Act !== undefined ? (q2Plan && q2Act > q2Plan ? 'text-rose-400' : 'text-emerald-400') : 'text-zinc-700'
-        }`}>
-          {q2Act !== undefined ? fmt(q2Act) : '—'}
+        <td className={`px-2 py-2 text-xs text-right tabular-nums group/q2r ${q2Cls}`}>
+          {editRealCell?.id === b.id && editRealCell.q === 2 ? (
+            <input autoFocus type="number" value={editRealVal}
+              onChange={e => setEditRealVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveReal(b, 2); if (e.key === 'Escape') setEditRealCell(null) }}
+              onBlur={() => handleSaveReal(b, 2)}
+              className="w-16 bg-zinc-800 border border-zinc-600 rounded px-1 py-0.5 text-xs text-white text-right focus:outline-none focus:border-[#a3e635] [appearance:textfield]" />
+          ) : (
+            <span className="inline-flex items-center gap-0.5 justify-end w-full">
+              <span>{q2HasData ? fmt(effQ2) : '—'}</span>
+              <button
+                onClick={() => {
+                  const pre = b.q2_actual !== null ? String(b.q2_actual) : q2Act !== undefined ? String(Math.round(q2Act)) : String(q2Plan)
+                  setEditRealCell({ id: b.id, q: 2 }); setEditRealVal(pre)
+                }}
+                className="opacity-0 group-hover/q2r:opacity-100 text-zinc-600 hover:text-zinc-300 transition-opacity shrink-0 ml-0.5">
+                <Pencil size={7} />
+              </button>
+            </span>
+          )}
         </td>
         <td className="px-2 py-2 text-center">
           <button onClick={() => handleToggle(b.id, 2, !b.q2_done)} disabled={isPending}
@@ -606,13 +663,9 @@ export function PresupuestoClient({
             {b.q2_done && <Check size={9} />}
           </button>
         </td>
-        <td className={`px-3 py-2 text-xs text-right tabular-nums ${histQ1Val !== undefined ? 'text-zinc-400' : 'text-zinc-700'}`}
-          title={histQ1Val !== undefined ? `Q1 Avg 3m: ${fmtFull(histQ1Val)}` : 'Sin historial Q1'}>
-          {histQ1Val !== undefined ? fmt(histQ1Val) : '—'}
-        </td>
-        <td className={`px-3 py-2 text-xs text-right tabular-nums ${histQ2Val !== undefined ? 'text-zinc-400' : 'text-zinc-700'}`}
-          title={histQ2Val !== undefined ? `Q2 Avg 3m: ${fmtFull(histQ2Val)}` : 'Sin historial Q2'}>
-          {histQ2Val !== undefined ? fmt(histQ2Val) : '—'}
+        <td className={`px-3 py-2 text-xs text-right tabular-nums ${histVal !== undefined ? 'text-zinc-400' : 'text-zinc-700'}`}
+          title={histVal !== undefined ? `Avg/Q 3m: ${fmtFull(histVal)}` : 'Sin historial'}>
+          {histVal !== undefined ? fmt(histVal) : '—'}
         </td>
         <td className="px-2 py-2">
           {plan > 0 && (
@@ -691,7 +744,7 @@ export function PresupuestoClient({
         <table className="w-full border-collapse text-left" style={{ minWidth: 760 }}>
           <thead>
             <tr className="bg-zinc-900/80 border-b border-zinc-800">
-              <td colSpan={10} className="px-3 py-2">
+              <td colSpan={9} className="px-3 py-2">
                 <div className="flex items-center gap-3 text-xs text-zinc-500">
                   <span>Plan <strong className="text-zinc-200">{fmt(totalPlan)}</strong></span>
                   <span>Real <strong className={pctCls(totalPct)}>{fmt(totalAct)}</strong></span>
@@ -729,8 +782,7 @@ export function PresupuestoClient({
                   {allQ2Done && <Check size={9} />}
                 </button>
               </th>
-              <Th k="history" right>Q1 Avg</Th>
-              <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-right text-zinc-500">Q2 Avg</th>
+              <Th k="history" right>Avg/Q</Th>
               <Th k="pct" right>%</Th>
             </tr>
           </thead>
@@ -752,7 +804,6 @@ export function PresupuestoClient({
               <td className={`px-3 py-2 text-right tabular-nums ${pctCls(totalPlanQ2 > 0 ? totalActQ2 / totalPlanQ2 * 100 : 0)}`}>{fmt(totalActQ2)}</td>
               <td />
               <td />
-              <td />
               <td className={`px-3 py-2 text-right ${pctCls(totalPct)}`}>{Math.round(totalPct)}%</td>
             </tr>
             <tr className="border-t-2 border-zinc-500 bg-zinc-900/80 text-xs font-black">
@@ -762,7 +813,6 @@ export function PresupuestoClient({
               <td />
               <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ2Plan)}`}>{fmtGap(gapQ2Plan)}</td>
               <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ2Real)}`}>{fmtGap(gapQ2Real)}</td>
-              <td />
               <td />
               <td />
               <td className={`px-3 py-2.5 text-right tabular-nums ${gapCls(gapQ1Plan + gapQ2Plan)}`}>

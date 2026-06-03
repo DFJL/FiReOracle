@@ -389,7 +389,9 @@ export type Database = {
         Row: {
           category: string
           month: number
+          q1_actual: number | null
           q1_done: boolean
+          q2_actual: number | null
           q2_done: boolean
           user_id: string
           year: number
@@ -397,7 +399,9 @@ export type Database = {
         Insert: {
           category: string
           month: number
+          q1_actual?: number | null
           q1_done?: boolean
+          q2_actual?: number | null
           q2_done?: boolean
           user_id: string
           year: number
@@ -405,7 +409,9 @@ export type Database = {
         Update: {
           category?: string
           month?: number
+          q1_actual?: number | null
           q1_done?: boolean
+          q2_actual?: number | null
           q2_done?: boolean
           user_id?: string
           year?: number

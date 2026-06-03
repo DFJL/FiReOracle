@@ -12,6 +12,8 @@ export type Budget = {
   q2_amount: number | null
   q1_done: boolean
   q2_done: boolean
+  q1_actual: number | null   // manual override for Real (from budget_monthly_done)
+  q2_actual: number | null
   sort_order: number
   budget_type: string   // 'expense' | 'savings' | 'income'
   effective_from: string
@@ -281,6 +283,38 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
       await admin.from('transactions').delete().eq('user_id', user.id).in('external_id', refs).eq('source', 'budget')
     }
   }
+
+  revalidatePath('/presupuesto')
+}
+
+export async function updateBudgetActual(
+  category: string, q: 1 | 2, actual: number | null,
+  year: number, month: number,
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No autorizado')
+
+  const admin = createAdminClient()
+
+  const { data: cur } = await admin.from('budget_monthly_done')
+    .select('q1_done, q2_done, q1_actual, q2_actual')
+    .eq('user_id', user.id)
+    .eq('category', category)
+    .eq('year', year)
+    .eq('month', month)
+    .maybeSingle()
+
+  await admin.from('budget_monthly_done').upsert({
+    user_id:   user.id,
+    category,
+    year,
+    month,
+    q1_done:   cur?.q1_done   ?? false,
+    q2_done:   cur?.q2_done   ?? false,
+    q1_actual: q === 1 ? actual : (cur?.q1_actual ?? null),
+    q2_actual: q === 2 ? actual : (cur?.q2_actual ?? null),
+  }, { onConflict: 'user_id,category,year,month' })
 
   revalidatePath('/presupuesto')
 }

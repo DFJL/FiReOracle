@@ -100,9 +100,9 @@ export default async function PresupuestoPage({
       .eq('is_active', true)
       .order('name'),
 
-    // Per-month done state (source of truth for checkbox display)
+    // Per-month done state + manual actuals
     admin.from('budget_monthly_done')
-      .select('category, q1_done, q2_done')
+      .select('category, q1_done, q2_done, q1_actual, q2_actual')
       .eq('user_id', user.id)
       .eq('year', year)
       .eq('month', month),
@@ -122,9 +122,11 @@ export default async function PresupuestoPage({
     return true
   }).map(b => {
     const md = monthlyDoneMap.get(b.category)
-    const q1_done = md ? md.q1_done : (isCurrentViewMonth ? b.q1_done : false)
-    const q2_done = md ? md.q2_done : (isCurrentViewMonth ? b.q2_done : false)
-    return { ...b, q1_done, q2_done }
+    const q1_done   = md ? md.q1_done   : (isCurrentViewMonth ? b.q1_done : false)
+    const q2_done   = md ? md.q2_done   : (isCurrentViewMonth ? b.q2_done : false)
+    const q1_actual = md?.q1_actual ?? null
+    const q2_actual = md?.q2_actual ?? null
+    return { ...b, q1_done, q2_done, q1_actual, q2_actual }
   })
 
   function toCRC(tx: { amount: number | null; currency_code: string | null; amount_usd: number | null }) {
@@ -174,6 +176,16 @@ export default async function PresupuestoPage({
     if (vals.length) histQ2[group] = vals.reduce((a, b) => a + b, 0) / vals.length
   }
 
+  // Single per-quincena historical reference (avg of Q1 avg and Q2 avg)
+  const history: Record<string, number> = {}
+  for (const group of new Set([...Object.keys(histQ1), ...Object.keys(histQ2)])) {
+    const hasQ1 = histQ1[group] !== undefined
+    const hasQ2 = histQ2[group] !== undefined
+    if (hasQ1 && hasQ2) history[group] = (histQ1[group] + histQ2[group]) / 2
+    else if (hasQ1)     history[group] = histQ1[group]
+    else                history[group] = histQ2[group]
+  }
+
   // Actual income
   const incomeActual = (incomeTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
 
@@ -192,8 +204,7 @@ export default async function PresupuestoPage({
         budgets={budgetRows ?? []}
         actualQ1={actualQ1}
         actualQ2={actualQ2}
-        histQ1={histQ1}
-        histQ2={histQ2}
+        history={history}
         incomeActual={incomeActual}
         year={year}
         month={month}
