@@ -457,7 +457,7 @@ export function EnvelopeSection({
   const [filterCustodio, setFilter]     = useState<string | null>(null)
 
   const custodios      = [...new Set(envelopes.map(e => e.custodio))]
-  const total          = envelopes.reduce((s, e) => s + e.balance + e.interest, 0)
+  const total          = envelopes.reduce((s, e) => s + e.balance, 0)
   const nonZero        = envelopes.filter(e => e.balance > 0).length
   const visibleEnvelopes = filterCustodio
     ? envelopes.filter(e => e.custodio === filterCustodio)
@@ -466,7 +466,7 @@ export function EnvelopeSection({
   function custTotal(cust: string) {
     return envelopes
       .filter(e => e.custodio === cust)
-      .reduce((s, e) => s + e.balance + e.interest, 0)
+      .reduce((s, e) => s + e.balance, 0)
   }
 
   const now        = new Date()
