@@ -901,6 +901,166 @@ export type Database = {
         }
         Relationships: []
       }
+      loan_payments: {
+        Row: {
+          amount: number
+          balance_after: number
+          balance_before: number
+          created_at: string
+          id: string
+          insurance: number
+          interest: number
+          linked_transaction_id: string | null
+          loan_id: string
+          notes: string | null
+          payment_date: string
+          payment_type: string
+          principal: number
+          rate_applied: number
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          balance_before: number
+          created_at?: string
+          id?: string
+          insurance?: number
+          interest?: number
+          linked_transaction_id?: string | null
+          loan_id: string
+          notes?: string | null
+          payment_date: string
+          payment_type?: string
+          principal?: number
+          rate_applied?: number
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          balance_before?: number
+          created_at?: string
+          id?: string
+          insurance?: number
+          interest?: number
+          linked_transaction_id?: string | null
+          loan_id?: string
+          notes?: string | null
+          payment_date?: string
+          payment_type?: string
+          principal?: number
+          rate_applied?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loan_payments_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loan_rate_history: {
+        Row: {
+          created_at: string
+          effective_date: string
+          id: string
+          loan_id: string
+          notes: string | null
+          rate: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          effective_date: string
+          id?: string
+          loan_id: string
+          notes?: string | null
+          rate: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          effective_date?: string
+          id?: string
+          loan_id?: string
+          notes?: string | null
+          rate?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loan_rate_history_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loans: {
+        Row: {
+          created_at: string
+          currency_code: string
+          current_balance: number
+          end_date: string
+          id: string
+          interest_rate: number
+          is_active: boolean
+          lender: string | null
+          loan_type: string
+          monthly_insurance: number
+          name: string
+          notes: string | null
+          original_amount: number
+          payment_day: number
+          start_date: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          currency_code?: string
+          current_balance: number
+          end_date: string
+          id?: string
+          interest_rate: number
+          is_active?: boolean
+          lender?: string | null
+          loan_type?: string
+          monthly_insurance?: number
+          name: string
+          notes?: string | null
+          original_amount: number
+          payment_day?: number
+          start_date: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          currency_code?: string
+          current_balance?: number
+          end_date?: string
+          id?: string
+          interest_rate?: number
+          is_active?: boolean
+          lender?: string | null
+          loan_type?: string
+          monthly_insurance?: number
+          name?: string
+          notes?: string | null
+          original_amount?: number
+          payment_day?: number
+          start_date?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       net_worth_items: {
         Row: {
           category: string
