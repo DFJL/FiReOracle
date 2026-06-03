@@ -131,7 +131,24 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
     })
   }
 
-  if (N < 2) return null
+  if (N < 2) return (
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 text-center space-y-3">
+      <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.14em]">Rendimiento por Instrumento</p>
+      <p className="text-xs text-zinc-600">Sin historial de rendimientos calculado aún.</p>
+      <button
+        onClick={handleRecalculate}
+        disabled={isPending}
+        className="px-4 py-2 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-xs font-black border border-[#a3e635]/20 hover:bg-[#a3e635]/20 disabled:opacity-50 transition-all"
+      >
+        {isPending ? 'Calculando…' : 'Calcular rendimientos desde transacciones'}
+      </button>
+      {recalcMsg && (
+        <p className={`text-[10px] px-3 py-1.5 rounded-lg ${
+          recalcMsg.startsWith('Error') ? 'text-rose-400 bg-rose-400/10' : 'text-[#a3e635] bg-[#a3e635]/10'
+        }`}>{recalcMsg}</p>
+      )}
+    </div>
+  )
 
   return (
     <div className="space-y-4">
