@@ -144,9 +144,12 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
   if (/^abarrotes/i.test(ck)) return 'FOOD_SUPER'
   if (/^impresion/i.test(ck)) return 'HOUSEHOLD'
 
-  // Learning maps — skip if they learned a generic code
-  if (vk && vk !== 'na' && vMap[vk] && !GENERIC_CODES.has(vMap[vk])) return vMap[vk]
-  if (ck && (!vk || vk === 'na') && cMap[ck] && !GENERIC_CODES.has(cMap[ck])) return cMap[ck]
+  // vMap is unreliable for expense transactions: the same vendor (e.g. TRANSCOMER)
+  // appears in both passive income context (rendimientos) and savings context (apertura fondo).
+  // The map learns the majority class (income) and misclassifies savings outflows.
+  const isExpenseTx = tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal'
+  if (!isExpenseTx && vk && vk !== 'na' && vMap[vk] && !GENERIC_CODES.has(vMap[vk])) return vMap[vk]
+  if (!isExpenseTx && ck && (!vk || vk === 'na') && cMap[ck] && !GENERIC_CODES.has(cMap[ck])) return cMap[ck]
   return inferCategory(tx.vendor, tx.concept, null)
 }
 

@@ -35,6 +35,15 @@ export function inferCategory(
   if (/p[eé]rdida\s*valor/i.test(c)) return 'VALUATION_LOSS'
   if (/aumento\s*de?\s*valor|valorizaci[oó]n\s*(positiva)?/i.test(c)) return 'VALUATION_GAIN'
 
+  // ── Savings / investment concepts — must come BEFORE passive income vendor checks
+  // so that "Apertura Fondo TRANSCOMER" is SAVINGS_FUND, not PASSIVE_FUND ──────
+  if (/^apertura\s*fondo|^inversi[oó]n\s*(en\s*)?fondo\s*de\s*inversi[oó]n/i.test(c)) return 'SAVINGS_FUND'
+  if (/^compra\s*(de\s*)?bitcoins?|^compra\s*cripto|^compra\s*ethereum/i.test(c)) return 'SAVINGS_CRYPTO'
+  if (/^inversi[oó]n\s*(en\s*)?(anchor|juicy|royal|sh\s*mining|shmining|meatex|nodos?|crypto|cripto)/i.test(c)) return 'SAVINGS_CRYPTO'
+  if (/^inversi[oó]n\s*(en\s*)?nodos/i.test(c)) return 'SAVINGS_CRYPTO'
+  if (/^compra\s*bienes?\s*inmuebles/i.test(c)) return 'REAL_ESTATE'
+  if (/^r[eé]gimen\s*de\s*pensi[oó]n|^pensi[oó]n\s*voluntaria/i.test(c)) return 'SAVINGS_PENSION'
+
   // ── Passive crypto income ─────────────────────────────────────────────────
   if (/miner[ií]a\s*ethereum|mining\s*eth/i.test(c)) return 'PASSIVE_CRYPTO'
   if (/nodos?\s*crypt|farming\s*crypt|rendimientos?\s*(farming|anchor|juicy|royal|sh\s*mining|shmining|meatex|nodos?|cript)/i.test(c)) return 'PASSIVE_CRYPTO'
