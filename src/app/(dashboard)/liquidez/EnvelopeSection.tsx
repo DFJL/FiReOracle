@@ -413,10 +413,14 @@ export function EnvelopeSection({
   const [subAddLeafId, setSubAddLeaf] = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
   const [showAddEnvelope, setShowAdd]   = useState(false)
+  const [filterCustodio, setFilter]     = useState<string | null>(null)
 
-  const custodios = [...new Set(envelopes.map(e => e.custodio))]
-  const total     = envelopes.reduce((s, e) => s + e.balance, 0)
-  const nonZero   = envelopes.filter(e => e.balance > 0).length
+  const custodios      = [...new Set(envelopes.map(e => e.custodio))]
+  const total          = envelopes.reduce((s, e) => s + e.balance, 0)
+  const nonZero        = envelopes.filter(e => e.balance > 0).length
+  const visibleEnvelopes = filterCustodio
+    ? envelopes.filter(e => e.custodio === filterCustodio)
+    : envelopes
 
   function custTotal(cust: string) {
     return envelopes
@@ -452,19 +456,31 @@ export function EnvelopeSection({
       {/* Custodio strip */}
       <div className="flex gap-2 flex-wrap">
         {custodios.map(cust => {
-          const ct  = custTotal(cust)
-          const pct = total > 0 ? (ct / total) * 100 : 0
+          const ct      = custTotal(cust)
+          const pct     = total > 0 ? (ct / total) * 100 : 0
+          const active  = filterCustodio === cust
           return (
-            <div key={cust} className="flex-1 min-w-[150px] flex items-center justify-between gap-2 px-4 py-3 rounded-xl bg-[#0d120d] border border-[#a3e635]/[0.10]">
+            <button
+              key={cust}
+              onClick={() => setFilter(active ? null : cust)}
+              className={`flex-1 min-w-[150px] flex items-center justify-between gap-2 px-4 py-3 rounded-xl text-left transition-all border ${
+                active
+                  ? 'bg-[#a3e635]/[0.08] border-[#a3e635]/40 ring-1 ring-[#a3e635]/20'
+                  : 'bg-[#0d120d] border-[#a3e635]/[0.10] hover:border-[#a3e635]/25'
+              }`}>
               <div>
-                <p className="text-xs font-black text-zinc-200">{cust}</p>
+                <p className={`text-xs font-black ${active ? 'text-[#a3e635]' : 'text-zinc-200'}`}>{cust}</p>
                 <p className="text-[10px] tabular-nums text-zinc-500">{fmtCRC(ct)} · {pct.toFixed(1)}%</p>
               </div>
-              <button onClick={() => setInterest(cust)}
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={e => { e.stopPropagation(); setInterest(cust) }}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setInterest(cust) } }}
                 className="shrink-0 px-2.5 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all">
                 + Interés
-              </button>
-            </div>
+              </span>
+            </button>
           )
         })}
       </div>
@@ -473,8 +489,14 @@ export function EnvelopeSection({
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#a3e635]/[0.08] flex items-center justify-between gap-3">
           <div>
-            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Sobres de ahorro</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Toca un sobre para registrar movimientos</p>
+            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">
+              Sobres de ahorro{filterCustodio ? ` · ${filterCustodio}` : ''}
+            </p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {filterCustodio
+                ? `${visibleEnvelopes.length} de ${envelopes.length} — toca el custodio para quitar filtro`
+                : 'Toca un sobre para registrar movimientos'}
+            </p>
           </div>
           <button
             onClick={() => setShowAdd(v => !v)}
@@ -482,7 +504,7 @@ export function EnvelopeSection({
             + Sobre
           </button>
         </div>
-        {envelopes.map((env, i) => {
+        {visibleEnvelopes.map((env, i) => {
           const hasChildren = env.children.length > 0
           const isExpanded  = expandedId === env.id
           const isOpen      = openId === env.id
