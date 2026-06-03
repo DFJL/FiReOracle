@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { computeSchedule, simulateExtra, type AmortizationResult } from './amortization'
+import { computeSchedule, simulateExtra, simulateLumpSum, type AmortizationResult } from './amortization'
 
 type Payment = {
   id: string
@@ -305,29 +305,64 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: string
 
 // ── Simulador ────────────────────────────────────────────────────────────────
 
-const PRESETS = [100_000, 250_000, 500_000, 1_000_000]
+const MONTHLY_PRESETS = [100_000, 250_000, 500_000, 1_000_000]
+const LUMP_PRESETS    = [1_000_000, 2_500_000, 5_000_000, 10_000_000]
 
 function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: AmortizationResult }) {
-  const [extra, setExtra]       = useState(0)
+  const [mode, setMode]         = useState<'mensual' | 'unico'>('mensual')
+  const [amount, setAmount]     = useState(0)
   const [inputVal, setInputVal] = useState('')
 
-  const sim = extra > 0
-    ? simulateExtra(
-        loan.currentBalance, loan.interestRate, loan.remainingMonths,
-        loan.monthlyInsurance, extra, loan.startYearMonth,
-      )
+  const presets = mode === 'mensual' ? MONTHLY_PRESETS : LUMP_PRESETS
+
+  const sim = amount > 0
+    ? mode === 'mensual'
+      ? simulateExtra(
+          loan.currentBalance, loan.interestRate, loan.remainingMonths,
+          loan.monthlyInsurance, amount, loan.startYearMonth,
+        )
+      : simulateLumpSum(
+          loan.currentBalance, loan.interestRate, loan.remainingMonths,
+          loan.monthlyInsurance, amount, loan.startYearMonth,
+        )
     : null
+
+  function pick(p: number) { setAmount(p); setInputVal(String(p)) }
+  function clear()          { setAmount(0); setInputVal('') }
+
+  const modeLabel = mode === 'mensual' ? 'abono extra mensual' : 'abono único'
 
   return (
     <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-5 space-y-5">
+      {/* Mode toggle */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+          {([{ id: 'mensual', label: 'Mensual' }, { id: 'unico', label: 'Único' }] as const).map(m => (
+            <button key={m.id}
+              onClick={() => { setMode(m.id); clear() }}
+              className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
+                mode === m.id ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+              }`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[9px] text-zinc-600">
+          {mode === 'mensual'
+            ? 'Extra por mes, todos los meses, hasta cancelar'
+            : 'Un abono único hoy que reduce el saldo de inmediato'}
+        </p>
+      </div>
+
+      {/* Amount picker */}
       <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-3">Abono extra mensual</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-3">Monto de {modeLabel}</p>
         <div className="flex flex-wrap gap-2 items-center">
-          {PRESETS.map(p => (
+          {presets.map(p => (
             <button key={p}
-              onClick={() => { setExtra(p); setInputVal(String(p)) }}
+              onClick={() => pick(p)}
               className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border ${
-                extra === p
+                amount === p
                   ? 'bg-[#a3e635]/20 text-[#a3e635] border-[#a3e635]/30'
                   : 'bg-white/[0.04] text-zinc-400 border-white/[0.06] hover:text-zinc-200'
               }`}>
@@ -337,12 +372,12 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
           <input
             type="number"
             value={inputVal}
-            onChange={e => { setInputVal(e.target.value); setExtra(Number(e.target.value) || 0) }}
+            onChange={e => { setInputVal(e.target.value); setAmount(Number(e.target.value) || 0) }}
             placeholder="Otro monto"
             className="w-36 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
           />
-          {extra > 0 && (
-            <button onClick={() => { setExtra(0); setInputVal('') }}
+          {amount > 0 && (
+            <button onClick={clear}
               className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
               Limpiar
             </button>
@@ -353,33 +388,35 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
       {sim ? (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <SimTile label="Meses ahorrados"  value={String(sim.monthsSaved)}            highlight />
-            <SimTile label="Años ahorrados"   value={sim.yearsSaved.toFixed(1)}          />
-            <SimTile label="Interés ahorrado" value={fmtCRC(sim.interestSaved, true)}    />
-            <SimTile label="Nueva cancelación" value={fmtYM(sim.newPayoffYearMonth, true)} />
+            <SimTile label="Meses ahorrados"   value={String(sim.monthsSaved)}               highlight />
+            <SimTile label="Años ahorrados"    value={sim.yearsSaved.toFixed(1)}             />
+            <SimTile label="Interés ahorrado"  value={fmtCRC(sim.interestSaved, true)}       />
+            <SimTile label="Nueva cancelación" value={fmtYM(sim.newPayoffYearMonth, true)}   />
           </div>
 
           <div className="p-4 rounded-xl bg-[#a3e635]/[0.04] border border-[#a3e635]/[0.12] space-y-3">
             <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-wider">Comparativa</p>
             <div className="grid grid-cols-2 gap-4 text-[11px]">
               <div className="space-y-1.5">
-                <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Sin abono extra</p>
-                <Row k="Cancela en"       v={fmtYM(schedule.payoffYearMonth, true)} />
-                <Row k="Cuota total"      v={fmtCRC(schedule.baseMonthlyPayment + loan.monthlyInsurance)} />
-                <Row k="Total intereses"  v={fmtCRC(schedule.totalInterest, true)} />
+                <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Sin abono</p>
+                <Row k="Cancela en"      v={fmtYM(schedule.payoffYearMonth, true)}                     />
+                <Row k="Cuota mensual"   v={fmtCRC(schedule.baseMonthlyPayment + loan.monthlyInsurance)} />
+                <Row k="Total intereses" v={fmtCRC(schedule.totalInterest, true)}                      />
               </div>
               <div className="space-y-1.5">
-                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-wider">Con {fmtCRC(extra, true)} extra</p>
-                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)} accent />
-                <Row k="Cuota total"     v={fmtCRC(sim.newMonthlyTotal)}          accent />
-                <Row k="Total intereses" v={fmtCRC(schedule.totalInterest - sim.interestSaved, true)} accent />
+                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-wider">
+                  {mode === 'mensual' ? `+${fmtCRC(amount, true)}/mes` : `Único ${fmtCRC(amount, true)}`}
+                </p>
+                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)}                                    accent />
+                <Row k="Cuota mensual"   v={fmtCRC(sim.newMonthlyTotal)}                                            accent />
+                <Row k="Total intereses" v={fmtCRC(schedule.totalInterest - sim.interestSaved, true)}               accent />
               </div>
             </div>
           </div>
         </>
       ) : (
         <p className="text-xs text-zinc-600 text-center py-6">
-          Seleccioná o ingresá un monto de abono extra para ver la proyección.
+          Seleccioná o ingresá un monto para ver la proyección.
         </p>
       )}
     </div>

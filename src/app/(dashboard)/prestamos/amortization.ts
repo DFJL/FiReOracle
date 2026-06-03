@@ -113,3 +113,24 @@ export function simulateExtra(
     newMonthlyTotal: (sim.rows[0]?.totalPayment) ?? 0,
   }
 }
+
+export function simulateLumpSum(
+  balance: number,
+  annualRate: number,
+  remainingMonths: number,
+  monthlyInsurance: number,
+  lumpSum: number,
+  startYearMonth: string,
+): SimResult {
+  const base       = computeSchedule(balance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+  const newBalance = Math.max(0, balance - lumpSum)
+  const sim        = computeSchedule(newBalance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+  const monthsSaved = base.monthsRemaining - sim.monthsRemaining
+  return {
+    monthsSaved,
+    yearsSaved: monthsSaved / 12,
+    interestSaved: base.totalInterest - sim.totalInterest,
+    newPayoffYearMonth: sim.payoffYearMonth,
+    newMonthlyTotal: (sim.rows[0]?.totalPayment) ?? 0,
+  }
+}
