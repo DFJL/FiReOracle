@@ -5,8 +5,6 @@ import { OracleView } from './OracleView'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { inferCategory, displayCategory, isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
 
-// ── types ──────────────────────────────────────────────────────────────────────
-
 type Tx = {
   date: string | null
   amount: string | number | null
@@ -19,8 +17,6 @@ type Tx = {
   is_settlement: boolean
   is_survival_expense: boolean | null
 }
-
-// ── category resolution (mirrors InteractiveSection logic) ────────────────────
 
 type CatMap = Record<string, string>
 
@@ -65,21 +61,15 @@ const BUCKET_ONLY = new Set(['SAVINGS', 'INCOME', 'SAVINGS_INVESTMENT', 'PASSIVE
 function resolveDisplayCat(tx: Tx, vMap: CatMap, cMap: CatMap): string {
   if (tx.is_settlement) return 'Liquidaciones'
   if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
-
   const ck = (tx.concept ?? '').toLowerCase().trim()
   const vk = (tx.vendor ?? '').toLowerCase().trim()
-
-  if (tx.category_code && (!tx.is_passive_income || !BUCKET_ONLY.has(tx.category_code))) {
-    return displayCategory(tx.category_code)
-  }
+  if (tx.category_code && (!tx.is_passive_income || !BUCKET_ONLY.has(tx.category_code))) return displayCategory(tx.category_code)
   if (/^abarrotes/i.test(ck)) return 'Abarrotes'
   if (/^impresion/i.test(ck)) return 'Hogar'
   if (vk && vk !== 'na' && vMap[vk]) return displayCategory(vMap[vk])
   if (ck && (!vk || vk === 'na') && cMap[ck]) return displayCategory(cMap[ck])
   return displayCategory(inferCategory(tx.vendor, tx.concept, tx.is_passive_income ? null : tx.category_code))
 }
-
-// ── helpers ────────────────────────────────────────────────────────────────────
 
 function fmtCRC(n: number) {
   return new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(n)
@@ -96,7 +86,7 @@ function isOutflow(tx: Tx) {
   return true
 }
 
-// ── page ──────────────────────────────────────────────────────────────────────
+const sum = (arr: Tx[]) => arr.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
 export default async function OraclePage() {
   const supabase = await createClient()
@@ -106,156 +96,312 @@ export default async function OraclePage() {
   const admin = createAdminClient()
   const now = new Date()
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const rolling12Start = new Date(now.getFullYear(), now.getMonth() - 12, 1)
-  const cutStr = rolling12Start.toISOString().slice(0, 10)
-  const endStr = currentMonthStart.toISOString().slice(0, 10)
+  const rolling12Start    = new Date(now.getFullYear(), now.getMonth() - 12, 1)
+  const prevYearStart     = new Date(now.getFullYear(), now.getMonth() - 24, 1)
+  const cutStr   = rolling12Start.toISOString().slice(0, 10)
+  const endStr   = currentMonthStart.toISOString().slice(0, 10)
+  const prevCut  = prevYearStart.toISOString().slice(0, 10)
+  const days60   = new Date(now.getTime() - 60 * 86400000).toISOString().slice(0, 10)
 
   const [
     { data: fireConfig },
     { data: allTxRaw },
     { data: snapshots },
+    { data: loansRaw },
+    { data: assetsRaw },
+    { data: liabilitiesRaw },
+    { data: bucketsRaw },
+    { data: envelopesRaw },
+    { data: movementsRaw },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
-    // Load ALL transactions for accurate vendor/concept learning maps
     admin.from('transactions')
       .select('date, amount, movement_type, expense_group, category_code, concept, vendor, is_passive_income, is_settlement, is_survival_expense')
       .eq('user_id', user.id)
       .not('amount', 'is', null)
-      .not('date', 'is', null),
+      .not('date', 'is', null)
+      .gte('date', prevCut),       // 24m for YoY comparison
     admin.from('net_worth_snapshots')
-      .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
+      .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc, liabilities_crc')
       .eq('user_id', user.id)
-      .order('snapshot_date', { ascending: false })
-      .limit(3),
+      .order('snapshot_date', { ascending: true }),
+    admin.from('loans')
+      .select('name, lender, loan_type, currency_code, current_balance, interest_rate, end_date')
+      .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
+    admin.from('assets')
+      .select('name, asset_type, value_crc, is_investable')
+      .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
+    admin.from('liabilities')
+      .select('name, liability_type, current_balance, interest_rate')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('user_investment_buckets')
+      .select('id, name, bucket_type, vendors, concept_map, account_id')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('savings_envelopes')
+      .select('id, name, parent_envelope_id')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('envelope_movements')
+      .select('amount, movement_type, envelope_id, date')
+      .eq('user_id', user.id),
   ])
 
   const exchangeRate = await fetchExchangeRate()
   const tcSell = exchangeRate?.sell ?? 515
+  const usd = (crc: number) => `$${Math.round(crc / tcSell).toLocaleString('en-US')}`
 
   const allTxs = (allTxRaw ?? []) as Tx[]
+  const vMap   = buildVendorCatMap(allTxs)
+  const cMap   = buildConceptCatMap(allTxs)
 
-  // Build category maps from full history for accurate inference
-  const vMap = buildVendorCatMap(allTxs)
-  const cMap = buildConceptCatMap(allTxs)
+  // Current 12m window
+  const cur12  = allTxs.filter(tx => tx.date && tx.date >= cutStr && tx.date < endStr)
+  // Prior 12m window (for YoY)
+  const prev12 = allTxs.filter(tx => tx.date && tx.date >= prevCut && tx.date < cutStr)
+  // Last 60 days (current month included)
+  const recent = allTxs.filter(tx => tx.date && tx.date >= days60).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
 
-  // Filter to last 12 complete months for metrics
-  const all = allTxs.filter(tx => tx.date && tx.date >= cutStr && tx.date < endStr)
-
-  // Classify flows
-  const activeIncome  = all.filter(tx => tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement)
-  const passiveIncome = all.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
-  const expenses      = all.filter(isOutflow)
-  const savings       = all.filter(tx =>
-    tx.expense_group === SAVINGS_EXPENSE_GROUP && !tx.is_settlement &&
-    (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
-  )
-
-  const sum = (arr: Tx[]) => arr.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
-  const totalActiveIncome  = sum(activeIncome)
-  const totalPassiveIncome = sum(passiveIncome)
-  const totalIncome        = totalActiveIncome + totalPassiveIncome
-  const totalExpenses      = sum(expenses)
-  const totalSavings       = sum(savings)
-  const avgMonthlyExpenses = totalExpenses / 12
-  const savingsRate        = totalIncome > 0 ? (totalSavings / totalIncome) * 100 : 0
-  const netMargin          = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome) * 100 : 0
-  const passiveCoverage    = avgMonthlyExpenses > 0 ? ((totalPassiveIncome / 12) / avgMonthlyExpenses) * 100 : 0
-
-  // Survival vs discretionary
-  const survivalExp = sum(all.filter(tx =>
-    !!tx.is_survival_expense && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
-  ))
-
-  // Resolved category breakdown (same logic as Resumen page)
-  const catMap: Record<string, number> = {}
-  for (const tx of expenses) {
-    const cat = resolveDisplayCat(tx, vMap, cMap)
-    catMap[cat] = (catMap[cat] ?? 0) + Number(tx.amount ?? 0)
+  // ── KPI helpers ────────────────────────────────────────────────────────────
+  function kpis(txs: Tx[]) {
+    const activeIncome  = txs.filter(tx => tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement)
+    const passiveIncome = txs.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
+    const expenses      = txs.filter(isOutflow)
+    const savings       = txs.filter(tx =>
+      tx.expense_group === SAVINGS_EXPENSE_GROUP && !tx.is_settlement &&
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
+    )
+    const totalActiveIncome  = sum(activeIncome)
+    const totalPassiveIncome = sum(passiveIncome)
+    const totalIncome        = totalActiveIncome + totalPassiveIncome
+    const totalExpenses      = sum(expenses)
+    const totalSavings       = sum(savings)
+    const survivalExp = sum(txs.filter(tx => !!tx.is_survival_expense && isOutflow(tx)))
+    return { totalActiveIncome, totalPassiveIncome, totalIncome, totalExpenses, totalSavings, survivalExp, expenses, passiveIncome, savings }
   }
-  const topCats = Object.entries(catMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name, amt]) => ({ name, amt, pct: totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0 }))
 
-  // Passive income breakdown
+  const c = kpis(cur12)
+  const p = kpis(prev12)
+
+  const avgMonthlyExpenses = c.totalExpenses / 12
+  const savingsRate     = c.totalIncome > 0 ? (c.totalSavings / c.totalIncome) * 100 : 0
+  const netMargin       = c.totalIncome > 0 ? ((c.totalIncome - c.totalExpenses) / c.totalIncome) * 100 : 0
+  const passiveCoverage = avgMonthlyExpenses > 0 ? ((c.totalPassiveIncome / 12) / avgMonthlyExpenses) * 100 : 0
+
+  // ── Monthly breakdown (current 12m) ────────────────────────────────────────
+  const months: string[] = []
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
+    months.push(d.toISOString().slice(0, 7))
+  }
+
+  const monthlyRows = months.map(m => {
+    const mTxs = cur12.filter(tx => tx.date?.startsWith(m))
+    const k = kpis(mTxs)
+    const net = k.totalIncome - k.totalExpenses
+    return { m, inc: k.totalIncome, exp: k.totalExpenses, sav: k.totalSavings, net }
+  })
+
+  // ── Top vendors by spend ───────────────────────────────────────────────────
+  const vendorSpend: Record<string, number> = {}
+  for (const tx of c.expenses) {
+    const v = (tx.vendor ?? tx.concept ?? 'Desconocido').trim()
+    if (!v || v.toLowerCase() === 'na') continue
+    vendorSpend[v] = (vendorSpend[v] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const topVendors = Object.entries(vendorSpend)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+
+  // ── Top categories ──────────────────────────────────────────────────────────
+  const catSpend: Record<string, number> = {}
+  for (const tx of c.expenses) {
+    const cat = resolveDisplayCat(tx, vMap, cMap)
+    catSpend[cat] = (catSpend[cat] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const topCats = Object.entries(catSpend).sort((a, b) => b[1] - a[1]).slice(0, 12)
+
+  // ── Passive income breakdown ────────────────────────────────────────────────
   const passiveCatMap: Record<string, number> = {}
-  for (const tx of passiveIncome) {
+  for (const tx of c.passiveIncome) {
     const cat = tx.category_code ? displayCategory(tx.category_code) : (tx.concept ?? 'Rendimientos')
     passiveCatMap[cat] = (passiveCatMap[cat] ?? 0) + Number(tx.amount ?? 0)
   }
-  const topPassive = Object.entries(passiveCatMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
 
-  // Savings/investment breakdown — concept-first to avoid vendor-map noise
-  function resolveSavingsCat(tx: Tx): string {
-    if (tx.category_code && !BUCKET_ONLY.has(tx.category_code)) return displayCategory(tx.category_code)
-    // For savings, concept is more reliable than vendor (e.g. "Regimen de pensión voluntaria" on vendor BAC)
-    return displayCategory(inferCategory(tx.vendor, tx.concept, null))
+  // ── Savings breakdown ───────────────────────────────────────────────────────
+  const savingsBreakdown: Record<string, number> = {}
+  for (const tx of c.savings) {
+    const cat = tx.category_code && !BUCKET_ONLY.has(tx.category_code)
+      ? displayCategory(tx.category_code)
+      : displayCategory(inferCategory(tx.vendor, tx.concept, null))
+    savingsBreakdown[cat] = (savingsBreakdown[cat] ?? 0) + Number(tx.amount ?? 0)
   }
-  const savingsCatMap: Record<string, number> = {}
-  for (const tx of savings) {
-    const cat = resolveSavingsCat(tx)
-    savingsCatMap[cat] = (savingsCatMap[cat] ?? 0) + Number(tx.amount ?? 0)
-  }
-  const topSavings = Object.entries(savingsCatMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
 
-  // FIRE metrics
+  // ── FIRE metrics ──────────────────────────────────────────────────────────
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
   const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
+  const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
-  const latestSnap = snapshots?.[0]
+  const latestSnap = (snapshots ?? []).slice(-1)[0]
   const liquid     = latestSnap ? Number((latestSnap as { liquid_crc?: number | null }).liquid_crc ?? 0) : 0
   const invested   = latestSnap ? Number(latestSnap.invested_crc ?? 0) : 0
   const activosInvertibles = liquid + invested
-  const fireProgress = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
-  const runway       = avgMonthlyExpenses > 0 ? liquid / avgMonthlyExpenses : null
+  const fireProgress  = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
+  const runway        = avgMonthlyExpenses > 0 ? liquid / avgMonthlyExpenses : null
+  const yearsToFire   = fireNumber > activosInvertibles && avgMonthlyExpenses > 0
+    ? Math.ceil(Math.log(fireNumber / activosInvertibles) / Math.log(1 + expReturn))
+    : 0
 
-  // Net worth trend
-  const nwTrend = (snapshots ?? []).map(s => ({ date: s.snapshot_date, nw: Number(s.net_worth_crc) })).reverse()
+  // ── Envelope / liquid breakdown ────────────────────────────────────────────
+  const parentIds = new Set(
+    (envelopesRaw ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
+  )
+  const rootParentIds = new Set(
+    (envelopesRaw ?? []).filter(e => !e.parent_envelope_id && parentIds.has(e.id)).map(e => e.id)
+  )
+  const envBalMap: Record<string, number> = {}
+  for (const m of movementsRaw ?? []) {
+    if (m.movement_type === 'interes' || rootParentIds.has(m.envelope_id)) continue
+    envBalMap[m.envelope_id] = (envBalMap[m.envelope_id] ?? 0) + Number(m.amount)
+  }
+  const envelopeRows = (envelopesRaw ?? [])
+    .filter(e => !rootParentIds.has(e.id) && Math.abs(envBalMap[e.id] ?? 0) > 100)
+    .map(e => ({ name: e.name, balance: envBalMap[e.id] ?? 0 }))
+    .sort((a, b) => b.balance - a.balance)
 
-  // Build context string
+  // ── YoY comparison ──────────────────────────────────────────────────────────
+  const yoyIncome  = p.totalIncome  > 0 ? ((c.totalIncome  - p.totalIncome)  / p.totalIncome  * 100).toFixed(1) : 'n/d'
+  const yoyExpense = p.totalExpenses > 0 ? ((c.totalExpenses - p.totalExpenses) / p.totalExpenses * 100).toFixed(1) : 'n/d'
+  const yoySavings = p.totalSavings > 0 ? ((c.totalSavings - p.totalSavings) / p.totalSavings * 100).toFixed(1) : 'n/d'
+
+  // ── Recent transactions (60d) ──────────────────────────────────────────────
+  const recentTxLines = recent
+    .filter(tx => tx.movement_type && Number(tx.amount ?? 0) > 500)
+    .slice(0, 60)
+    .map(tx => {
+      const type = tx.movement_type === 'income' ? '↑' : tx.expense_group === SAVINGS_EXPENSE_GROUP ? '💰' : '↓'
+      const cat  = resolveDisplayCat(tx, vMap, cMap)
+      const v    = (tx.vendor ?? tx.concept ?? '').slice(0, 22).padEnd(22)
+      const d    = (tx.date ?? '').slice(5)
+      return `${d} ${type} ${v} ${fmtCRC(Number(tx.amount ?? 0)).padStart(14)} [${cat}]`
+    })
+
+  // ── NW history (all snapshots) ─────────────────────────────────────────────
+  const nwHistory = (snapshots ?? []).map(s => ({
+    date:  s.snapshot_date,
+    nw:    Number(s.net_worth_crc),
+    inv:   Number(s.invested_crc ?? 0),
+    liq:   Number((s as { liquid_crc?: number | null }).liquid_crc ?? 0),
+    liab:  Number((s as { liabilities_crc?: number | null }).liabilities_crc ?? 0),
+  }))
+
   const monthLabel = `${rolling12Start.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })} — ${new Date(endStr).toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })}`
-  const usd = (crc: number) => `$${Math.round(crc / tcSell).toLocaleString('en-US')}`
 
-  const context = `PERÍODO: Últimos 12 meses completos (${monthLabel})
+  // ─────────────────────────── BUILD CONTEXT ──────────────────────────────────
+  const context = `FECHA HOY: ${now.toISOString().slice(0, 10)}
 TIPO DE CAMBIO: ₡${tcSell.toLocaleString('es-CR')} por USD
+PERÍODO PRINCIPAL: Últimos 12 meses completos (${monthLabel})
 
-── FLUJO DE INGRESOS ──
-Ingresos activos (12m):     ${fmtCRC(totalActiveIncome)} (${usd(totalActiveIncome)})
-Ingresos pasivos (12m):     ${fmtCRC(totalPassiveIncome)} (${usd(totalPassiveIncome)}) → ${passiveCoverage.toFixed(1)}% de cobertura de gastos
-Total ingresos (12m):       ${fmtCRC(totalIncome)} → promedio ${fmtCRC(totalIncome / 12)}/mes
+══════════════════════════════════════════════════════════
+ KPIs PRINCIPALES (12m)
+══════════════════════════════════════════════════════════
+Ingresos activos:        ${fmtCRC(c.totalActiveIncome)} (${usd(c.totalActiveIncome)})  → ${fmtCRC(c.totalActiveIncome / 12)}/mes
+Ingresos pasivos:        ${fmtCRC(c.totalPassiveIncome)} (${usd(c.totalPassiveIncome)}) → ${fmtCRC(c.totalPassiveIncome / 12)}/mes
+Total ingresos:          ${fmtCRC(c.totalIncome)} → ${fmtCRC(c.totalIncome / 12)}/mes
+Gastos totales:          ${fmtCRC(c.totalExpenses)} → ${fmtCRC(avgMonthlyExpenses)}/mes
+  — Supervivencia:       ${fmtCRC(c.survivalExp)} (${c.totalExpenses > 0 ? ((c.survivalExp / c.totalExpenses) * 100).toFixed(0) : 0}%)
+  — Discrecional:        ${fmtCRC(c.totalExpenses - c.survivalExp)} (${c.totalExpenses > 0 ? (((c.totalExpenses - c.survivalExp) / c.totalExpenses) * 100).toFixed(0) : 0}%)
+Ahorro / Inversión:      ${fmtCRC(c.totalSavings)} → ${fmtCRC(c.totalSavings / 12)}/mes
+Tasa de ahorro:          ${savingsRate.toFixed(1)}%
+Margen neto:             ${netMargin.toFixed(1)}%
+Cobertura pasiva:        ${passiveCoverage.toFixed(1)}%
+Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
 
-── FLUJO DE GASTOS ──
-Gastos totales (12m):       ${fmtCRC(totalExpenses)} → promedio ${fmtCRC(avgMonthlyExpenses)}/mes
-  — Supervivencia:          ${fmtCRC(survivalExp)} (${totalExpenses > 0 ? ((survivalExp / totalExpenses) * 100).toFixed(0) : 0}%)
-  — Discrecional:           ${fmtCRC(totalExpenses - survivalExp)} (${totalExpenses > 0 ? (((totalExpenses - survivalExp) / totalExpenses) * 100).toFixed(0) : 0}%)
-Ahorro / Inversión (12m):   ${fmtCRC(totalSavings)}
+══════════════════════════════════════════════════════════
+ AÑO CONTRA AÑO (12m actual vs 12m anterior)
+══════════════════════════════════════════════════════════
+Ingresos:   ${fmtCRC(c.totalIncome)} vs ${fmtCRC(p.totalIncome)}  (${yoyIncome}%)
+Gastos:     ${fmtCRC(c.totalExpenses)} vs ${fmtCRC(p.totalExpenses)}  (${yoyExpense}%)
+Ahorro:     ${fmtCRC(c.totalSavings)} vs ${fmtCRC(p.totalSavings)}  (${yoySavings}%)
 
-── KPIs ──
-Tasa de ahorro:             ${savingsRate.toFixed(1)}% ${savingsRate >= 30 ? '✓ excelente' : savingsRate >= 20 ? '~ aceptable' : '⚠ bajo'}
-Margen neto:                ${netMargin.toFixed(1)}%
-Cobertura pasiva de gastos: ${passiveCoverage.toFixed(1)}% ${passiveCoverage >= 100 ? '✓ FIRE alcanzado' : ''}
-Runway líquido:             ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
+══════════════════════════════════════════════════════════
+ DESGLOSE MENSUAL (últimos 12 meses completos)
+══════════════════════════════════════════════════════════
+Mes        Ingreso          Gasto            Ahorro           Neto
+${monthlyRows.map(r =>
+  `${r.m}   ${fmtCRC(r.inc).padStart(14)}   ${fmtCRC(r.exp).padStart(14)}   ${fmtCRC(r.sav).padStart(14)}   ${fmtCRC(r.net).padStart(14)}`
+).join('\n')}
 
-── FIRE ──
-FIRE Number (SWR ${(swr * 100).toFixed(0)}%): ${fmtCRC(fireNumber)} (${usd(fireNumber)})
-Activos invertibles:        ${fmtCRC(activosInvertibles)} (${usd(activosInvertibles)})
-  — Liquidez:               ${fmtCRC(liquid)}
-  — Inversiones:            ${fmtCRC(invested)}
-Progreso FIRE:              ${fireProgress.toFixed(1)}%
-${nwTrend.length >= 2 ? `Patrimonio neto reciente: ${nwTrend.map(s => `${s.date}: ${fmtCRC(s.nw)}`).join(' | ')}` : ''}
+══════════════════════════════════════════════════════════
+ TOP CATEGORÍAS DE GASTO (12m)
+══════════════════════════════════════════════════════════
+${topCats.map(([n, v]) => `${n.padEnd(28)} ${fmtCRC(v).padStart(14)}  (${c.totalExpenses > 0 ? ((v / c.totalExpenses) * 100).toFixed(0) : 0}%)`).join('\n')}
 
-── TOP CATEGORÍAS DE GASTO (últimos 12m) ──
-${topCats.map(c => `${c.name.padEnd(26)} ${fmtCRC(c.amt).padStart(14)}  (${c.pct.toFixed(0)}%)`).join('\n')}
+══════════════════════════════════════════════════════════
+ TOP 25 COMERCIOS / VENDEDORES POR GASTO (12m)
+══════════════════════════════════════════════════════════
+${topVendors.map(([v, amt]) => `${v.slice(0, 30).padEnd(30)} ${fmtCRC(amt).padStart(14)}`).join('\n')}
 
-── AHORRO E INVERSIÓN (últimos 12m) ──
-${topSavings.map(([k, v]) => `${k.padEnd(26)} ${fmtCRC(v).padStart(14)}  (${totalSavings > 0 ? ((v / totalSavings) * 100).toFixed(0) : 0}%)`).join('\n') || 'Sin aportes registrados'}
+══════════════════════════════════════════════════════════
+ INGRESOS PASIVOS (12m)
+══════════════════════════════════════════════════════════
+${Object.entries(passiveCatMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k.padEnd(28)} ${fmtCRC(v)}`).join('\n') || 'Sin registros'}
 
-── INGRESOS PASIVOS (últimos 12m) ──
-${topPassive.map(([k, v]) => `${k.padEnd(26)} ${fmtCRC(v)}`).join('\n') || 'Sin ingresos pasivos registrados'}`
+══════════════════════════════════════════════════════════
+ AHORRO E INVERSIÓN (12m)
+══════════════════════════════════════════════════════════
+${Object.entries(savingsBreakdown).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k.padEnd(28)} ${fmtCRC(v)}`).join('\n') || 'Sin registros'}
+
+══════════════════════════════════════════════════════════
+ FIRE
+══════════════════════════════════════════════════════════
+FIRE Number (SWR ${(swr * 100).toFixed(0)}%):  ${fmtCRC(fireNumber)} (${usd(fireNumber)})
+Meta mensual en retiro:  ${fmtCRC(targetExp)}
+Activos invertibles:     ${fmtCRC(activosInvertibles)} (${usd(activosInvertibles)}) → ${fireProgress.toFixed(1)}% del FIRE
+  — Liquidez:            ${fmtCRC(liquid)}
+  — Inversiones:         ${fmtCRC(invested)}
+Retorno esperado:        ${(expReturn * 100).toFixed(0)}% anual
+Años estimados a FIRE:   ${yearsToFire > 0 ? `~${yearsToFire} años` : fireProgress >= 100 ? 'FIRE alcanzado' : 'n/d'}
+Runway:                  ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
+
+══════════════════════════════════════════════════════════
+ LIQUIDEZ — SALDO POR SOBRE
+══════════════════════════════════════════════════════════
+${envelopeRows.length > 0
+  ? envelopeRows.map(e => `${e.name.padEnd(28)} ${fmtCRC(e.balance).padStart(14)}`).join('\n')
+  : 'Sin sobres activos'}
+
+══════════════════════════════════════════════════════════
+ PRÉSTAMOS ACTIVOS
+══════════════════════════════════════════════════════════
+${(loansRaw ?? []).map(l => {
+  const bal = Number(l.current_balance)
+  const balCrc = l.currency_code === 'USD' ? bal * tcSell : bal
+  return `${(l.name ?? '').padEnd(28)} ${l.currency_code === 'USD' ? `$${bal.toLocaleString('en-US')}` : fmtCRC(bal).padStart(14)} @ ${Number(l.interest_rate).toFixed(2)}% · vence ${l.end_date ?? 'n/d'} (${usd(balCrc)} equiv)`
+}).join('\n') || 'Sin préstamos activos'}
+
+══════════════════════════════════════════════════════════
+ ACTIVOS
+══════════════════════════════════════════════════════════
+${(assetsRaw ?? []).map(a =>
+  `${(a.name ?? '').padEnd(28)} ${fmtCRC(Number(a.value_crc)).padStart(14)} [${a.asset_type}]${a.is_investable ? ' ✓invertible' : ''}`
+).join('\n') || 'Sin activos registrados'}
+${(liabilitiesRaw ?? []).length > 0 ? `\nPasivos manuales:\n${(liabilitiesRaw ?? []).map(l =>
+  `${(l.name ?? '').padEnd(28)} ${fmtCRC(Number(l.current_balance)).padStart(14)}`
+).join('\n')}` : ''}
+
+══════════════════════════════════════════════════════════
+ PATRIMONIO NETO — HISTORIAL COMPLETO
+══════════════════════════════════════════════════════════
+Fecha        Patrim.Neto       Invertido         Liquidez        Pasivos
+${nwHistory.map(s =>
+  `${s.date}   ${fmtCRC(s.nw).padStart(14)}   ${fmtCRC(s.inv).padStart(14)}   ${fmtCRC(s.liq).padStart(14)}   ${fmtCRC(s.liab).padStart(14)}`
+).join('\n') || '(Sin snapshots)'}
+
+══════════════════════════════════════════════════════════
+ TRANSACCIONES RECIENTES (últimos 60 días, >₡500)
+══════════════════════════════════════════════════════════
+Fecha  T  Comercio/Concepto        Monto             Categoría
+${recentTxLines.join('\n') || '(Sin transacciones recientes)'}
+`
 
   return (
     <div className="h-[calc(100vh-4rem)] md:h-screen flex flex-col">
