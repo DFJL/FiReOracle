@@ -975,37 +975,55 @@ export function PatrimonioView({
                   <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Ilíquido</th>
                   <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Pasivos</th>
                   <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Patrimonio Neto</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">MoM %</th>
+                  <th className="px-3 py-2 text-right text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">vs 12m %</th>
                   <th className="px-1 py-2 w-8" />
                 </tr>
               </thead>
               <tbody>
-                {sorted.slice().reverse().slice(0, 24).map((s, i) => {
-                  const prev = sorted.slice().reverse()[i + 1]
-                  const delta = prev ? Number(s.net_worth_crc) - Number(prev.net_worth_crc) : null
-                  return (
-                    <tr key={s.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
-                      <td className="px-3 py-1.5 text-zinc-400">{s.snapshot_date.slice(0, 7)}</td>
-                      <td className="px-3 py-1.5 text-right text-amber-400">{fmtShort(Number(s.liquid_crc))}</td>
-                      <td className="px-3 py-1.5 text-right text-[#a3e635]">{fmtShort(Number(s.invested_crc))}</td>
-                      <td className="px-3 py-1.5 text-right text-blue-400">{fmtShort(Number(s.iliquid_crc))}</td>
-                      <td className="px-3 py-1.5 text-right text-rose-400">{fmtShort(Number(s.liabilities_crc))}</td>
-                      <td className="px-3 py-1.5 text-right font-bold text-white">
-                        {fmtShort(Number(s.net_worth_crc))}
-                        {delta !== null && (
-                          <span className={`ml-1.5 text-[9px] ${delta >= 0 ? 'text-[#a3e635]/70' : 'text-rose-400/70'}`}>
-                            {delta >= 0 ? '▲' : '▼'}{fmtShort(Math.abs(delta))}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-1 py-1.5">
-                        <button onClick={() => handleDeleteSnapshot(s.id)} disabled={isPending}
-                          className="p-1 rounded text-zinc-700 hover:text-rose-400 transition-colors">
-                          <Trash2 size={11} />
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
+                {(() => {
+                  const reversedSorted = sorted.slice().reverse()
+                  return reversedSorted.slice(0, 24).map((s, i) => {
+                    const prev = reversedSorted[i + 1]
+                    const curNW = Number(s.net_worth_crc)
+                    const prevNW = prev ? Number(prev.net_worth_crc) : null
+                    const delta = prevNW !== null ? curNW - prevNW : null
+                    const momPct = (prevNW !== null && prevNW !== 0) ? (curNW - prevNW) / Math.abs(prevNW) * 100 : null
+                    const yearAgoYM = `${Number(s.snapshot_date.slice(0, 4)) - 1}-${s.snapshot_date.slice(5, 7)}`
+                    const snapYearAgo = sorted.find(snap => snap.snapshot_date.slice(0, 7) === yearAgoYM)
+                    const yrAgoNW = snapYearAgo ? Number(snapYearAgo.net_worth_crc) : null
+                    const vsYearAgoPct = (yrAgoNW !== null && yrAgoNW !== 0) ? (curNW - yrAgoNW) / Math.abs(yrAgoNW) * 100 : null
+                    return (
+                      <tr key={s.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                        <td className="px-3 py-1.5 text-zinc-400">{s.snapshot_date.slice(0, 7)}</td>
+                        <td className="px-3 py-1.5 text-right text-amber-400">{fmtShort(Number(s.liquid_crc))}</td>
+                        <td className="px-3 py-1.5 text-right text-[#a3e635]">{fmtShort(Number(s.invested_crc))}</td>
+                        <td className="px-3 py-1.5 text-right text-blue-400">{fmtShort(Number(s.iliquid_crc))}</td>
+                        <td className="px-3 py-1.5 text-right text-rose-400">{fmtShort(Number(s.liabilities_crc))}</td>
+                        <td className="px-3 py-1.5 text-right font-bold text-white">
+                          {fmtShort(curNW)}
+                          {delta !== null && (
+                            <span className={`ml-1.5 text-[9px] ${delta >= 0 ? 'text-[#a3e635]/70' : 'text-rose-400/70'}`}>
+                              {delta >= 0 ? '▲' : '▼'}{fmtShort(Math.abs(delta))}
+                            </span>
+                          )}
+                        </td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${momPct === null ? 'text-zinc-700' : momPct >= 0 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                          {momPct !== null ? `${momPct >= 0 ? '+' : ''}${momPct.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${vsYearAgoPct === null ? 'text-zinc-700' : vsYearAgoPct >= 0 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                          {vsYearAgoPct !== null ? `${vsYearAgoPct >= 0 ? '+' : ''}${vsYearAgoPct.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className="px-1 py-1.5">
+                          <button onClick={() => handleDeleteSnapshot(s.id)} disabled={isPending}
+                            className="p-1 rounded text-zinc-700 hover:text-rose-400 transition-colors">
+                            <Trash2 size={11} />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })
+                })()}
               </tbody>
             </table>
           </div>
