@@ -134,3 +134,38 @@ export function simulateLumpSum(
     newMonthlyTotal: (sim.rows[0]?.totalPayment) ?? 0,
   }
 }
+
+// Lump sum but maintain the same monthly payment → shorter term instead of lower payment
+export function simulateLumpSumKeepPayment(
+  balance: number,
+  annualRate: number,
+  remainingMonths: number,
+  monthlyInsurance: number,
+  lumpSum: number,
+  startYearMonth: string,
+): SimResult {
+  const base = computeSchedule(balance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+  const newBalance = Math.max(0, balance - lumpSum)
+  if (newBalance <= 0) {
+    return {
+      monthsSaved: base.monthsRemaining,
+      yearsSaved: base.monthsRemaining / 12,
+      interestSaved: base.totalInterest,
+      newPayoffYearMonth: startYearMonth,
+      newMonthlyTotal: monthlyInsurance,
+    }
+  }
+  // New base payment for reduced balance over same period (would be lower)
+  const newBase = computeSchedule(newBalance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+  // Apply the difference as extra to preserve original payment level
+  const extra = Math.max(0, base.baseMonthlyPayment - newBase.baseMonthlyPayment)
+  const sim = computeSchedule(newBalance, annualRate, remainingMonths, monthlyInsurance, extra, startYearMonth)
+  const monthsSaved = base.monthsRemaining - sim.monthsRemaining
+  return {
+    monthsSaved,
+    yearsSaved: monthsSaved / 12,
+    interestSaved: base.totalInterest - sim.totalInterest,
+    newPayoffYearMonth: sim.payoffYearMonth,
+    newMonthlyTotal: (sim.rows[0]?.totalPayment) ?? 0,
+  }
+}

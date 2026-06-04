@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import { ChevronUp, ChevronDown, Plus, X, Loader2 } from 'lucide-react'
-import { computeSchedule, simulateExtra, simulateLumpSum, type AmortizationResult, type ScheduleRow } from './amortization'
+import {
+  computeSchedule,
+  simulateExtra,
+  simulateLumpSum,
+  simulateLumpSumKeepPayment,
+  type AmortizationResult,
+  type ScheduleRow,
+} from './amortization'
 import { createLoan, updateLoanSortOrder } from '@/app/actions/loans'
 
 type Payment = {
@@ -87,18 +94,20 @@ const PAYMENT_COLOR: Record<string, string> = {
 // ── Root component ──────────────────────────────────────────────────────────
 
 export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
-  const [loans, setLoans] = useState<LoanData[]>(initialLoans)
-  const [showForm, setShowForm] = useState(false)
-  const [, startTransition] = useTransition()
+  const [loans, setLoans]           = useState<LoanData[]>(initialLoans)
+  const [showForm, setShowForm]     = useState(false)
+  const [selectedId, setSelectedId] = useState<string>(initialLoans[0]?.id ?? '')
+  const [, startTransition]         = useTransition()
+
+  const selectedLoan = loans.find(l => l.id === selectedId) ?? loans[0] ?? null
 
   function moveUp(index: number) {
     if (index === 0) return
-    const next = [...loans]
-    const above = next[index - 1]
+    const next    = [...loans]
+    const above   = next[index - 1]
     const current = next[index]
-    // Swap sort_order values
-    const tmp = above.sortOrder
-    next[index - 1] = { ...above, sortOrder: current.sortOrder }
+    const tmp     = above.sortOrder
+    next[index - 1] = { ...above,   sortOrder: current.sortOrder }
     next[index]     = { ...current, sortOrder: tmp }
     setLoans(next)
     startTransition(async () => {
@@ -116,6 +125,7 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
 
   function onCreated(loan: LoanData) {
     setLoans([loan, ...loans])
+    setSelectedId(loan.id)
     setShowForm(false)
   }
 
@@ -135,10 +145,7 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
 
       {/* Create form */}
       {showForm && (
-        <CreateLoanForm
-          onCreated={onCreated}
-          onCancel={() => setShowForm(false)}
-        />
+        <CreateLoanForm onCreated={onCreated} onCancel={() => setShowForm(false)} />
       )}
 
       {loans.length === 0 && !showForm && (
@@ -148,32 +155,68 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
         </div>
       )}
 
-      {loans.map((loan, i) => (
-        <div key={loan.id} className="space-y-1">
-          {/* Reorder controls */}
-          {loans.length > 1 && (
-            <div className="flex items-center gap-1 justify-end pr-1">
-              <button
-                onClick={() => moveUp(i)}
-                disabled={i === 0}
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
-                title="Mover arriba"
-              >
-                <ChevronUp size={14} />
-              </button>
-              <button
-                onClick={() => moveDown(i)}
-                disabled={i === loans.length - 1}
-                className="p-1 rounded text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
-                title="Mover abajo"
-              >
-                <ChevronDown size={14} />
-              </button>
-            </div>
-          )}
-          <LoanCard loan={loan} />
+      {/* ── Loan selector strip ── */}
+      {loans.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {loans.map((loan, i) => {
+            const isSelected = loan.id === selectedId
+            const isUSD      = loan.currencyCode === 'USD'
+            const balFmt     = isUSD ? fmtUSD(loan.currentBalance) : fmtCRC(loan.currentBalance, true)
+            const paidPct    = Math.min(100,
+              ((loan.originalAmount - loan.currentBalance) / loan.originalAmount) * 100
+            )
+            return (
+              <div key={loan.id} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => setSelectedId(loan.id)}
+                  className={`text-left rounded-2xl border px-4 py-3 transition-all min-w-[160px] ${
+                    isSelected
+                      ? 'bg-[#a3e635]/[0.08] border-[#a3e635]/30'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:border-white/[0.12]'
+                  }`}
+                >
+                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">{loan.lender}</p>
+                  <p className={`text-sm font-black mt-0.5 leading-tight ${isSelected ? 'text-white' : 'text-zinc-300'}`}>
+                    {loan.name}
+                  </p>
+                  <p className={`text-xs font-black mt-1 ${isSelected ? 'text-[#a3e635]' : 'text-zinc-500'}`}>
+                    {balFmt}
+                  </p>
+                  {/* Mini progress */}
+                  <div className="mt-2 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${isSelected ? 'bg-[#a3e635]' : 'bg-zinc-600'}`}
+                      style={{ width: `${paidPct.toFixed(1)}%` }}
+                    />
+                  </div>
+                </button>
+                {/* Reorder arrows */}
+                {loans.length > 1 && (
+                  <div className="flex flex-col gap-0.5 ml-0.5">
+                    <button
+                      onClick={() => moveUp(i)}
+                      disabled={i === 0}
+                      className="p-1 rounded text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
+                    >
+                      <ChevronUp size={12} />
+                    </button>
+                    <button
+                      onClick={() => moveDown(i)}
+                      disabled={i === loans.length - 1}
+                      className="p-1 rounded text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
-      ))}
+      )}
+
+      {/* ── Selected loan detail ── */}
+      {selectedLoan && <LoanCard loan={selectedLoan} />}
     </div>
   )
 }
@@ -188,23 +231,23 @@ function CreateLoanForm({
   onCancel: () => void
 }) {
   const [isPending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]            = useState<string | null>(null)
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
-  const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+  const lbl      = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
 
-  const [name, setName]             = useState('')
-  const [lender, setLender]         = useState('')
-  const [loanType, setLoanType]     = useState('mortgage')
-  const [currency, setCurrency]     = useState('USD')
-  const [original, setOriginal]     = useState('')
-  const [balance, setBalance]       = useState('')
-  const [rate, setRate]             = useState('')
-  const [insurance, setInsurance]   = useState('0')
-  const [startDate, setStartDate]   = useState('')
-  const [endDate, setEndDate]       = useState('')
-  const [payDay, setPayDay]         = useState('5')
-  const [notes, setNotes]           = useState('')
+  const [name, setName]           = useState('')
+  const [lender, setLender]       = useState('')
+  const [loanType, setLoanType]   = useState('mortgage')
+  const [currency, setCurrency]   = useState('USD')
+  const [original, setOriginal]   = useState('')
+  const [balance, setBalance]     = useState('')
+  const [rate, setRate]           = useState('')
+  const [insurance, setInsurance] = useState('0')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate]     = useState('')
+  const [payDay, setPayDay]       = useState('5')
+  const [notes, setNotes]         = useState('')
 
   function currentYM() {
     const now = new Date()
@@ -214,7 +257,7 @@ function CreateLoanForm({
   function remainingMonths(ed: string) {
     const end = new Date(ed + 'T12:00:00')
     const now = new Date()
-    const m = (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth())
+    const m   = (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth())
     return Math.max(0, m)
   }
 
@@ -241,7 +284,6 @@ function CreateLoanForm({
       })
       if (res.error) { setError(res.error); return }
 
-      // Build a minimal LoanData object for optimistic UI update
       const newLoan: LoanData = {
         id: res.id!,
         name, lender, currencyCode: currency,
@@ -362,7 +404,7 @@ function CreateLoanForm({
 // ── Per-loan card ────────────────────────────────────────────────────────────
 
 function LoanCard({ loan }: { loan: LoanData }) {
-  const [tab, setTab] = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
+  const [tab, setTab]       = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
   const [showAll, setShowAll] = useState(false)
 
   const schedule = computeSchedule(
@@ -379,14 +421,14 @@ function LoanCard({ loan }: { loan: LoanData }) {
   )
 
   const isUSD = loan.currencyCode === 'USD'
-  const fmt = isUSD ? fmtUSD : (v: number) => fmtCRC(v, true)
+  const fmt   = isUSD ? fmtUSD : (v: number) => fmtCRC(v, true)
 
   const displayRows: ScheduleRow[] = showAll ? schedule.rows : schedule.rows.slice(0, 24)
 
   const TABS = [
-    { id: 'proyeccion' as const,  label: 'Proyección'  },
-    { id: 'historial'  as const,  label: 'Historial'   },
-    { id: 'simulador'  as const,  label: 'Simulador'   },
+    { id: 'proyeccion' as const, label: 'Proyección' },
+    { id: 'historial'  as const, label: 'Historial'  },
+    { id: 'simulador'  as const, label: 'Simulador'  },
   ]
 
   return (
@@ -422,10 +464,10 @@ function LoanCard({ loan }: { loan: LoanData }) {
 
         {/* Key metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Tile label="Tasa" value={`${loan.interestRate.toFixed(2)}%`} sub="anual" />
-          <Tile label="Cuota base" value={fmt(schedule.baseMonthlyPayment)} sub="capital + interés" />
-          <Tile label="Total mensual" value={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)} sub="incl. seguro" />
-          <Tile label="Cancelación" value={fmtYM(schedule.payoffYearMonth, true)} sub={`${schedule.monthsRemaining} meses`} />
+          <Tile label="Tasa"         value={`${loan.interestRate.toFixed(2)}%`}                                    sub="anual" />
+          <Tile label="Cuota base"   value={fmt(schedule.baseMonthlyPayment)}                                      sub="capital + interés" />
+          <Tile label="Total mensual" value={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)}             sub="incl. seguro" />
+          <Tile label="Cancelación"  value={fmtYM(schedule.payoffYearMonth, true)}                                sub={`${schedule.monthsRemaining} meses`} />
         </div>
 
         {/* Rate history */}
@@ -571,15 +613,20 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: string
 
 // ── Simulador ────────────────────────────────────────────────────────────────
 
-const MONTHLY_PRESETS = [100_000, 250_000, 500_000, 1_000_000]
-const LUMP_PRESETS    = [1_000_000, 2_500_000, 5_000_000, 10_000_000]
-
 function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: AmortizationResult }) {
-  const [mode, setMode]         = useState<'mensual' | 'unico'>('mensual')
-  const [amount, setAmount]     = useState(0)
-  const [inputVal, setInputVal] = useState('')
+  const [mode, setMode]               = useState<'mensual' | 'unico'>('mensual')
+  const [keepPayment, setKeepPayment] = useState(false)
+  const [amount, setAmount]           = useState(0)
+  const [inputVal, setInputVal]       = useState('')
+
+  const isUSD = loan.currencyCode === 'USD'
+
+  // Currency-aware presets
+  const MONTHLY_PRESETS = isUSD ? [100, 250, 500, 1_000]             : [100_000, 250_000, 500_000, 1_000_000]
+  const LUMP_PRESETS    = isUSD ? [1_000, 2_500, 5_000, 10_000]      : [1_000_000, 2_500_000, 5_000_000, 10_000_000]
 
   const presets = mode === 'mensual' ? MONTHLY_PRESETS : LUMP_PRESETS
+  const fmt     = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
 
   const sim = amount > 0
     ? mode === 'mensual'
@@ -587,19 +634,19 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
           loan.currentBalance, loan.interestRate, loan.remainingMonths,
           loan.monthlyInsurance, amount, loan.startYearMonth,
         )
-      : simulateLumpSum(
-          loan.currentBalance, loan.interestRate, loan.remainingMonths,
-          loan.monthlyInsurance, amount, loan.startYearMonth,
-        )
+      : keepPayment
+        ? simulateLumpSumKeepPayment(
+            loan.currentBalance, loan.interestRate, loan.remainingMonths,
+            loan.monthlyInsurance, amount, loan.startYearMonth,
+          )
+        : simulateLumpSum(
+            loan.currentBalance, loan.interestRate, loan.remainingMonths,
+            loan.monthlyInsurance, amount, loan.startYearMonth,
+          )
     : null
-
-  const isUSD = loan.currencyCode === 'USD'
-  const fmt = isUSD ? fmtUSD : (v: number) => fmtCRC(v, true)
 
   function pick(p: number) { setAmount(p); setInputVal(String(p)) }
   function clear()          { setAmount(0); setInputVal('') }
-
-  const modeLabel = mode === 'mensual' ? 'abono extra mensual' : 'abono único'
 
   return (
     <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-5 space-y-5">
@@ -608,7 +655,7 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
         <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
           {([{ id: 'mensual', label: 'Mensual' }, { id: 'unico', label: 'Único' }] as const).map(m => (
             <button key={m.id}
-              onClick={() => { setMode(m.id); clear() }}
+              onClick={() => { setMode(m.id); clear(); setKeepPayment(false) }}
               className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
                 mode === m.id ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
               }`}>
@@ -616,16 +663,39 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
             </button>
           ))}
         </div>
+
+        {/* Keep-payment toggle — only for lump sum */}
+        {mode === 'unico' && (
+          <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+            {([
+              { val: false, label: 'Reducir cuota' },
+              { val: true,  label: 'Mantener cuota' },
+            ] as const).map(opt => (
+              <button key={String(opt.val)}
+                onClick={() => setKeepPayment(opt.val)}
+                className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
+                  keepPayment === opt.val ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <p className="text-[9px] text-zinc-600">
           {mode === 'mensual'
             ? 'Extra por mes, todos los meses, hasta cancelar'
-            : 'Un abono único hoy que reduce el saldo de inmediato'}
+            : keepPayment
+              ? 'Abono único + seguís pagando la misma cuota → menor plazo'
+              : 'Abono único que reduce saldo → menor cuota, mismo plazo'}
         </p>
       </div>
 
       {/* Amount picker */}
       <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-3">Monto de {modeLabel}</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-3">
+          Monto de {mode === 'mensual' ? 'abono extra mensual' : 'abono único'}
+        </p>
         <div className="flex flex-wrap gap-2 items-center">
           {presets.map(p => (
             <button key={p}
@@ -657,10 +727,10 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
       {sim ? (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <SimTile label="Meses ahorrados"   value={String(sim.monthsSaved)}               highlight />
-            <SimTile label="Años ahorrados"    value={sim.yearsSaved.toFixed(1)}             />
-            <SimTile label="Interés ahorrado"  value={fmt(sim.interestSaved)}                />
-            <SimTile label="Nueva cancelación" value={fmtYM(sim.newPayoffYearMonth, true)}   />
+            <SimTile label="Meses ahorrados"   value={String(sim.monthsSaved)}             highlight />
+            <SimTile label="Años ahorrados"    value={sim.yearsSaved.toFixed(1)}           />
+            <SimTile label="Interés ahorrado"  value={fmt(sim.interestSaved)}              />
+            <SimTile label="Nueva cancelación" value={fmtYM(sim.newPayoffYearMonth, true)} />
           </div>
 
           <div className="p-4 rounded-xl bg-[#a3e635]/[0.04] border border-[#a3e635]/[0.12] space-y-3">
@@ -668,17 +738,21 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
             <div className="grid grid-cols-2 gap-4 text-[11px]">
               <div className="space-y-1.5">
                 <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Sin abono</p>
-                <Row k="Cancela en"      v={fmtYM(schedule.payoffYearMonth, true)}                     />
-                <Row k="Cuota mensual"   v={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)} />
-                <Row k="Total intereses" v={fmt(schedule.totalInterest)}                              />
+                <Row k="Cancela en"      v={fmtYM(schedule.payoffYearMonth, true)}                          />
+                <Row k="Cuota mensual"   v={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)}       />
+                <Row k="Total intereses" v={fmt(schedule.totalInterest)}                                    />
               </div>
               <div className="space-y-1.5">
                 <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-wider">
-                  {mode === 'mensual' ? `+${fmt(amount)}/mes` : `Único ${fmt(amount)}`}
+                  {mode === 'mensual'
+                    ? `+${fmt(amount)}/mes`
+                    : keepPayment
+                      ? `Único ${fmt(amount)} + misma cuota`
+                      : `Único ${fmt(amount)}`}
                 </p>
-                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)}                                    accent />
-                <Row k="Cuota mensual"   v={fmt(sim.newMonthlyTotal)}                                               accent />
-                <Row k="Total intereses" v={fmt(schedule.totalInterest - sim.interestSaved)}                        accent />
+                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)}                accent />
+                <Row k="Cuota mensual"   v={fmt(sim.newMonthlyTotal)}                           accent />
+                <Row k="Total intereses" v={fmt(schedule.totalInterest - sim.interestSaved)}    accent />
               </div>
             </div>
           </div>
