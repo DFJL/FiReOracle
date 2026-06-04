@@ -42,12 +42,14 @@ export function ComposicionDetallada({
   computedValues = {},
   liquidezBreakdown = [],
   inversionesBreakdown = [],
+  loansBreakdown = [],
 }: {
   items: NetWorthItem[]
   fmt: (v: number) => string
   computedValues?: Record<string, number>
   liquidezBreakdown?: Breakdown
   inversionesBreakdown?: Breakdown
+  loansBreakdown?: Breakdown
 }) {
   const [items, setItems]       = useState<NetWorthItem[]>(initialItems)
   const [editSheet, setEdit]    = useState<EditSheet>(null)
@@ -161,25 +163,25 @@ export function ComposicionDetallada({
   const activeSheet = editSheet !== null || addSheet !== null
 
   function renderCatCard(cat: Category) {
-    const catItems = [...items.filter(i => i.category === cat)]
-      .sort((a, b) => a.sort_order - b.sort_order)
+    const isPasivo = cat === 'pasivo'
+    const catItems = isPasivo ? [] : [...items.filter(i => i.category === cat)].sort((a, b) => a.sort_order - b.sort_order)
     const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : null
-    const total = (ck !== null && ck in computedValues)
-      ? computedValues[ck]
-      : catItems.reduce((s, i) => {
-          const k = i.item_name.toLowerCase()
-          return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
-        }, 0)
+    const total = isPasivo
+      ? loansBreakdown.reduce((s, l) => s + l.balance, 0)
+      : (ck !== null && ck in computedValues)
+        ? computedValues[ck]
+        : catItems.reduce((s, i) => {
+            const k = i.item_name.toLowerCase()
+            return s + (k in computedValues ? computedValues[k] : Number(i.value_crc))
+          }, 0)
     const m = CAT_META[cat]
     const isOpen = expanded.has(cat)
-    // Live drilldown rows for auto-computed categories
     const drillRows: Breakdown =
       cat === 'liquido'     ? liquidezBreakdown :
       cat === 'inversiones' ? inversionesBreakdown : []
 
     return (
       <div key={cat} className={`rounded-xl border ${m.border} overflow-hidden`}>
-        {/* Header — click to collapse/expand */}
         <button
           onClick={() => toggleExpand(cat)}
           className={`w-full px-3 py-2 flex items-center justify-between ${m.head} ${isOpen ? 'border-b border-white/[0.05]' : ''}`}
@@ -188,6 +190,9 @@ export function ComposicionDetallada({
             <p className="text-[9px] font-black uppercase tracking-[0.12em]" style={{ color: m.color }}>
               {m.label}
             </p>
+            {isPasivo && (
+              <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide">sync /prestamos</span>
+            )}
             <svg
               className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}
               style={{ color: m.color, opacity: 0.5 }}
@@ -201,68 +206,87 @@ export function ComposicionDetallada({
 
         {isOpen && (
           <>
-            {/* Manual net_worth_items */}
-            {catItems.map(item => {
-              const computedKey  = item.item_name.toLowerCase()
-              const isComputed   = computedKey in computedValues
-              const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => !isComputed && openEdit(item)}
-                  className={`flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 group ${
-                    isComputed ? 'bg-white/[0.01]' : 'cursor-pointer active:bg-white/[0.03] hover:bg-white/[0.02]'
-                  }`}
-                >
+            {/* Pasivo: loans auto-synced — read-only */}
+            {isPasivo ? (
+              loansBreakdown.length > 0 ? loansBreakdown.map((loan, i) => (
+                <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 bg-white/[0.01]">
                   <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
-                    <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
-                    {isComputed ? (
-                      <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
-                    ) : (
-                      <svg className="w-2.5 h-2.5 shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-                      </svg>
-                    )}
+                    <p className="text-xs text-zinc-300 truncate">{loan.name}</p>
+                    <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs font-bold tabular-nums" style={{ color: m.color }}>
-                      {fmt(displayValue)}
-                    </span>
-                    {!isComputed && (
-                      <button
-                        onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
-                        disabled={isPending}
-                        title="Eliminar"
-                        className="text-zinc-700 hover:text-rose-400 active:text-rose-400 transition-colors disabled:opacity-20 sm:opacity-0 sm:group-hover:opacity-100"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
+                  <span className="text-xs font-bold tabular-nums shrink-0" style={{ color: m.color }}>
+                    {fmt(loan.balance)}
+                  </span>
                 </div>
+              )) : (
+                <p className="px-3 py-3 text-[10px] text-zinc-600">Sin préstamos en /prestamos.</p>
               )
-            })}
+            ) : (
+              <>
+                {/* Manual net_worth_items */}
+                {catItems.map(item => {
+                  const computedKey  = item.item_name.toLowerCase()
+                  const isComputed   = computedKey in computedValues
+                  const displayValue = isComputed ? computedValues[computedKey] : Number(item.value_crc)
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => !isComputed && openEdit(item)}
+                      className={`flex items-center justify-between px-3 py-2 border-b border-white/[0.03] last:border-0 group ${
+                        isComputed ? 'bg-white/[0.01]' : 'cursor-pointer active:bg-white/[0.03] hover:bg-white/[0.02]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-2">
+                        <p className="text-xs text-zinc-300 truncate">{item.item_name}</p>
+                        {isComputed ? (
+                          <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
+                        ) : (
+                          <svg className="w-2.5 h-2.5 shrink-0 text-zinc-600 group-hover:text-zinc-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-bold tabular-nums" style={{ color: m.color }}>
+                          {fmt(displayValue)}
+                        </span>
+                        {!isComputed && (
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDelete(item.id) }}
+                            disabled={isPending}
+                            title="Eliminar"
+                            className="text-zinc-700 hover:text-rose-400 active:text-rose-400 transition-colors disabled:opacity-20 sm:opacity-0 sm:group-hover:opacity-100"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
 
-            {/* Live drilldown rows (read-only, from envelopes / buckets) */}
-            {drillRows.length > 0 && (
-              <div className="border-t border-white/[0.05] bg-black/20">
-                {drillRows.map((row, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.02] last:border-0">
-                    <p className="text-[11px] text-zinc-500 truncate pr-2">{row.name}</p>
-                    <p className="text-[11px] tabular-nums text-zinc-400 shrink-0">{fmt(row.balance)}</p>
+                {/* Live drilldown rows */}
+                {drillRows.length > 0 && (
+                  <div className="border-t border-white/[0.05] bg-black/20">
+                    {drillRows.map((row, i) => (
+                      <div key={i} className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.02] last:border-0">
+                        <p className="text-[11px] text-zinc-500 truncate pr-2">{row.name}</p>
+                        <p className="text-[11px] tabular-nums text-zinc-400 shrink-0">{fmt(row.balance)}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
 
-            <button
-              onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
-              className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
-            >
-              + agregar
-            </button>
+                <button
+                  onClick={() => setAdd({ cat, name: '', period: currentYYYYMM, value: '' })}
+                  className="w-full text-left px-3 py-2 text-[10px] text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.02] transition-colors border-t border-white/[0.03]"
+                >
+                  + agregar
+                </button>
+              </>
+            )}
           </>
         )}
       </div>

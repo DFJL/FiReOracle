@@ -829,6 +829,10 @@ export function PatrimonioView({
             computedValues={{ liquidez: liquidBalance, inversiones: totalInvested }}
             liquidezBreakdown={envelopeBreakdown}
             inversionesBreakdown={bucketBreakdown}
+            loansBreakdown={loans.map(l => ({
+              name: `${l.name} (${l.lender})`,
+              balance: l.currencyCode === 'USD' ? l.currentBalance * rate : l.currentBalance,
+            }))}
           />
         </div>
       )}
