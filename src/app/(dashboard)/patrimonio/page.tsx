@@ -27,6 +27,7 @@ export default async function PatrimonioPage() {
     { data: envelopes },
     { data: assetRows },
     { data: liabilityRows },
+    { data: loansRaw },
     { data: snapshotRows },
     { data: itemRows },
   ] = await Promise.all([
@@ -54,6 +55,11 @@ export default async function PatrimonioPage() {
       .select('id, name, liability_type, current_balance, original_balance, interest_rate, is_active, as_of_date')
       .eq('user_id', user.id)
       .eq('is_active', true),
+    admin.from('loans')
+      .select('id, name, lender, loan_type, currency_code, current_balance, interest_rate')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('sort_order'),
     admin.from('net_worth_snapshots')
       .select('id, snapshot_date, liquid_crc, invested_crc, iliquid_crc, liabilities_crc, net_worth_crc, notes, source')
       .eq('user_id', user.id)
@@ -123,13 +129,10 @@ export default async function PatrimonioPage() {
   }
 
   // Asset/liability aggregates
-  const activeAssets = assetRows ?? []
-  const activeLiabilities = liabilityRows ?? []
-  const iliquidTotal = activeAssets.reduce((s, a) => s + Number(a.value_crc), 0)
-  const iliquidInvestable = activeAssets.filter(a => a.is_investable).reduce((s, a) => s + Number(a.value_crc), 0)
-  const totalLiabilities = activeLiabilities.reduce((s, l) => s + Number(l.current_balance), 0)
-  const totalActivos = liquidBalance + totalInvested + iliquidTotal
-  const patrimonioNeto = totalActivos - totalLiabilities
+  const activeAssets       = assetRows ?? []
+  const activeLiabilities  = liabilityRows ?? []
+  const iliquidTotal       = activeAssets.reduce((s, a) => s + Number(a.value_crc), 0)
+  const iliquidInvestable  = activeAssets.filter(a => a.is_investable).reduce((s, a) => s + Number(a.value_crc), 0)
   const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
 
   // Per-envelope balance breakdown (for Liquidez drilldown)
@@ -245,6 +248,24 @@ export default async function PatrimonioPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
+  // Loans from prestamos table (auto-sync into pasivos)
+  const loansForPatrimonio = (loansRaw ?? []).map(l => ({
+    id:            l.id as string,
+    name:          l.name as string,
+    lender:        l.lender as string,
+    loanType:      (l.loan_type ?? 'other') as string,
+    currencyCode:  (l.currency_code ?? 'CRC') as string,
+    currentBalance: Number(l.current_balance),
+    interestRate:  Number(l.interest_rate),
+  }))
+
+  const loansCRCTotal     = loansForPatrimonio.reduce((s, l) =>
+    s + (l.currencyCode === 'USD' ? l.currentBalance * exchangeRate.sell : l.currentBalance), 0)
+  const manualLiabTotal   = activeLiabilities.reduce((s, l) => s + Number(l.current_balance), 0)
+  const totalLiabilities  = loansCRCTotal + manualLiabTotal
+  const totalActivos      = liquidBalance + totalInvested + iliquidTotal
+  const patrimonioNeto    = totalActivos - totalLiabilities
+
   // Deduplicate by item_name: take the most recent entry per item (rows are already DESC by date)
   const allItems = (itemRows ?? []) as NetWorthItem[]
   const seenItemNames = new Set<string>()
@@ -270,6 +291,7 @@ export default async function PatrimonioPage() {
         activosInvertibles={activosInvertibles}
         assets={activeAssets}
         liabilities={activeLiabilities}
+        loans={loansForPatrimonio}
         monthlyTrend={monthlyTrend}
         snapshots={(snapshotRows ?? []) as SnapshotRow[]}
         exchangeRate={exchangeRate}

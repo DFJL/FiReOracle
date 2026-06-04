@@ -32,6 +32,11 @@ type Liability = {
   interest_rate: number | null; as_of_date: string
 }
 
+type Loan = {
+  id: string; name: string; lender: string; loanType: string
+  currencyCode: string; currentBalance: number; interestRate: number
+}
+
 type TrendPoint = { month: string; total: number }
 
 type Props = {
@@ -45,6 +50,7 @@ type Props = {
   activosInvertibles: number
   assets: Asset[]
   liabilities: Liability[]
+  loans: Loan[]
   monthlyTrend: TrendPoint[]
   snapshots: SnapshotRow[]
   exchangeRate: ExchangeRate
@@ -115,13 +121,14 @@ const NW_RANGES = [
 // ─── Snapshot net worth chart (interactive, portfolio-style) ─────────────────
 
 function NetWorthChart({
-  snapshots, fallback, fmt, assets, liabilities,
+  snapshots, fallback, fmt, assets, liabilities, loans,
 }: {
   snapshots: SnapshotRow[]
   fallback: TrendPoint[]
   fmt: (v: number) => string
   assets: Asset[]
   liabilities: Liability[]
+  loans: Loan[]
 }) {
   const [rangeMonths, setRangeMonths] = useState(9999)
   const [visible, setVisible]         = useState<Set<string>>(new Set(['__neto__']))
@@ -339,7 +346,18 @@ function NetWorthChart({
                   <p className="text-[9px] font-black text-rose-400/70 uppercase tracking-[0.12em]">Pasivos</p>
                   <p className="text-xs font-bold text-rose-400">{fmt(last.balances['__pasivos__'] ?? 0)}</p>
                 </div>
-                {liabilities.length > 0 ? liabilities.map(l => (
+                {loans.map(l => (
+                  <div key={l.id} className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.03]">
+                    <div>
+                      <p className="text-xs text-zinc-300">{l.name}</p>
+                      <p className="text-[9px] text-zinc-600">{l.lender} · {l.interestRate.toFixed(2)}%</p>
+                    </div>
+                    <p className="text-xs font-bold text-rose-400">
+                      {l.currencyCode === 'USD' ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmt(l.currentBalance)}
+                    </p>
+                  </div>
+                ))}
+                {liabilities.map(l => (
                   <div key={l.id} className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.03] last:border-0">
                     <div>
                       <p className="text-xs text-zinc-300">{l.name}</p>
@@ -347,9 +365,10 @@ function NetWorthChart({
                     </div>
                     <p className="text-xs font-bold text-rose-400">{fmt(l.current_balance)}</p>
                   </div>
-                )) : (
+                ))}
+                {loans.length === 0 && liabilities.length === 0 && (
                   <p className="px-3 py-3 text-[10px] text-zinc-600">
-                    Total del snapshot importado. Usá <span className="text-zinc-400">"Agregar pasivo"</span> para desglosar por hipoteca, tarjeta, etc.
+                    Sin pasivos registrados. Los préstamos de <span className="text-zinc-400">/prestamos</span> aparecen aquí automáticamente.
                   </p>
                 )}
               </div>
@@ -548,7 +567,7 @@ function parsePastedSnapshots(raw: string): Array<{
 export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
-  assets, liabilities, monthlyTrend, snapshots, exchangeRate, netWorthItems,
+  assets, liabilities, loans, monthlyTrend, snapshots, exchangeRate, netWorthItems,
   envelopeBreakdown, bucketBreakdown,
 }: Props) {
   const [isPending, startTransition] = useTransition()
@@ -837,7 +856,7 @@ export function PatrimonioView({
             )}
           </div>
         </div>
-        <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} fmt={fmt} assets={assets} liabilities={liabilities} />
+        <NetWorthChart snapshots={snapshots} fallback={monthlyTrend} fmt={fmt} assets={assets} liabilities={liabilities} loans={loans} />
       </div>
 
       {/* ── Historial Mensual ── */}
@@ -1137,16 +1156,40 @@ export function PatrimonioView({
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Pasivos</p>
-            <p className="text-[10px] text-zinc-600 mt-0.5">Hipotecas, préstamos, tarjetas de crédito</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">Préstamos sync automático · Otros pasivos manuales</p>
           </div>
           <button
             onClick={() => setShowAddLiab(v => !v)}
             className="flex items-center gap-1.5 text-xs font-bold text-rose-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-rose-400/20 hover:bg-rose-400/10"
           >
             <Plus size={12} strokeWidth={3} />
-            Agregar pasivo
+            Otro pasivo
           </button>
         </div>
+
+        {/* Loans auto-synced from /prestamos */}
+        {loans.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em] flex items-center gap-1.5">
+              Préstamos
+              <span className="text-[8px] font-normal text-zinc-700 normal-case tracking-normal">sincronizado desde /prestamos</span>
+            </p>
+            {loans.map(l => {
+              const balFmt = l.currencyCode === 'USD'
+                ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : fmtShort(l.currentBalance)
+              return (
+                <div key={l.id} className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-white">{l.name}</p>
+                    <p className="text-[9px] text-zinc-600 mt-0.5">{l.lender} · {l.interestRate.toFixed(2)}% anual</p>
+                  </div>
+                  <p className="text-base font-black text-rose-400 shrink-0">{balFmt}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {showAddLiab && (
           <form onSubmit={handleAddLiab} className="bg-white/[0.03] rounded-xl border border-rose-400/20 p-4 space-y-3">
@@ -1192,7 +1235,11 @@ export function PatrimonioView({
           </form>
         )}
 
-        {liabilities.length === 0 && !showAddLiab ? (
+        {(liabilities.length > 0 || showAddLiab) && (
+          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em]">Otros pasivos</p>
+        )}
+
+        {liabilities.length === 0 && !showAddLiab && loans.length === 0 ? (
           <div className="text-center py-8 text-sm text-zinc-600 bg-white/[0.02] rounded-xl border border-white/[0.04]">
             Sin pasivos registrados.
           </div>
