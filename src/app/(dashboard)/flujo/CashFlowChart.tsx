@@ -139,11 +139,11 @@ export function MonthlyBarsChart({
   ]
 
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-5">
+    <div className="rounded-2xl bg-white/[0.03] border border-white/[0.06] p-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <p className="text-sm font-semibold text-zinc-200 tracking-tight">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
             Ingresos vs Egresos
           </p>
           {hp ? (
@@ -195,9 +195,9 @@ export function MonthlyBarsChart({
               <button
                 key={o.key}
                 onClick={() => setOverlay(o.key)}
-                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                className={`px-2 py-1 rounded-md text-xs font-bold transition-colors ${
                   overlay === o.key
-                    ? 'bg-white/[0.08] text-white'
+                    ? 'bg-[#a3e635] text-black'
                     : 'text-zinc-600 hover:text-zinc-300'
                 }`}
               >

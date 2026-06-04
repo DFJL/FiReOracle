@@ -1108,12 +1108,12 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       </div>
 
       {/* ── Trend chart ───────────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] mb-4 overflow-hidden">
+      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.06] mb-4 overflow-hidden">
         <button onClick={() => setShowTrend(v => !v)}
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
           <div>
-            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] text-left">Tendencia mensual</p>
-            {showTrend && <p className="text-xs text-zinc-500 mt-0.5 text-left">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>}
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Tendencia mensual</p>
+            {showTrend && <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Ingresos, gastos y balance por mes · {trendPoints.length} meses</p>}
           </div>
           <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showTrend ? 'rotate-180' : ''}`} />
         </button>
@@ -1133,10 +1133,10 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
           ? <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
           : (
             <button onClick={() => setShowSankey(true)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] hover:bg-white/[0.02] transition-colors">
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
               <div>
-                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] text-left">Flujo de ingresos</p>
-                <p className="text-xs text-zinc-500 mt-0.5 text-left">Cómo se distribuyen tus ingresos en el período</p>
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Flujo de ingresos</p>
+                <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Cómo se distribuyen tus ingresos en el período</p>
               </div>
               <ChevronDown size={14} className="text-zinc-600" />
             </button>

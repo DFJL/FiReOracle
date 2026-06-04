@@ -624,71 +624,116 @@ function WealthDeltaSection({
   currency: 'CRC' | 'USD'
   rate: number
 }) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+
   const sym = currency === 'CRC' ? '₡' : '$'
   const cvt = (v: number) => currency === 'CRC' ? v : v / rate
   const fmt = (v: number) => {
     const val = cvt(v)
     const abs = Math.abs(val)
-    const sign = val < 0 ? '-' : val > 0 ? '+' : ''
-    if (abs >= 1_000_000) return `${sign}${sym}${(Math.abs(val) / 1_000_000).toFixed(1)}M`
+    const sign = val < 0 ? '−' : val > 0 ? '+' : ''
+    if (abs >= 1_000_000) return `${sign}${sym}${(Math.abs(val) / 1_000_000).toFixed(2)}M`
     if (abs >= 1_000)     return `${sign}${sym}${(Math.abs(val) / 1_000).toFixed(0)}K`
     return `${sign}${sym}${Math.round(Math.abs(val)).toLocaleString('es-CR')}`
   }
 
-  const maxAbs = Math.max(...data.map(m => Math.abs(m.delta)), 1)
+  // Scale: max of positive contributions (right) and negative residual (left)
+  const maxRight = Math.max(...data.map(m =>
+    Math.max(m.savings, 0) + Math.max(m.returns, 0) + Math.max(m.residual, 0)
+  ), 1)
+  const maxLeft  = Math.max(...data.map(m => Math.max(-m.residual, 0)), 0)
+  const maxAbs   = Math.max(maxRight, maxLeft, 1)
 
   const total = data.reduce((acc, m) => ({
-    delta:    acc.delta    + m.delta,
-    savings:  acc.savings  + m.savings,
-    returns:  acc.returns  + m.returns,
-    residual: acc.residual + m.residual,
+    delta: acc.delta + m.delta, savings: acc.savings + m.savings,
+    returns: acc.returns + m.returns, residual: acc.residual + m.residual,
   }), { delta: 0, savings: 0, returns: 0, residual: 0 })
+
+  const hovM = hovIdx !== null ? data[hovIdx] : null
 
   return (
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
       <div>
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Atribución del crecimiento patrimonial</p>
-        <p className="text-[9px] text-zinc-600 mt-0.5">¿Qué impulsa el cambio en tu patrimonio?</p>
+        <p className="text-[9px] text-zinc-600 mt-0.5">¿Qué impulsa el cambio en tu patrimonio? — hover para detalle</p>
       </div>
 
-      <div className="flex flex-wrap gap-3 text-[9px] text-zinc-500">
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 text-[9px] text-zinc-500">
+        <span className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black text-rose-400/70">← Pérdida</span>
+        </span>
         {([
           { color: '#34d399', label: 'Ahorro activo' },
           { color: '#60a5fa', label: 'Rendimientos' },
           { color: '#fbbf24', label: 'FX / Revaluación' },
-          { color: '#f43f5e', label: 'Pérdida' },
         ] as const).map(({ color, label }) => (
           <span key={label} className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: color }} />
+            <span className="w-2 h-2 rounded-sm inline-block" style={{ backgroundColor: color }} />
             {label}
           </span>
         ))}
+        <span className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black text-emerald-400/70">Ganancia →</span>
+        </span>
       </div>
 
-      <div className="space-y-1.5">
-        {data.map(m => {
-          const barFrac = Math.abs(m.delta) / maxAbs
-          const isNeg   = m.delta < 0
-          const savFrac = m.delta > 0 ? Math.max(m.savings,   0) / Math.abs(m.delta) * barFrac : 0
-          const retFrac = m.delta > 0 ? Math.max(m.returns,   0) / Math.abs(m.delta) * barFrac : 0
-          const resPosF = m.delta > 0 ? Math.max(m.residual,  0) / Math.abs(m.delta) * barFrac : 0
-          const resNegF = m.delta > 0 ? Math.max(-m.residual, 0) / Math.abs(m.delta) * barFrac : 0
+      {/* Diverging bar chart */}
+      <div className="space-y-1">
+        {data.map((m, idx) => {
+          const posTotal = Math.max(m.savings, 0) + Math.max(m.returns, 0) + Math.max(m.residual, 0)
+          const negTotal = Math.max(-m.residual, 0)
+          // Each side spans 0→50% of the container from center
+          const rightPct = (posTotal / maxAbs) * 50   // % of full width
+          const leftPct  = (negTotal / maxAbs) * 50
+
+          // Proportional segments within the right bar
+          const savPct  = posTotal > 0 ? (Math.max(m.savings,   0) / posTotal) * 100 : 0
+          const retPct  = posTotal > 0 ? (Math.max(m.returns,   0) / posTotal) * 100 : 0
+          const resPct  = posTotal > 0 ? (Math.max(m.residual,  0) / posTotal) * 100 : 0
+
+          const isHov = hovIdx === idx
+
           return (
-            <div key={m.ym} className="flex items-center gap-2">
+            <div
+              key={m.ym}
+              className={`flex items-center gap-2 py-0.5 rounded-lg cursor-default transition-colors ${isHov ? 'bg-white/[0.03]' : ''}`}
+              onMouseEnter={() => setHovIdx(idx)}
+              onMouseLeave={() => setHovIdx(null)}
+            >
               <p className="text-[9px] text-zinc-500 w-10 shrink-0 text-right tabular-nums">{m.label}</p>
-              <div className="flex-1 h-3.5 bg-white/[0.03] rounded overflow-hidden flex">
-                {isNeg ? (
-                  <div className="h-full rounded bg-rose-500/50" style={{ width: `${barFrac * 100}%` }} />
-                ) : (
-                  <>
-                    <div className="h-full bg-emerald-400/60" style={{ width: `${savFrac * 100}%` }} />
-                    <div className="h-full bg-blue-400/60"    style={{ width: `${retFrac * 100}%` }} />
-                    <div className="h-full bg-amber-400/60"   style={{ width: `${resPosF * 100}%` }} />
-                    <div className="h-full bg-rose-400/50"    style={{ width: `${resNegF * 100}%` }} />
-                  </>
-                )}
+
+              {/* Chart: fixed-height, centered */}
+              <div className="flex-1 relative h-4 flex items-center">
+                {/* Left half (losses extend left from center) */}
+                <div className="w-1/2 h-full flex justify-end overflow-hidden pr-px">
+                  {negTotal > 0 && (
+                    <div
+                      className={`h-full rounded-l transition-opacity ${isHov ? 'opacity-90' : 'opacity-60'}`}
+                      style={{ width: `${leftPct * 2}%`, backgroundColor: '#f43f5e' }}
+                    />
+                  )}
+                </div>
+
+                {/* Center line */}
+                <div className="w-px h-full shrink-0 bg-zinc-600/60" />
+
+                {/* Right half (gains extend right from center) */}
+                <div className="w-1/2 h-full flex overflow-hidden pl-px">
+                  {posTotal > 0 && (
+                    <div
+                      className={`h-full flex rounded-r overflow-hidden transition-opacity ${isHov ? 'opacity-90' : 'opacity-65'}`}
+                      style={{ width: `${rightPct * 2}%` }}
+                    >
+                      <div className="h-full bg-emerald-400" style={{ width: `${savPct}%` }} />
+                      <div className="h-full bg-blue-400"    style={{ width: `${retPct}%` }} />
+                      <div className="h-full bg-amber-400"   style={{ width: `${resPct}%` }} />
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className={`text-[9px] font-black w-16 shrink-0 tabular-nums text-right ${m.delta >= 0 ? 'text-zinc-300' : 'text-rose-400'}`}>
+
+              <p className={`text-[9px] font-black w-14 shrink-0 tabular-nums text-right ${m.delta >= 0 ? 'text-zinc-300' : 'text-rose-400'}`}>
                 {fmt(m.delta)}
               </p>
             </div>
@@ -696,44 +741,47 @@ function WealthDeltaSection({
         })}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-[9px] border-collapse">
-          <thead>
-            <tr className="border-b border-white/[0.06] text-[8px] font-black uppercase tracking-wider">
-              <th className="text-left py-1.5 pr-2 text-zinc-500">Mes</th>
-              <th className="text-right py-1.5 px-1 text-emerald-400/80">Ahorro</th>
-              <th className="text-right py-1.5 px-1 text-blue-400/80">Rend.</th>
-              <th className="text-right py-1.5 px-1 text-amber-400/80">FX/Reval.</th>
-              <th className="text-right py-1.5 pl-1 text-zinc-300">Total ΔPN</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map(m => (
-              <tr key={m.ym} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
-                <td className="py-1 pr-2 text-zinc-500">{m.label}</td>
-                <td className="py-1 px-1 text-right text-emerald-400/80 tabular-nums">{fmt(m.savings)}</td>
-                <td className="py-1 px-1 text-right text-blue-400/80 tabular-nums">{fmt(m.returns)}</td>
-                <td className={`py-1 px-1 text-right tabular-nums ${m.residual >= 0 ? 'text-amber-400/80' : 'text-rose-400/80'}`}>
-                  {fmt(m.residual)}
-                </td>
-                <td className={`py-1 pl-1 text-right font-black tabular-nums ${m.delta >= 0 ? 'text-zinc-200' : 'text-rose-400'}`}>
-                  {fmt(m.delta)}
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t border-white/[0.1] font-black">
-              <td className="py-1.5 pr-2 text-zinc-400 text-[8px] uppercase tracking-wider">12m</td>
-              <td className="py-1.5 px-1 text-right text-emerald-400 tabular-nums">{fmt(total.savings)}</td>
-              <td className="py-1.5 px-1 text-right text-blue-400 tabular-nums">{fmt(total.returns)}</td>
-              <td className={`py-1.5 px-1 text-right tabular-nums ${total.residual >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
-                {fmt(total.residual)}
-              </td>
-              <td className={`py-1.5 pl-1 text-right tabular-nums ${total.delta >= 0 ? 'text-white' : 'text-rose-400'}`}>
-                {fmt(total.delta)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      {/* Interactive detail card */}
+      <div className={`rounded-xl border transition-all duration-150 overflow-hidden ${
+        hovM ? 'border-white/[0.08] bg-white/[0.02]' : 'border-transparent bg-transparent'
+      }`}>
+        {hovM ? (
+          <div className="p-3">
+            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.14em] mb-2.5">{hovM.label} — desglose</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {([
+                { label: 'Ahorro activo', value: hovM.savings,  color: 'text-emerald-400' },
+                { label: 'Rendimientos',  value: hovM.returns,  color: 'text-blue-400'    },
+                { label: 'FX / Reval.',   value: hovM.residual, color: hovM.residual >= 0 ? 'text-amber-400' : 'text-rose-400' },
+                { label: 'Total ΔPN',     value: hovM.delta,    color: hovM.delta >= 0 ? 'text-white font-black' : 'text-rose-400 font-black' },
+              ] as const).map(({ label, value, color }) => (
+                <div key={label}>
+                  <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-0.5">{label}</p>
+                  <p className={`text-sm tabular-nums ${color}`}>{fmt(value)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 h-[68px] flex items-center justify-center">
+            <p className="text-[9px] text-zinc-700">Hover sobre un mes para ver el desglose</p>
+          </div>
+        )}
+      </div>
+
+      {/* 12-month totals strip */}
+      <div className="grid grid-cols-4 gap-2 pt-1 border-t border-white/[0.04]">
+        {([
+          { label: 'Ahorro 12m',  value: total.savings,  color: 'text-emerald-400' },
+          { label: 'Rend. 12m',   value: total.returns,  color: 'text-blue-400'    },
+          { label: 'FX/Reval.',   value: total.residual, color: total.residual >= 0 ? 'text-amber-400' : 'text-rose-400' },
+          { label: 'ΔPN 12m',     value: total.delta,    color: total.delta >= 0 ? 'text-white' : 'text-rose-400' },
+        ] as const).map(({ label, value, color }) => (
+          <div key={label} className="text-center">
+            <p className={`text-xs font-black tabular-nums ${color}`}>{fmt(value)}</p>
+            <p className="text-[8px] text-zinc-600 mt-0.5 uppercase tracking-wider">{label}</p>
+          </div>
+        ))}
       </div>
     </div>
   )
