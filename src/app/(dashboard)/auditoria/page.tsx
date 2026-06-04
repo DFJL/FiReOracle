@@ -74,16 +74,22 @@ export default async function AuditoriaPage() {
   const parentIds = new Set(
     (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
   )
+  // rootParentIds = root-level parents only (no parent themselves, but have children)
+  // These are container envelopes like "Transitorio" whose own movements shouldn't be counted
+  const rootParentIds = new Set(
+    (envelopes ?? []).filter(e => !e.parent_envelope_id && parentIds.has(e.id)).map(e => e.id)
+  )
+  const activeEnvelopeIds = new Set((envelopes ?? []).map(e => e.id))
 
-  // Build custodio info from leaf envelopes only
+  // Build custodio totals — skip only root-level parents; include intermediate parents (they hold real money)
   const custodioMap = new Map<string, CustodioInfo>()
   for (const e of envelopes ?? []) {
-    if (parentIds.has(e.id)) continue // skip parent envelopes
+    if (rootParentIds.has(e.id)) continue
     if (!custodioMap.has(e.custodio)) {
       custodioMap.set(e.custodio, { name: e.custodio, systemTotal: 0, leafEnvelopes: [] })
     }
     const info = custodioMap.get(e.custodio)!
-    info.systemTotal += (ownBalance[e.id] ?? 0) + (ownInterest[e.id] ?? 0)
+    info.systemTotal += (ownBalance[e.id] ?? 0)  // principal only, no interest
     info.leafEnvelopes.push({ id: e.id, name: e.name })
   }
   const custodios = [...custodioMap.values()]
@@ -98,9 +104,13 @@ export default async function AuditoriaPage() {
     else if (tx.movement_type === 'cash_withdrawal')             cashWithdrawals  += amt
   }
 
-  const activeLeafIds = new Set((envelopes ?? []).filter(e => !parentIds.has(e.id)).map(e => e.id))
+  // envelopeTotal: principal only, all active envelopes except root-level parents
   const envelopeTotal = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes' && activeLeafIds.has(m.envelope_id))
+    .filter(m =>
+      m.movement_type !== 'interes' &&
+      activeEnvelopeIds.has(m.envelope_id) &&
+      !rootParentIds.has(m.envelope_id)
+    )
     .reduce((s, m) => s + Number(m.amount), 0)
 
   const flowData: FlowData = {

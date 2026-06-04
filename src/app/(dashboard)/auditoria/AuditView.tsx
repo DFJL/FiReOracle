@@ -25,8 +25,6 @@ import type { AuditReport, AuditCheck, AuditIssue, AuditSeverity, DupeTxSnapshot
 import type { CustodioInfo, FlowData } from './page'
 
 function fmtCRC(n: number) {
-  const abs = Math.abs(n)
-  if (abs >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
