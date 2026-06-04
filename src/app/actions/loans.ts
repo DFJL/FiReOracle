@@ -50,6 +50,7 @@ export async function recordLoanPayment(
   if (updateErr) return { error: updateErr.message }
 
   revalidatePath('/prestamos')
+  revalidatePath('/patrimonio')
   return { error: null }
 }
 
@@ -69,6 +70,7 @@ export async function updateLoanBalance(
 
   if (error) return { error: error.message }
   revalidatePath('/prestamos')
+  revalidatePath('/patrimonio')
   return { error: null }
 }
 

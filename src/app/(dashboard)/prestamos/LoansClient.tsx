@@ -8,7 +8,7 @@ import {
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
-import { createLoan, updateLoanSortOrder } from '@/app/actions/loans'
+import { createLoan, updateLoanSortOrder, updateLoanBalance } from '@/app/actions/loans'
 
 type Payment = {
   id: string
@@ -402,8 +402,12 @@ function CreateLoanForm({
 // ── Per-loan card ────────────────────────────────────────────────────────────
 
 function LoanCard({ loan }: { loan: LoanData }) {
-  const [tab, setTab]       = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
-  const [showAll, setShowAll] = useState(false)
+  const [tab, setTab]           = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
+  const [showAll, setShowAll]   = useState(false)
+  const [editingBal, setEditingBal] = useState(false)
+  const [newBalStr, setNewBalStr]   = useState('')
+  const [balErr, setBalErr]         = useState<string | null>(null)
+  const [isPendingBal, startBal]    = useTransition()
 
   const schedule = computeSchedule(
     loan.currentBalance,
@@ -441,7 +445,15 @@ function LoanCard({ loan }: { loan: LoanData }) {
           </div>
           <div className="text-right">
             <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Saldo actual</p>
-            <p className="text-3xl font-black text-[#a3e635] leading-none mt-0.5">{fmt(loan.currentBalance)}</p>
+            <div className="flex items-baseline gap-2 justify-end mt-0.5">
+              <p className="text-3xl font-black text-[#a3e635] leading-none">{fmt(loan.currentBalance)}</p>
+              <button
+                onClick={() => { setEditingBal(v => !v); setNewBalStr(String(loan.currentBalance)); setBalErr(null) }}
+                className="text-[9px] text-zinc-600 hover:text-zinc-300 transition-colors font-black uppercase tracking-wider"
+              >
+                {editingBal ? 'Cancelar' : 'Editar'}
+              </button>
+            </div>
             <p className="text-[10px] text-zinc-600 mt-0.5">de {fmt(loan.originalAmount)} original</p>
           </div>
         </div>
@@ -459,6 +471,50 @@ function LoanCard({ loan }: { loan: LoanData }) {
             <span>{(100 - paidPct).toFixed(1)}% pendiente</span>
           </div>
         </div>
+
+        {/* Manual balance correction */}
+        {editingBal && (
+          <div className="pt-3 border-t border-white/[0.06] space-y-2">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
+              Corregir saldo real
+              <span className="text-zinc-700 normal-case tracking-normal font-normal ml-1">
+                — usá el saldo exacto del estado de cuenta del banco
+              </span>
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] rounded-lg overflow-hidden">
+                <span className="pl-3 text-zinc-500 text-sm">{isUSD ? '$' : '₡'}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newBalStr}
+                  onChange={e => setNewBalStr(e.target.value)}
+                  className="w-40 bg-transparent px-2 py-2 text-sm text-white focus:outline-none"
+                  autoFocus
+                />
+              </div>
+              <button
+                disabled={isPendingBal || !newBalStr}
+                onClick={() => {
+                  const val = parseFloat(newBalStr)
+                  if (isNaN(val) || val < 0) { setBalErr('Saldo inválido'); return }
+                  setBalErr(null)
+                  startBal(async () => {
+                    const res = await updateLoanBalance(loan.id, val)
+                    if (res.error) { setBalErr(res.error); return }
+                    setEditingBal(false)
+                    // optimistic: page will revalidate
+                  })
+                }}
+                className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors"
+              >
+                {isPendingBal ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+            {balErr && <p className="text-xs text-rose-400">{balErr}</p>}
+          </div>
+        )}
 
         {/* Key metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
