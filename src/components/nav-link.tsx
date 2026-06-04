@@ -8,9 +8,10 @@ interface NavLinkProps {
   label: string
   icon: React.ReactNode
   mobile?: boolean
+  badge?: number
 }
 
-export function NavLink({ href, label, icon, mobile }: NavLinkProps) {
+export function NavLink({ href, label, icon, mobile, badge }: NavLinkProps) {
   const pathname = usePathname()
   const active = pathname === href || (href !== '/resumen' && pathname.startsWith(href))
 
@@ -36,7 +37,12 @@ export function NavLink({ href, label, icon, mobile }: NavLinkProps) {
       }`}
     >
       <span className={active ? 'text-[#a3e635]' : ''}>{icon}</span>
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge != null && badge > 0 && (
+        <span className="ml-auto text-[9px] font-black bg-[#a3e635] text-black rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
+          {badge}
+        </span>
+      )}
     </Link>
   )
 }

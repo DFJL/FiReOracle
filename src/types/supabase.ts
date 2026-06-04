@@ -1749,6 +1749,42 @@ export type Database = {
           },
         ]
       }
+      transaction_inbox: {
+        Row: {
+          created_at: string
+          email_date: string | null
+          email_id: string
+          extracted: Json | null
+          id: string
+          raw_snippet: string | null
+          raw_subject: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email_date?: string | null
+          email_id: string
+          extracted?: Json | null
+          id?: string
+          raw_snippet?: string | null
+          raw_subject?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email_date?: string | null
+          email_id?: string
+          extracted?: Json | null
+          id?: string
+          raw_snippet?: string | null
+          raw_subject?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       transactions: {
         Row: {
           account_id: string | null
@@ -1903,6 +1939,9 @@ export type Database = {
           fire_inflation_rate: number
           fire_target_monthly_exp: number | null
           fire_withdrawal_rate: number
+          gmail_connected_at: string | null
+          gmail_email: string | null
+          gmail_refresh_token: string | null
           goal_funding_alert_ratio: number
           preferred_currency: string | null
           runway_green_months: number
@@ -1921,6 +1960,9 @@ export type Database = {
           fire_inflation_rate?: number
           fire_target_monthly_exp?: number | null
           fire_withdrawal_rate?: number
+          gmail_connected_at?: string | null
+          gmail_email?: string | null
+          gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
           preferred_currency?: string | null
           runway_green_months?: number
@@ -1939,6 +1981,9 @@ export type Database = {
           fire_inflation_rate?: number
           fire_target_monthly_exp?: number | null
           fire_withdrawal_rate?: number
+          gmail_connected_at?: string | null
+          gmail_email?: string | null
+          gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
           preferred_currency?: string | null
           runway_green_months?: number

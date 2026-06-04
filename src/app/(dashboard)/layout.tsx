@@ -16,45 +16,48 @@ import {
   Wallet,
   Target,
   ShieldCheck,
+  Inbox,
 } from 'lucide-react'
+import { getPendingCount } from '@/app/actions/inbox'
 
-type NavGroup = {
-  label: string
-  items: { href: string; label: string; icon: React.ReactNode }[]
+type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: number }
+type NavGroup = { label: string; items: NavItem[] }
+
+function buildNavGroups(pendingCount: number): NavGroup[] {
+  return [
+    {
+      label: 'Flujos',
+      items: [
+        { href: '/resumen',     label: 'Resumen',       icon: <LayoutDashboard size={16} /> },
+        { href: '/flujo',       label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
+        { href: '/presupuesto', label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
+        { href: '/movimientos', label: 'Bandeja',        icon: <Inbox size={16} />, badge: pendingCount },
+      ],
+    },
+    {
+      label: 'Patrimonio',
+      items: [
+        { href: '/inversiones', label: 'Portafolio',  icon: <TrendingUp size={16} /> },
+        { href: '/liquidez',    label: 'Liquidez',    icon: <Wallet size={16} /> },
+        { href: '/prestamos',   label: 'Préstamos',   icon: <Users size={16} /> },
+        { href: '/patrimonio',  label: 'Patrimonio',  icon: <Landmark size={16} /> },
+      ],
+    },
+    {
+      label: 'FIRE',
+      items: [
+        { href: '/progreso', label: 'Progreso',  icon: <Target size={16} /> },
+        { href: '/oracle',   label: 'Oracle',    icon: <Sparkles size={16} /> },
+      ],
+    },
+    {
+      label: 'Herramientas',
+      items: [
+        { href: '/auditoria', label: 'Auditoría', icon: <ShieldCheck size={16} /> },
+      ],
+    },
+  ]
 }
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: 'Flujos',
-    items: [
-      { href: '/resumen',     label: 'Resumen',       icon: <LayoutDashboard size={16} /> },
-      { href: '/flujo',       label: 'Flujo de Caja', icon: <BarChart2 size={16} /> },
-      { href: '/presupuesto', label: 'Presupuesto',   icon: <PiggyBank size={16} /> },
-    ],
-  },
-  {
-    label: 'Patrimonio',
-    items: [
-      { href: '/inversiones', label: 'Portafolio',  icon: <TrendingUp size={16} /> },
-      { href: '/liquidez',    label: 'Liquidez',    icon: <Wallet size={16} /> },
-      { href: '/prestamos',   label: 'Préstamos',   icon: <Users size={16} /> },
-      { href: '/patrimonio',  label: 'Patrimonio',  icon: <Landmark size={16} /> },
-    ],
-  },
-  {
-    label: 'FIRE',
-    items: [
-      { href: '/progreso', label: 'Progreso',  icon: <Target size={16} /> },
-      { href: '/oracle',   label: 'Oracle',    icon: <Sparkles size={16} /> },
-    ],
-  },
-  {
-    label: 'Herramientas',
-    items: [
-      { href: '/auditoria', label: 'Auditoría', icon: <ShieldCheck size={16} /> },
-    ],
-  },
-]
 
 // Subset shown in mobile bottom bar
 const BOTTOM_NAV = [
@@ -73,13 +76,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('onboarding_done')
-    .eq('user_id', user.id)
-    .maybeSingle()
+  const [{ data: profile }, pendingCount] = await Promise.all([
+    supabase
+      .from('user_profiles')
+      .select('onboarding_done')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    getPendingCount(),
+  ])
 
   const needsSetup = !profile?.onboarding_done
+  const NAV_GROUPS = buildNavGroups(pendingCount)
 
   return (
     <div className="min-h-screen bg-[#080c08] text-[#f0f4ee] flex">
