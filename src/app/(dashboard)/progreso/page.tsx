@@ -47,7 +47,7 @@ export default async function ProgresoPage() {
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin.from('envelope_movements')
-      .select('amount, movement_type, envelope_id')
+      .select('amount, movement_type, envelope_id, date')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
       .select('id, parent_envelope_id')
@@ -199,6 +199,63 @@ export default async function ProgresoPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
+  // Wealth Delta: monthly NW attribution for last 12 complete months
+  const MONTH_LABELS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+  // Group snapshots by year-month (first-of-month date = NW at start of that month)
+  const snapByYM: Record<string, number> = {}
+  for (const s of snapshotRows ?? []) {
+    const ym = (s.snapshot_date as string).slice(0, 7)
+    snapByYM[ym] = Number(s.net_worth_crc)
+  }
+
+  type WealthDeltaMonth = {
+    ym: string; label: string
+    delta: number; savings: number; returns: number; residual: number
+  }
+  const wealthDelta: WealthDeltaMonth[] = []
+
+  for (let i = 12; i >= 1; i--) {
+    const d     = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const nextD = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+    const ym     = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const ymNext = `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, '0')}`
+
+    const nwStart = snapByYM[ym]
+    const nwEnd   = snapByYM[ymNext]
+    if (nwStart == null || nwEnd == null) continue
+
+    const delta = nwEnd - nwStart
+
+    const savings = (txs ?? []).filter(tx =>
+      (tx.date as string | null)?.slice(0, 7) === ym &&
+      tx.expense_group === 'objetivos_financieros' &&
+      !tx.is_settlement &&
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
+    ).reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+    const passiveIncome = (txs ?? []).filter(tx =>
+      (tx.date as string | null)?.slice(0, 7) === ym &&
+      tx.is_passive_income &&
+      tx.movement_type === 'income' &&
+      !tx.is_settlement
+    ).reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+    const envelopeInterest = (movements ?? []).filter(m =>
+      m.movement_type === 'interes' &&
+      (m as { date?: string | null }).date?.slice(0, 7) === ym
+    ).reduce((s, m) => s + Number(m.amount ?? 0), 0)
+
+    const returns  = passiveIncome + envelopeInterest
+    const residual = delta - savings - returns
+
+    wealthDelta.push({
+      ym,
+      label: `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+      delta, savings, returns, residual,
+    })
+  }
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
       <ProgresoView
@@ -228,6 +285,7 @@ export default async function ProgresoPage() {
         }}
         runwayGreen={fireConfig?.runway_green_months  ?? 6}
         runwayYellow={fireConfig?.runway_yellow_months ?? 3}
+        wealthDelta={wealthDelta}
       />
     </div>
   )
