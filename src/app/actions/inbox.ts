@@ -121,6 +121,35 @@ export async function discardInboxItem(inboxId: string): Promise<{ error: string
   return { error: null }
 }
 
+export async function insertManualInboxItem(
+  subject: string,
+  snippet: string,
+  extracted: ExtractedFields | null,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const emailId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+
+  const { error } = await createAdminClient()
+    .from('transaction_inbox')
+    .insert({
+      user_id:     user.id,
+      email_id:    emailId,
+      email_date:  new Date().toISOString(),
+      raw_subject: subject || 'Correo manual',
+      raw_snippet: snippet.slice(0, 500),
+      extracted:   extracted as never,
+      status:      'pending',
+    })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/movimientos')
+  return { error: null }
+}
+
 export async function getPendingCount(): Promise<number> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { confirmInboxItem, discardInboxItem } from '@/app/actions/inbox'
+import { confirmInboxItem, discardInboxItem, insertManualInboxItem } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
-import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox } from 'lucide-react'
+import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox, ClipboardPaste, Loader2 } from 'lucide-react'
 
 type Category = {
   code: string
@@ -284,6 +284,101 @@ function ItemCard({
   )
 }
 
+function PastePanel() {
+  const [open, setOpen]         = useState(false)
+  const [text, setText]         = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [msg, setMsg]           = useState<{ ok: boolean; text: string } | null>(null)
+  const [, startTransition]     = useTransition()
+
+  async function handleSubmit() {
+    if (!text.trim()) return
+    setLoading(true)
+    setMsg(null)
+
+    try {
+      // Extract via Claude
+      const res = await fetch('/api/inbox/extract', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ subject: '', snippet: text, body: text }),
+      })
+      const data = await res.json() as { skip?: boolean; reason?: string } & Partial<ExtractedFields & { confidence: string }>
+
+      if (data.skip) {
+        setMsg({ ok: false, text: `No se reconoció como transacción: ${data.reason ?? ''}` })
+        setLoading(false)
+        return
+      }
+
+      const extracted: ExtractedFields = {
+        amount:       Number(data.amount ?? 0),
+        currency:     (data.currency ?? 'CRC') as 'CRC' | 'USD',
+        vendor:       String(data.vendor ?? ''),
+        concept:      String(data.concept ?? ''),
+        date:         String(data.date ?? new Date().toISOString().slice(0, 10)),
+        movement_type: (data.movement_type ?? 'expense') as ExtractedFields['movement_type'],
+        category_code: data.category_code,
+        confidence:   (data.confidence ?? 'medium') as ExtractedFields['confidence'],
+      }
+
+      startTransition(async () => {
+        const { error } = await insertManualInboxItem('Correo pegado', text.slice(0, 300), extracted)
+        if (error) {
+          setMsg({ ok: false, text: error })
+        } else {
+          setMsg({ ok: true, text: `Transacción extraída: ${extracted.vendor} · ${extracted.amount} ${extracted.currency}` })
+          setText('')
+          setOpen(false)
+        }
+        setLoading(false)
+      })
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) })
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06]">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors rounded-xl"
+      >
+        <ClipboardPaste size={14} className="text-zinc-500 shrink-0" />
+        <span className="text-xs font-semibold text-zinc-400">Pegar correo bancario</span>
+        <span className="ml-auto text-[9px] text-zinc-600">Yahoo · Gmail · cualquier banco</span>
+        {open ? <ChevronUp size={13} className="text-zinc-600 shrink-0" /> : <ChevronDown size={13} className="text-zinc-600 shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06] p-4 space-y-3">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Pegá el texto del correo de notificación bancaria aquí..."
+            rows={5}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40 resize-none font-mono"
+          />
+          {msg && (
+            <p className={`text-xs px-3 py-2 rounded-lg ${msg.ok ? 'text-[#a3e635] bg-[#a3e635]/10' : 'text-rose-400 bg-rose-500/10'}`}>
+              {msg.text}
+            </p>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !text.trim()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <ClipboardPaste size={13} />}
+            Extraer transacción
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function InboxClient({ items, categories }: Props) {
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
 
@@ -322,6 +417,9 @@ export function InboxClient({ items, categories }: Props) {
           </button>
         ))}
       </div>
+
+      {/* Paste panel — always visible */}
+      <PastePanel />
 
       {/* Empty state */}
       {shown.length === 0 && (
