@@ -4,9 +4,7 @@ import { useState, useTransition } from 'react'
 import { ChevronUp, ChevronDown, Plus, X, Loader2 } from 'lucide-react'
 import {
   computeSchedule,
-  simulateExtra,
-  simulateLumpSum,
-  simulateLumpSumKeepPayment,
+  simulateCombined,
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
@@ -613,66 +611,120 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: string
 
 // ── Simulador ────────────────────────────────────────────────────────────────
 
+function AmountPicker({
+  label, hint, presets, value, inputVal, fmt,
+  onPick, onInput, onClear,
+}: {
+  label: string
+  hint: string
+  presets: number[]
+  value: number
+  inputVal: string
+  fmt: (v: number) => string
+  onPick: (p: number) => void
+  onInput: (raw: string) => void
+  onClear: () => void
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <p className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">{label}</p>
+        <p className="text-[9px] text-zinc-600 mt-0.5">{hint}</p>
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        {presets.map(p => (
+          <button key={p} onClick={() => onPick(p)}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border ${
+              value === p
+                ? 'bg-[#a3e635]/20 text-[#a3e635] border-[#a3e635]/30'
+                : 'bg-white/[0.04] text-zinc-400 border-white/[0.06] hover:text-zinc-200'
+            }`}>
+            {fmt(p)}
+          </button>
+        ))}
+        <input
+          type="number"
+          value={inputVal}
+          onChange={e => onInput(e.target.value)}
+          placeholder="Otro"
+          className="w-28 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
+        />
+        {value > 0 && (
+          <button onClick={onClear} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            Limpiar
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: AmortizationResult }) {
-  const [mode, setMode]               = useState<'mensual' | 'unico'>('mensual')
+  const [lumpSum,    setLumpSum]    = useState(0)
+  const [lumpInput,  setLumpInput]  = useState('')
+  const [extra,      setExtra]      = useState(0)
+  const [extraInput, setExtraInput] = useState('')
   const [keepPayment, setKeepPayment] = useState(false)
-  const [amount, setAmount]           = useState(0)
-  const [inputVal, setInputVal]       = useState('')
 
   const isUSD = loan.currencyCode === 'USD'
+  const fmt   = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
 
-  // Currency-aware presets
-  const MONTHLY_PRESETS = isUSD ? [100, 250, 500, 1_000]             : [100_000, 250_000, 500_000, 1_000_000]
-  const LUMP_PRESETS    = isUSD ? [1_000, 2_500, 5_000, 10_000]      : [1_000_000, 2_500_000, 5_000_000, 10_000_000]
+  const MONTHLY_PRESETS = isUSD ? [100, 250, 500, 1_000]        : [100_000, 250_000, 500_000, 1_000_000]
+  const LUMP_PRESETS    = isUSD ? [1_000, 2_500, 5_000, 10_000] : [1_000_000, 2_500_000, 5_000_000, 10_000_000]
 
-  const presets = mode === 'mensual' ? MONTHLY_PRESETS : LUMP_PRESETS
-  const fmt     = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
+  const hasAny = lumpSum > 0 || extra > 0
 
-  const sim = amount > 0
-    ? mode === 'mensual'
-      ? simulateExtra(
-          loan.currentBalance, loan.interestRate, loan.remainingMonths,
-          loan.monthlyInsurance, amount, loan.startYearMonth,
-        )
-      : keepPayment
-        ? simulateLumpSumKeepPayment(
-            loan.currentBalance, loan.interestRate, loan.remainingMonths,
-            loan.monthlyInsurance, amount, loan.startYearMonth,
-          )
-        : simulateLumpSum(
-            loan.currentBalance, loan.interestRate, loan.remainingMonths,
-            loan.monthlyInsurance, amount, loan.startYearMonth,
-          )
+  const sim = hasAny
+    ? simulateCombined(
+        loan.currentBalance, loan.interestRate, loan.remainingMonths,
+        loan.monthlyInsurance, lumpSum, extra, keepPayment, loan.startYearMonth,
+      )
     : null
 
-  function pick(p: number) { setAmount(p); setInputVal(String(p)) }
-  function clear()          { setAmount(0); setInputVal('') }
+  // Build scenario label for comparativa
+  const scenarioLabel = [
+    lumpSum > 0 && `único ${fmt(lumpSum)}${keepPayment ? ' + misma cuota' : ''}`,
+    extra   > 0 && `+${fmt(extra)}/mes`,
+  ].filter(Boolean).join(' · ')
 
   return (
     <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] p-5 space-y-5">
-      {/* Mode toggle */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-          {([{ id: 'mensual', label: 'Mensual' }, { id: 'unico', label: 'Único' }] as const).map(m => (
-            <button key={m.id}
-              onClick={() => { setMode(m.id); clear(); setKeepPayment(false) }}
-              className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
-                mode === m.id ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-              }`}>
-              {m.label}
-            </button>
-          ))}
-        </div>
 
-        {/* Keep-payment toggle — only for lump sum */}
-        {mode === 'unico' && (
+      {/* Two pickers side by side on sm+ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+        <AmountPicker
+          label="Abono único hoy"
+          hint="Se aplica al saldo de inmediato"
+          presets={LUMP_PRESETS}
+          value={lumpSum}
+          inputVal={lumpInput}
+          fmt={fmt}
+          onPick={p  => { setLumpSum(p);  setLumpInput(String(p)) }}
+          onInput={s => { setLumpInput(s); setLumpSum(Number(s) || 0) }}
+          onClear={() => { setLumpSum(0);  setLumpInput('') }}
+        />
+        <AmountPicker
+          label="Extra mensual"
+          hint="Se suma a la cuota todos los meses"
+          presets={MONTHLY_PRESETS}
+          value={extra}
+          inputVal={extraInput}
+          fmt={fmt}
+          onPick={p  => { setExtra(p);  setExtraInput(String(p)) }}
+          onInput={s => { setExtraInput(s); setExtra(Number(s) || 0) }}
+          onClear={() => { setExtra(0);  setExtraInput('') }}
+        />
+      </div>
+
+      {/* Keep-payment toggle — only meaningful when there's a lump sum */}
+      {lumpSum > 0 && (
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
             {([
               { val: false, label: 'Reducir cuota' },
               { val: true,  label: 'Mantener cuota' },
             ] as const).map(opt => (
-              <button key={String(opt.val)}
-                onClick={() => setKeepPayment(opt.val)}
+              <button key={String(opt.val)} onClick={() => setKeepPayment(opt.val)}
                 className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
                   keepPayment === opt.val ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
                 }`}>
@@ -680,49 +732,13 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
               </button>
             ))}
           </div>
-        )}
-
-        <p className="text-[9px] text-zinc-600">
-          {mode === 'mensual'
-            ? 'Extra por mes, todos los meses, hasta cancelar'
-            : keepPayment
-              ? 'Abono único + seguís pagando la misma cuota → menor plazo'
-              : 'Abono único que reduce saldo → menor cuota, mismo plazo'}
-        </p>
-      </div>
-
-      {/* Amount picker */}
-      <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-3">
-          Monto de {mode === 'mensual' ? 'abono extra mensual' : 'abono único'}
-        </p>
-        <div className="flex flex-wrap gap-2 items-center">
-          {presets.map(p => (
-            <button key={p}
-              onClick={() => pick(p)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border ${
-                amount === p
-                  ? 'bg-[#a3e635]/20 text-[#a3e635] border-[#a3e635]/30'
-                  : 'bg-white/[0.04] text-zinc-400 border-white/[0.06] hover:text-zinc-200'
-              }`}>
-              {fmt(p)}
-            </button>
-          ))}
-          <input
-            type="number"
-            value={inputVal}
-            onChange={e => { setInputVal(e.target.value); setAmount(Number(e.target.value) || 0) }}
-            placeholder="Otro monto"
-            className="w-36 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
-          />
-          {amount > 0 && (
-            <button onClick={clear}
-              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
-              Limpiar
-            </button>
-          )}
+          <p className="text-[9px] text-zinc-600">
+            {keepPayment
+              ? 'Después del abono único seguís pagando la misma cuota → menor plazo'
+              : 'El abono único reduce el saldo → cuota menor, plazo igual'}
+          </p>
         </div>
-      </div>
+      )}
 
       {sim ? (
         <>
@@ -738,28 +754,24 @@ function SimuladorTab({ loan, schedule }: { loan: LoanData; schedule: Amortizati
             <div className="grid grid-cols-2 gap-4 text-[11px]">
               <div className="space-y-1.5">
                 <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Sin abono</p>
-                <Row k="Cancela en"      v={fmtYM(schedule.payoffYearMonth, true)}                          />
-                <Row k="Cuota mensual"   v={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)}       />
-                <Row k="Total intereses" v={fmt(schedule.totalInterest)}                                    />
+                <Row k="Cancela en"      v={fmtYM(schedule.payoffYearMonth, true)}                    />
+                <Row k="Cuota mensual"   v={fmt(schedule.baseMonthlyPayment + loan.monthlyInsurance)} />
+                <Row k="Total intereses" v={fmt(schedule.totalInterest)}                              />
               </div>
               <div className="space-y-1.5">
-                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-wider">
-                  {mode === 'mensual'
-                    ? `+${fmt(amount)}/mes`
-                    : keepPayment
-                      ? `Único ${fmt(amount)} + misma cuota`
-                      : `Único ${fmt(amount)}`}
+                <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-wider truncate" title={scenarioLabel}>
+                  {scenarioLabel}
                 </p>
-                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)}                accent />
-                <Row k="Cuota mensual"   v={fmt(sim.newMonthlyTotal)}                           accent />
-                <Row k="Total intereses" v={fmt(schedule.totalInterest - sim.interestSaved)}    accent />
+                <Row k="Cancela en"      v={fmtYM(sim.newPayoffYearMonth, true)}             accent />
+                <Row k="Cuota mensual"   v={fmt(sim.newMonthlyTotal)}                        accent />
+                <Row k="Total intereses" v={fmt(schedule.totalInterest - sim.interestSaved)} accent />
               </div>
             </div>
           </div>
         </>
       ) : (
         <p className="text-xs text-zinc-600 text-center py-6">
-          Seleccioná o ingresá un monto para ver la proyección.
+          Ingresá un abono único, un extra mensual, o ambos para ver la proyección.
         </p>
       )}
     </div>

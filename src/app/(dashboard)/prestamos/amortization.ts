@@ -135,6 +135,38 @@ export function simulateLumpSum(
   }
 }
 
+// Combined: lump sum today + extra every month, with optional keep-payment mode
+export function simulateCombined(
+  balance: number,
+  annualRate: number,
+  remainingMonths: number,
+  monthlyInsurance: number,
+  lumpSum: number,
+  extraMonthly: number,
+  keepPayment: boolean,
+  startYearMonth: string,
+): SimResult {
+  const base       = computeSchedule(balance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+  const newBalance = Math.max(0, balance - lumpSum)
+
+  let extra = extraMonthly
+  if (keepPayment && lumpSum > 0 && newBalance > 0) {
+    const reducedBase = computeSchedule(newBalance, annualRate, remainingMonths, monthlyInsurance, 0, startYearMonth)
+    const keepExtra   = Math.max(0, base.baseMonthlyPayment - reducedBase.baseMonthlyPayment)
+    extra = extraMonthly + keepExtra
+  }
+
+  const sim         = computeSchedule(newBalance, annualRate, remainingMonths, monthlyInsurance, extra, startYearMonth)
+  const monthsSaved = base.monthsRemaining - sim.monthsRemaining
+  return {
+    monthsSaved,
+    yearsSaved: monthsSaved / 12,
+    interestSaved: base.totalInterest - sim.totalInterest,
+    newPayoffYearMonth: sim.payoffYearMonth,
+    newMonthlyTotal: (sim.rows[0]?.totalPayment) ?? 0,
+  }
+}
+
 // Lump sum but maintain the same monthly payment → shorter term instead of lower payment
 export function simulateLumpSumKeepPayment(
   balance: number,
