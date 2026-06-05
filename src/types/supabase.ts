@@ -2058,6 +2058,9 @@ export type Database = {
         Row: {
           created_at: string
           display_name: string | null
+          gmail_connected_at: string | null
+          gmail_email: string | null
+          gmail_refresh_token: string | null
           main_currency: string
           monthly_income: number | null
           onboarding_done: boolean
@@ -2068,6 +2071,9 @@ export type Database = {
         Insert: {
           created_at?: string
           display_name?: string | null
+          gmail_connected_at?: string | null
+          gmail_email?: string | null
+          gmail_refresh_token?: string | null
           main_currency?: string
           monthly_income?: number | null
           onboarding_done?: boolean
@@ -2078,6 +2084,9 @@ export type Database = {
         Update: {
           created_at?: string
           display_name?: string | null
+          gmail_connected_at?: string | null
+          gmail_email?: string | null
+          gmail_refresh_token?: string | null
           main_currency?: string
           monthly_income?: number | null
           onboarding_done?: boolean
@@ -2255,4 +2264,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

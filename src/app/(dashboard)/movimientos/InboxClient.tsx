@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { confirmInboxItem, discardInboxItem, insertManualInboxItem } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
-import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox, ClipboardPaste, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox, ClipboardPaste, Loader2, RefreshCw } from 'lucide-react'
 
 type Category = {
   code: string
@@ -16,6 +16,8 @@ type Category = {
 type Props = {
   items: InboxItem[]
   categories: Category[]
+  gmailEmail: string | null
+  gmailStatus: string | null
 }
 
 const MOVEMENT_LABELS: Record<string, string> = {
@@ -284,6 +286,79 @@ function ItemCard({
   )
 }
 
+function GmailPanel({ email }: { email: string | null }) {
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg]         = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function handleSync() {
+    setLoading(true)
+    setMsg(null)
+    try {
+      const res  = await fetch('/api/gmail/sync', { method: 'POST' })
+      const data = await res.json() as { found?: number; inserted?: number; error?: string }
+      if (!res.ok || data.error) {
+        setMsg({ ok: false, text: data.error ?? 'Error al sincronizar' })
+      } else {
+        const { found = 0, inserted = 0 } = data
+        setMsg({
+          ok:   true,
+          text: inserted > 0
+            ? `${inserted} correo${inserted !== 1 ? 's' : ''} nuevo${inserted !== 1 ? 's' : ''} de ${found} encontrado${found !== 1 ? 's' : ''}`
+            : `${found} correo${found !== 1 ? 's' : ''} encontrado${found !== 1 ? 's' : ''}, sin novedades`,
+        })
+        if (inserted > 0) {
+          // Reload to show new inbox items
+          window.location.reload()
+        }
+      }
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] px-4 py-3 flex items-center gap-3">
+      <Mail size={14} className="text-zinc-500 shrink-0" />
+      {email ? (
+        <>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-zinc-300 truncate">{email}</p>
+            <p className="text-[9px] text-zinc-600">Gmail conectado</p>
+          </div>
+          {msg && (
+            <p className={`text-[10px] px-2 py-1 rounded-lg ${msg.ok ? 'text-[#a3e635] bg-[#a3e635]/10' : 'text-rose-400 bg-rose-500/10'}`}>
+              {msg.text}
+            </p>
+          )}
+          <button
+            onClick={handleSync}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-xs font-bold hover:bg-white/[0.10] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            Sync correos
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-zinc-400">Conectar Gmail</p>
+            <p className="text-[9px] text-zinc-600">Importá correos bancarios automáticamente</p>
+          </div>
+          <a
+            href="/api/auth/gmail"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors shrink-0"
+          >
+            Conectar
+          </a>
+        </>
+      )}
+    </div>
+  )
+}
+
 function PastePanel() {
   const [open, setOpen]         = useState(false)
   const [text, setText]         = useState('')
@@ -379,7 +454,7 @@ function PastePanel() {
   )
 }
 
-export function InboxClient({ items, categories }: Props) {
+export function InboxClient({ items, categories, gmailEmail, gmailStatus }: Props) {
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
 
   const pending   = items.filter(i => i.status === 'pending')
@@ -394,6 +469,18 @@ export function InboxClient({ items, categories }: Props) {
         <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Correos bancarios</p>
         <h1 className="text-xl font-black text-white">Bandeja de Entrada</h1>
       </div>
+
+      {/* OAuth result banner */}
+      {gmailStatus === 'connected' && (
+        <p className="text-xs text-[#a3e635] bg-[#a3e635]/10 rounded-lg px-3 py-2">
+          Gmail conectado correctamente. Hacé clic en &ldquo;Sync correos&rdquo; para importar tus correos bancarios.
+        </p>
+      )}
+      {gmailStatus === 'error' && (
+        <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">
+          No se pudo conectar Gmail. Intentá de nuevo.
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-1 w-fit border border-white/[0.06]">
@@ -418,6 +505,9 @@ export function InboxClient({ items, categories }: Props) {
         ))}
       </div>
 
+      {/* Gmail connect / sync panel */}
+      <GmailPanel email={gmailEmail} />
+
       {/* Paste panel — always visible */}
       <PastePanel />
 
@@ -431,8 +521,7 @@ export function InboxClient({ items, categories }: Props) {
             <>
               <p className="text-sm font-semibold text-zinc-400">Sin correos pendientes</p>
               <p className="text-xs text-zinc-600 max-w-xs">
-                Pedile a Claude que sincronice tus correos bancarios:<br />
-                <span className="font-mono text-zinc-500 mt-1 block">&ldquo;sincronizá mis correos bancarios&rdquo;</span>
+                Conectá Gmail arriba y hacé clic en &ldquo;Sync correos&rdquo;, o pegá el texto de un correo bancario.
               </p>
             </>
           ) : (
