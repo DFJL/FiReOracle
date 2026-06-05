@@ -49,6 +49,7 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   const monthlyTotals: Record<string, number> = {}
   for (const tx of prevTx ?? []) {
+    if (!tx.date) continue
     const ym = tx.date.slice(0, 7)
     monthlyTotals[ym] = (monthlyTotals[ym] ?? 0) + Number(tx.amount)
   }

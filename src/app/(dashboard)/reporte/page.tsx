@@ -51,7 +51,6 @@ export default async function ReportePage({
     { data: yearAgoTx },
     { data: snapshots },
     { data: categories },
-    { data: allTx },
   ] = await Promise.all([
     admin
       .from('transactions')
@@ -82,12 +81,6 @@ export default async function ReportePage({
     admin
       .from('transaction_categories')
       .select('code, name, group_gasto'),
-    // Fetch distinct months
-    admin
-      .from('transactions')
-      .select('date')
-      .eq('user_id', user.id)
-      .not('date', 'is', null),
   ])
 
   // 5. Compute aggregations
@@ -155,13 +148,6 @@ export default async function ReportePage({
       ? (nwDelta / Math.abs(nwStart)) * 100
       : null
 
-  // Available months
-  const monthSet = new Set<string>()
-  for (const tx of allTx ?? []) {
-    if (tx.date) monthSet.add(tx.date.slice(0, 7))
-  }
-  const availableMonths = [...monthSet].sort((a, b) => b.localeCompare(a))
-
   return (
     <ReporteView
       month={month}
@@ -174,7 +160,6 @@ export default async function ReportePage({
       nwEnd={nwEnd}
       nwDelta={nwDelta}
       nwDeltaPct={nwDeltaPct}
-      availableMonths={availableMonths}
     />
   )
 }

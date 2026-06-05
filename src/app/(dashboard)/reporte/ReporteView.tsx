@@ -30,7 +30,6 @@ type Props = {
   nwEnd: number | null
   nwDelta: number | null
   nwDeltaPct: number | null
-  availableMonths: string[]
 }
 
 function monthLabel(month: string): string {
@@ -76,7 +75,6 @@ export function ReporteView({
   nwEnd,
   nwDelta,
   nwDeltaPct,
-  availableMonths,
 }: Props) {
   const router = useRouter()
   const curYM = currentYearMonth()
@@ -114,8 +112,6 @@ export function ReporteView({
     yearAgo.income > 0 ? ((cur.income - yearAgo.income) / yearAgo.income) * 100 : null
   const yoyExpensesPct =
     yearAgo.expenses > 0 ? ((cur.expenses - yearAgo.expenses) / yearAgo.expenses) * 100 : null
-
-  const _ = availableMonths // referenced to avoid lint warning if unused
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-4">
