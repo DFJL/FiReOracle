@@ -14,9 +14,9 @@ const CAT_META = {
 
 type Category = keyof typeof CAT_META
 
-// First 3 are grouped under "Portafolio", last 2 are standalone
+// First 3 are grouped under "Portafolio" — iliquido/pasivo have dedicated sections below
 const PORTFOLIO_CATS: Category[] = ['liquido', 'inversiones', 'invertido']
-const STANDALONE_CATS: Category[] = ['iliquido', 'pasivo']
+const STANDALONE_CATS: Category[] = []
 
 function fmtPreview(raw: string): string {
   const n = parseFloat(raw.replace(/,/g, ''))
@@ -55,7 +55,7 @@ export function ComposicionDetallada({
   const [editSheet, setEdit]    = useState<EditSheet>(null)
   const [addSheet, setAdd]      = useState<AddSheet>(null)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Set<Category>>(new Set(['liquido', 'inversiones', 'invertido', 'iliquido', 'pasivo']))
+  const [expanded, setExpanded] = useState<Set<Category>>(new Set(['liquido', 'inversiones', 'invertido']))
   const [isPending, startTransition] = useTransition()
 
   function toggleExpand(cat: Category) {
