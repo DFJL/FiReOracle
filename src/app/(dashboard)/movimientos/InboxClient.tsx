@@ -293,34 +293,47 @@ function ItemCard({
   )
 }
 
-function GmailPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[] }) {
-  const [accounts, setAccounts] = useState<ConnectedAccount[]>(initialAccounts)
-  const [syncing,  setSyncing]  = useState(false)
-  const [removing, setRemoving] = useState<string | null>(null)
-  const [msg, setMsg]           = useState<{ ok: boolean; text: string } | null>(null)
+function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[] }) {
+  const [accounts,  setAccounts]  = useState<ConnectedAccount[]>(initialAccounts)
+  const [syncing,   setSyncing]   = useState<string | null>(null)  // account id being synced
+  const [removing,  setRemoving]  = useState<string | null>(null)
+  const [msgs,      setMsgs]      = useState<Record<string, { ok: boolean; text: string }>>({})
 
-  async function handleSync() {
-    setSyncing(true)
-    setMsg(null)
+  async function handleSync(acc: ConnectedAccount) {
+    setSyncing(acc.id)
+    setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
     try {
-      const res  = await fetch('/api/gmail/sync', { method: 'POST' })
+      const endpoint = acc.provider === 'yahoo' ? '/api/yahoo/sync' : '/api/gmail/sync'
+      const body     = acc.provider === 'yahoo'
+        ? JSON.stringify({ accountId: acc.id })
+        : undefined
+
+      const res  = await fetch(endpoint, {
+        method:  'POST',
+        headers: acc.provider === 'yahoo' ? { 'Content-Type': 'application/json' } : {},
+        body,
+      })
       const data = await res.json() as { found?: number; inserted?: number; error?: string }
+
       if (!res.ok || data.error) {
-        setMsg({ ok: false, text: data.error ?? 'Error al sincronizar' })
+        setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' } }))
       } else {
         const { found = 0, inserted = 0 } = data
-        setMsg({
-          ok:   true,
-          text: inserted > 0
-            ? `${inserted} correo${inserted !== 1 ? 's' : ''} nuevo${inserted !== 1 ? 's' : ''} de ${found} encontrado${found !== 1 ? 's' : ''}`
-            : `${found} encontrado${found !== 1 ? 's' : ''}, sin novedades`,
-        })
+        setMsgs(m => ({
+          ...m,
+          [acc.id]: {
+            ok:   true,
+            text: inserted > 0
+              ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
+              : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
+          },
+        }))
         if (inserted > 0) window.location.reload()
       }
     } catch (e) {
-      setMsg({ ok: false, text: String(e) })
+      setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: String(e) } }))
     } finally {
-      setSyncing(false)
+      setSyncing(null)
     }
   }
 
@@ -340,8 +353,8 @@ function GmailPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[
 
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3 space-y-2">
-      {/* Header row */}
-      <div className="flex items-center gap-2">
+      {/* Header + connect buttons */}
+      <div className="flex items-center gap-2 flex-wrap">
         <Mail size={13} className="text-zinc-500 shrink-0" />
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] flex-1">Cuentas conectadas</p>
         <a
@@ -349,30 +362,54 @@ function GmailPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#a3e635] text-black text-[10px] font-black hover:bg-[#b4f040] transition-colors"
         >
           <Plus size={11} />
-          Conectar Gmail
+          Gmail
+        </a>
+        <a
+          href="/api/auth/yahoo"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#6001d2] text-white text-[10px] font-black hover:bg-[#7510e8] transition-colors"
+        >
+          <Plus size={11} />
+          Yahoo
         </a>
       </div>
 
       {/* Connected accounts list */}
       {accounts.length === 0 ? (
         <p className="text-[10px] text-zinc-600 px-1">
-          Sin cuentas conectadas — conectá Gmail para importar correos bancarios automáticamente.
+          Sin cuentas conectadas — conectá Gmail o Yahoo para importar correos bancarios.
         </p>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {accounts.map(acc => (
             <div key={acc.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/[0.03]">
-              <div className="w-5 h-5 rounded-full bg-white/[0.08] flex items-center justify-center shrink-0">
-                <Mail size={10} className="text-zinc-400" />
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[8px] font-black ${
+                acc.provider === 'yahoo' ? 'bg-[#6001d2]/30 text-purple-300' : 'bg-[#a3e635]/20 text-[#a3e635]'
+              }`}>
+                {acc.provider === 'yahoo' ? 'Y!' : 'G'}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-zinc-300 truncate">{acc.email}</p>
-                <p className="text-[9px] text-zinc-600">{acc.provider}</p>
+                {msgs[acc.id] && (
+                  <p className={`text-[9px] ${msgs[acc.id].ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                    {msgs[acc.id].text}
+                  </p>
+                )}
               </div>
+              <button
+                onClick={() => handleSync(acc)}
+                disabled={syncing === acc.id}
+                className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-40"
+                title="Sync"
+              >
+                {syncing === acc.id
+                  ? <Loader2 size={11} className="animate-spin" />
+                  : <RefreshCw size={11} />}
+              </button>
               <button
                 onClick={() => handleRemove(acc.id)}
                 disabled={removing === acc.id}
                 className="p-1 rounded hover:bg-white/[0.06] text-zinc-600 hover:text-rose-400 transition-colors disabled:opacity-40"
+                title="Desconectar"
               >
                 {removing === acc.id
                   ? <Loader2 size={11} className="animate-spin" />
@@ -380,25 +417,6 @@ function GmailPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[
               </button>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Sync row */}
-      {accounts.length > 0 && (
-        <div className="flex items-center gap-2 pt-1 border-t border-white/[0.04]">
-          {msg && (
-            <p className={`text-[10px] flex-1 ${msg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>
-              {msg.text}
-            </p>
-          )}
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-xs font-bold hover:bg-white/[0.10] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            Sync correos
-          </button>
         </div>
       )}
     </div>
@@ -516,15 +534,15 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
         <h1 className="text-xl font-black text-white">Bandeja de Entrada</h1>
       </div>
 
-      {/* OAuth result banner */}
-      {gmailStatus === 'connected' && (
+      {/* OAuth result banners */}
+      {(gmailStatus === 'connected') && (
         <p className="text-xs text-[#a3e635] bg-[#a3e635]/10 rounded-lg px-3 py-2">
-          Gmail conectado correctamente. Hacé clic en &ldquo;Sync correos&rdquo; para importar tus correos bancarios.
+          Cuenta conectada. Hacé clic en el ícono <RefreshCw size={10} className="inline" /> para sincronizar.
         </p>
       )}
-      {gmailStatus === 'error' && (
+      {(gmailStatus === 'error') && (
         <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">
-          No se pudo conectar Gmail. Intentá de nuevo.
+          No se pudo conectar la cuenta. Intentá de nuevo.
         </p>
       )}
 
@@ -551,8 +569,8 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
         ))}
       </div>
 
-      {/* Gmail connect / sync panel */}
-      <GmailPanel accounts={connectedAccounts} />
+      {/* Email accounts panel */}
+      <EmailAccountsPanel accounts={connectedAccounts} />
 
       {/* Paste panel — always visible */}
       <PastePanel />
