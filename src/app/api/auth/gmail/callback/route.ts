@@ -32,7 +32,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${base}/movimientos?gmail=error&reason=no_code`)
   }
 
-  // Exchange authorization code for tokens
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -51,9 +50,9 @@ export async function GET(req: NextRequest) {
   }
 
   const tokens = await tokenRes.json() as {
-    access_token:  string
+    access_token:   string
     refresh_token?: string
-    expires_in:    number
+    expires_in:     number
   }
 
   if (!tokens.refresh_token) {
@@ -70,15 +69,19 @@ export async function GET(req: NextRequest) {
     gmailEmail = profile.emailAddress
   }
 
-  // Persist tokens in user_profiles
+  // Upsert into connected_email_accounts (supports multiple accounts)
   await createAdminClient()
-    .from('user_profiles')
-    .update({
-      gmail_refresh_token: tokens.refresh_token,
-      gmail_email:         gmailEmail,
-      gmail_connected_at:  new Date().toISOString(),
-    })
-    .eq('user_id', user.id)
+    .from('connected_email_accounts')
+    .upsert(
+      {
+        user_id:       user.id,
+        email:         gmailEmail,
+        provider:      'gmail',
+        refresh_token: tokens.refresh_token,
+        connected_at:  new Date().toISOString(),
+      },
+      { onConflict: 'user_id,email' }
+    )
 
   const response = NextResponse.redirect(`${base}/movimientos?gmail=connected`)
   response.cookies.delete('gmail_oauth_state')

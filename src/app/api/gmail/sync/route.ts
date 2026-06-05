@@ -4,7 +4,6 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const anthropic = new Anthropic()
 
-// Search query for Costa Rican bank notification emails
 const GMAIL_QUERY =
   'newer_than:90d (from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:scotiabankcr.com OR from:bcr.fi.cr OR "SINPE Móvil" OR "SINPE movil" OR subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR subject:"Notificacion" OR subject:"Notificación")'
 
@@ -65,66 +64,38 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   return data.access_token ?? null
 }
 
-export async function POST() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response('Unauthorized', { status: 401 })
-
-  const admin = createAdminClient()
-
-  // Get stored refresh token
-  const { data: profile } = await admin
-    .from('user_profiles')
-    .select('gmail_refresh_token')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!profile?.gmail_refresh_token) {
-    return Response.json({ error: 'Gmail no conectado' }, { status: 400 })
-  }
-
-  const accessToken = await refreshAccessToken(profile.gmail_refresh_token)
-  if (!accessToken) {
-    return Response.json({ error: 'No se pudo refrescar el token de Gmail' }, { status: 401 })
-  }
-
-  // Fetch message list from Gmail
+async function syncAccount(
+  accessToken: string,
+  userId: string,
+  admin: ReturnType<typeof import('@/lib/supabase/admin').createAdminClient>,
+  today: string,
+): Promise<{ found: number; inserted: number }> {
   const listRes = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=${encodeURIComponent(GMAIL_QUERY)}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   )
-  if (!listRes.ok) {
-    return Response.json({ error: 'Error consultando Gmail' }, { status: 502 })
-  }
+  if (!listRes.ok) return { found: 0, inserted: 0 }
 
   const listData = await listRes.json() as { messages?: { id: string }[] }
   const messageIds = (listData.messages ?? []).map(m => m.id)
+  if (messageIds.length === 0) return { found: 0, inserted: 0 }
 
-  if (messageIds.length === 0) {
-    return Response.json({ found: 0, inserted: 0 })
-  }
-
-  // Check which email IDs are already in transaction_inbox
   const { data: existing } = await admin
     .from('transaction_inbox')
     .select('email_id')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .in('email_id', messageIds)
 
   const existingIds = new Set((existing ?? []).map(r => r.email_id))
   const newIds = messageIds.filter(id => !existingIds.has(id))
 
-  if (newIds.length === 0) {
-    return Response.json({ found: messageIds.length, inserted: 0 })
-  }
+  if (newIds.length === 0) return { found: messageIds.length, inserted: 0 }
 
-  const today = new Date().toISOString().slice(0, 10)
   const system = EXTRACTION_SYSTEM.replace('__TODAY__', today)
   let inserted = 0
 
   for (const msgId of newIds) {
     try {
-      // Fetch full message
       const msgRes = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=full`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -137,10 +108,10 @@ export async function POST() {
         payload?: GmailPart & { headers?: { name: string; value: string }[] }
       }
 
-      const headers = msg.payload?.headers ?? []
-      const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value ?? ''
-      const from    = headers.find(h => h.name.toLowerCase() === 'from')?.value ?? ''
-      const body    = msg.payload ? decodeEmailBody(msg.payload) : ''
+      const headers   = msg.payload?.headers ?? []
+      const subject   = headers.find(h => h.name.toLowerCase() === 'subject')?.value ?? ''
+      const from      = headers.find(h => h.name.toLowerCase() === 'from')?.value ?? ''
+      const body      = msg.payload ? decodeEmailBody(msg.payload) : ''
       const emailDate = msg.internalDate
         ? new Date(parseInt(msg.internalDate)).toISOString()
         : new Date().toISOString()
@@ -153,7 +124,6 @@ export async function POST() {
 
       if (!content.trim()) continue
 
-      // Extract via Claude
       const aiRes = await anthropic.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 256,
@@ -163,17 +133,16 @@ export async function POST() {
 
       const raw = aiRes.content[0]?.type === 'text' ? aiRes.content[0].text.trim() : ''
       let extracted: Record<string, unknown> | null = null
-
       try {
         const match = raw.match(/\{[\s\S]*\}/)
         if (match) {
           const parsed = JSON.parse(match[0]) as Record<string, unknown>
           if (!parsed.skip) extracted = parsed
         }
-      } catch { /* skip unparseable */ }
+      } catch { /* skip */ }
 
       await admin.from('transaction_inbox').insert({
-        user_id:     user.id,
+        user_id:     userId,
         email_id:    msgId,
         email_date:  emailDate,
         raw_subject: subject.slice(0, 500),
@@ -187,5 +156,41 @@ export async function POST() {
     }
   }
 
-  return Response.json({ found: messageIds.length, inserted })
+  return { found: messageIds.length, inserted }
+}
+
+export async function POST() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return new Response('Unauthorized', { status: 401 })
+
+  const admin = createAdminClient()
+
+  const { data: accounts } = await admin
+    .from('connected_email_accounts')
+    .select('id, email, refresh_token')
+    .eq('user_id', user.id)
+
+  if (!accounts || accounts.length === 0) {
+    return Response.json({ error: 'No hay cuentas conectadas' }, { status: 400 })
+  }
+
+  const today = new Date().toISOString().slice(0, 10)
+  let totalFound = 0
+  let totalInserted = 0
+  const results: { email: string; found: number; inserted: number; error?: string }[] = []
+
+  for (const account of accounts) {
+    const accessToken = await refreshAccessToken(account.refresh_token)
+    if (!accessToken) {
+      results.push({ email: account.email, found: 0, inserted: 0, error: 'Token inválido' })
+      continue
+    }
+    const { found, inserted } = await syncAccount(accessToken, user.id, admin, today)
+    totalFound    += found
+    totalInserted += inserted
+    results.push({ email: account.email, found, inserted })
+  }
+
+  return Response.json({ found: totalFound, inserted: totalInserted, accounts: results })
 }

@@ -538,6 +538,36 @@ export type Database = {
           },
         ]
       }
+      connected_email_accounts: {
+        Row: {
+          connected_at: string | null
+          created_at: string | null
+          email: string
+          id: string
+          provider: string
+          refresh_token: string
+          user_id: string
+        }
+        Insert: {
+          connected_at?: string | null
+          created_at?: string | null
+          email: string
+          id?: string
+          provider?: string
+          refresh_token: string
+          user_id: string
+        }
+        Update: {
+          connected_at?: string | null
+          created_at?: string | null
+          email?: string
+          id?: string
+          provider?: string
+          refresh_token?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       currencies: {
         Row: {
           code: string
