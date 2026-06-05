@@ -704,6 +704,7 @@ export type Database = {
           is_active: boolean
           linked_bucket_id: string | null
           linked_envelope_id: string | null
+          manual_current_amount_crc: number | null
           name: string
           sort_order: number
           target_amount_crc: number
@@ -719,6 +720,7 @@ export type Database = {
           is_active?: boolean
           linked_bucket_id?: string | null
           linked_envelope_id?: string | null
+          manual_current_amount_crc?: number | null
           name: string
           sort_order?: number
           target_amount_crc: number
@@ -734,6 +736,7 @@ export type Database = {
           is_active?: boolean
           linked_bucket_id?: string | null
           linked_envelope_id?: string | null
+          manual_current_amount_crc?: number | null
           name?: string
           sort_order?: number
           target_amount_crc?: number
