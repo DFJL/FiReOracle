@@ -17,8 +17,11 @@ import {
   Target,
   ShieldCheck,
   Inbox,
+  Flag,
+  FileText,
 } from 'lucide-react'
 import { getPendingCount } from '@/app/actions/inbox'
+import { AlertsServer } from './AlertsServer'
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: number }
 type NavGroup = { label: string; items: NavItem[] }
@@ -47,13 +50,15 @@ function buildNavGroups(pendingCount: number): NavGroup[] {
       label: 'FIRE',
       items: [
         { href: '/progreso', label: 'Progreso',  icon: <Target size={16} /> },
+        { href: '/metas',    label: 'Metas',     icon: <Flag size={16} /> },
         { href: '/oracle',   label: 'Oracle',    icon: <Sparkles size={16} /> },
       ],
     },
     {
       label: 'Herramientas',
       items: [
-        { href: '/auditoria', label: 'Auditoría', icon: <ShieldCheck size={16} /> },
+        { href: '/reporte',   label: 'Reporte Mensual', icon: <FileText size={16} /> },
+        { href: '/auditoria', label: 'Auditoría',       icon: <ShieldCheck size={16} /> },
       ],
     },
   ]
@@ -165,6 +170,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </a>
           </div>
         )}
+
+        {/* Smart alert banners — async, non-blocking */}
+        <Suspense fallback={null}>
+          <AlertsServer userId={user.id} />
+        </Suspense>
 
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
