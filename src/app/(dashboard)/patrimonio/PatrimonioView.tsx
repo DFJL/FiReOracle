@@ -743,10 +743,11 @@ export function PatrimonioView({
   const lastSnap = sorted[sorted.length - 1]
   const prevMonthSnap = sorted[sorted.length - 2]
 
-  // Liquidez and Inversiones are always live-computed from DB (reliable, no manual entry needed).
-  // Ilíquido and Pasivos use the latest snapshot when available (requires manual recording).
-  const dispLiq     = liquidBalance
-  const dispInv     = totalInvested
+  // All four components use the latest snapshot when available — the live-computed
+  // values (especially liquidBalance from envelopes) are incomplete because they
+  // don't capture real checking account balances. Fall back to live only when no snapshot exists.
+  const dispLiq     = lastSnap ? Number(lastSnap.liquid_crc)       : liquidBalance
+  const dispInv     = lastSnap ? Number(lastSnap.invested_crc)     : totalInvested
   const dispIliq    = lastSnap ? Number(lastSnap.iliquid_crc)      : iliquidTotal
   const dispPasivos = lastSnap ? Number(lastSnap.liabilities_crc)  : totalLiabilities
   const dispActivos = dispLiq + dispInv + dispIliq
