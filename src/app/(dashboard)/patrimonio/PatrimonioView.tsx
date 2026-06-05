@@ -713,7 +713,7 @@ export function PatrimonioView({
   function prefillSnapshot() {
     setSnapDate(today())
     setSnapLiquid(String(Math.round(liquidBalance)))
-    setSnapInvested(String(Math.round(totalInvested)))
+    setSnapInvested(String(Math.round(totalInvested + itemsInvertido)))
     setSnapIliquid(String(Math.round(iliquidTotal)))
     setSnapLiabilities(String(Math.round(totalLiabilities)))
     setShowSnapshotPanel(true)
