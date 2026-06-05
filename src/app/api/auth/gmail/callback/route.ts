@@ -59,14 +59,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${base}/movimientos?gmail=error&reason=no_refresh_token`)
   }
 
-  // Get connected Gmail address
+  // Get connected Gmail address via userinfo endpoint (works with email+profile scope)
   let gmailEmail = ''
-  const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+  const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   })
-  if (profileRes.ok) {
-    const profile = await profileRes.json() as { emailAddress: string }
-    gmailEmail = profile.emailAddress
+  if (userinfoRes.ok) {
+    const info = await userinfoRes.json() as { email?: string }
+    gmailEmail = info.email ?? ''
+  }
+  // Fallback to Gmail profile endpoint
+  if (!gmailEmail) {
+    const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    })
+    if (profileRes.ok) {
+      const profile = await profileRes.json() as { emailAddress?: string }
+      gmailEmail = profile.emailAddress ?? ''
+    }
+  }
+  if (!gmailEmail) {
+    return NextResponse.redirect(`${base}/movimientos?gmail=error&reason=no_email`)
   }
 
   // Upsert into connected_email_accounts (supports multiple accounts)
