@@ -743,13 +743,15 @@ export function PatrimonioView({
   const lastSnap = sorted[sorted.length - 1]
   const prevMonthSnap = sorted[sorted.length - 2]
 
-  // All four components use the latest snapshot when available — the live-computed
-  // values (especially liquidBalance from envelopes) are incomplete because they
-  // don't capture real checking account balances. Fall back to live only when no snapshot exists.
-  const dispLiq     = lastSnap ? Number(lastSnap.liquid_crc)       : liquidBalance
-  const dispInv     = lastSnap ? Number(lastSnap.invested_crc)     : totalInvested
-  const dispIliq    = lastSnap ? Number(lastSnap.iliquid_crc)      : iliquidTotal
-  const dispPasivos = lastSnap ? Number(lastSnap.liabilities_crc)  : totalLiabilities
+  // Fondos & Pensiones (OPC/ROP) stored in net_worth_items category='invertido' —
+  // not captured by transaction-based bucket calculations, must be added explicitly.
+  const itemsInvertido = netWorthItems
+    .filter(i => i.category === 'invertido')
+    .reduce((s, i) => s + Number(i.value_crc), 0)
+  const dispLiq     = liquidBalance
+  const dispInv     = totalInvested + itemsInvertido
+  const dispIliq    = iliquidTotal
+  const dispPasivos = totalLiabilities
   const dispActivos = dispLiq + dispInv + dispIliq
   const dispNW      = dispActivos - dispPasivos
 
