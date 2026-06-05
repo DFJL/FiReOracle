@@ -470,11 +470,11 @@ function FuMoneyChart({
   if (avgMonthlyExpenses <= 0) return null
 
   const points = snapshots
-    .filter(s => s.liquid_crc > 0)
+    .filter(s => s.liquid_crc > 0 || s.invested_crc > 0)
     .map(s => ({
       ms: new Date(s.snapshot_date + 'T12:00:00').getTime(),
-      months: s.liquid_crc / netMonthlyExpenses,
-      liquid: s.liquid_crc,
+      months: (s.liquid_crc + s.invested_crc) / netMonthlyExpenses,
+      liquid: s.liquid_crc + s.invested_crc,
     }))
     .sort((a, b) => a.ms - b.ms)
 
@@ -538,7 +538,7 @@ function FuMoneyChart({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money</p>
-          <p className="text-[9px] text-zinc-600 mt-0.5">Liquidez / (gasto − ingresos pasivos) — histórico</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">(Líquido + Invertido) / (gasto − ingresos pasivos) — histórico</p>
         </div>
         {hovered && (
           <span className="text-[10px] text-zinc-300">
