@@ -310,6 +310,7 @@ export function ProgresoView({
       <FuMoneyChart
         snapshots={snapshots}
         avgMonthlyExpenses={avgMonthlyExpenses}
+        passiveMonthlyAvg={passiveMonthlyAvg}
         runwayGreen={runwayGreen}
         runwayYellow={runwayYellow}
         currency={currency}
@@ -452,10 +453,11 @@ function MilestoneStrip({
 }
 
 function FuMoneyChart({
-  snapshots, avgMonthlyExpenses, runwayGreen, runwayYellow, currency, rate,
+  snapshots, avgMonthlyExpenses, passiveMonthlyAvg, runwayGreen, runwayYellow, currency, rate,
 }: {
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
   avgMonthlyExpenses: number
+  passiveMonthlyAvg: number
   runwayGreen: number
   runwayYellow: number
   currency: 'CRC' | 'USD'
@@ -464,13 +466,14 @@ function FuMoneyChart({
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
+  const netMonthlyExpenses = Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 1)
   if (avgMonthlyExpenses <= 0) return null
 
   const points = snapshots
     .filter(s => s.liquid_crc > 0)
     .map(s => ({
       ms: new Date(s.snapshot_date + 'T12:00:00').getTime(),
-      months: s.liquid_crc / avgMonthlyExpenses,
+      months: s.liquid_crc / netMonthlyExpenses,
       liquid: s.liquid_crc,
     }))
     .sort((a, b) => a.ms - b.ms)
@@ -535,7 +538,7 @@ function FuMoneyChart({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money</p>
-          <p className="text-[9px] text-zinc-600 mt-0.5">Liquidez / gasto mensual promedio — histórico</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">Liquidez / (gasto − ingresos pasivos) — histórico</p>
         </div>
         {hovered && (
           <span className="text-[10px] text-zinc-300">
