@@ -225,8 +225,10 @@ export async function POST(req: Request) {
               .replace(/\s+/g, ' ').trim()
               .slice(0, 2000)
           }
-          // Try to extract PDF attachment
-          pdfBase64 = extractPdfFromMime(raw)
+          // Only parse PDF when body is too short to contain transaction data
+          if (body.trim().length < 120) {
+            pdfBase64 = extractPdfFromMime(raw)
+          }
         }
 
         type ContentBlock =

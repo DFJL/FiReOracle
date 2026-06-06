@@ -162,9 +162,9 @@ async function syncAccount(
         ? new Date(parseInt(msg.internalDate)).toISOString()
         : new Date().toISOString()
 
-      // Look for a PDF attachment and fetch it
+      // Only fetch PDF attachment when the text body is too short to contain transaction data
       let pdfBase64: string | null = null
-      if (msg.payload) {
+      if (msg.payload && body.trim().length < 120) {
         const pdfPart = findPdfPart(msg.payload)
         if (pdfPart?.body?.attachmentId) {
           pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
