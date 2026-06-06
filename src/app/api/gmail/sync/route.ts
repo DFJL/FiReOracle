@@ -192,7 +192,7 @@ async function syncAccount(
         : textContent
 
       const aiRes = await anthropic.messages.create({
-        model:      'claude-haiku-4-5-20251001',
+        model:      pdfBase64 ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
         max_tokens: 256,
         system,
         messages:   [{ role: 'user', content: userContent as never }],

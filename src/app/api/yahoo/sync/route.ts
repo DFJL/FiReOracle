@@ -53,31 +53,16 @@ const BANK_FROM_PATTERNS = [
 ]
 
 function extractPdfFromMime(raw: string): string | null {
-  const lines = raw.split(/\r?\n/)
-  let state: 'scanning' | 'in_headers' | 'in_body' = 'scanning'
-  let isBase64 = false
-  const bodyLines: string[] = []
+  // Every PDF starts with %PDF- which encodes to JVBERi0 in base64
+  const idx = raw.indexOf('JVBERi0')
+  if (idx === -1) return null
 
-  for (const line of lines) {
-    if (state === 'scanning') {
-      if (/^Content-Type:\s*application\/pdf/i.test(line)) {
-        state = 'in_headers'
-        isBase64 = false
-      }
-    } else if (state === 'in_headers') {
-      if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) {
-        isBase64 = true
-      } else if (line === '') {
-        state = isBase64 ? 'in_body' : 'scanning'
-      }
-    } else if (state === 'in_body') {
-      if (line.startsWith('--') || (line === '' && bodyLines.length > 0)) break
-      if (line) bodyLines.push(line)
-    }
-  }
+  const slice = raw.slice(idx)
+  // Base64 data ends at the next MIME boundary (line starting with --)
+  const endIdx = slice.search(/\r?\n--/)
+  const b64 = (endIdx === -1 ? slice : slice.slice(0, endIdx)).replace(/[\r\n\s]/g, '')
 
-  if (!bodyLines.length) return null
-  return bodyLines.join('')
+  return b64.length > 200 ? b64 : null
 }
 
 async function refreshYahooToken(refreshToken: string): Promise<string | null> {
@@ -252,7 +237,7 @@ export async function POST(req: Request) {
           : textContent
 
         const aiRes = await anthropic.messages.create({
-          model:      'claude-haiku-4-5-20251001',
+          model:      pdfBase64 ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
           max_tokens: 256,
           system,
           messages:   [{ role: 'user', content: userContent as never }],
