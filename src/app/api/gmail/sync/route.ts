@@ -38,8 +38,32 @@ Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacc
 
 type GmailPart = {
   mimeType: string
-  body?: { data?: string }
+  filename?: string
+  body?: { data?: string; attachmentId?: string }
   parts?: GmailPart[]
+}
+
+function findPdfPart(part: GmailPart): GmailPart | null {
+  if (part.mimeType === 'application/pdf' && part.body?.attachmentId) return part
+  if (part.parts) {
+    for (const p of part.parts) {
+      const found = findPdfPart(p)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+async function fetchPdfAttachment(msgId: string, attachmentId: string, accessToken: string): Promise<string | null> {
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${attachmentId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+  if (!res.ok) return null
+  const data = await res.json() as { data?: string }
+  if (!data.data) return null
+  // base64url → standard base64
+  return data.data.replace(/-/g, '+').replace(/_/g, '/')
 }
 
 function stripHtml(text: string): string {
@@ -138,19 +162,39 @@ async function syncAccount(
         ? new Date(parseInt(msg.internalDate)).toISOString()
         : new Date().toISOString()
 
-      const content = [
+      // Look for a PDF attachment and fetch it
+      let pdfBase64: string | null = null
+      if (msg.payload) {
+        const pdfPart = findPdfPart(msg.payload)
+        if (pdfPart?.body?.attachmentId) {
+          pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
+        }
+      }
+
+      const textContent = [
         subject ? `Asunto: ${subject}` : '',
         from    ? `De: ${from}` : '',
         body    ? `Cuerpo:\n${body.slice(0, 2000)}` : '',
       ].filter(Boolean).join('\n\n')
 
-      if (!content.trim()) continue
+      if (!textContent.trim() && !pdfBase64) continue
+
+      type ContentBlock =
+        | { type: 'text'; text: string }
+        | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+
+      const userContent: string | ContentBlock[] = pdfBase64
+        ? [
+            { type: 'text', text: textContent || '(ver PDF adjunto)' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+          ]
+        : textContent
 
       const aiRes = await anthropic.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 256,
         system,
-        messages:   [{ role: 'user', content }],
+        messages:   [{ role: 'user', content: userContent as never }],
       })
 
       const raw = aiRes.content[0]?.type === 'text' ? aiRes.content[0].text.trim() : ''
@@ -169,7 +213,7 @@ async function syncAccount(
         email_id:    msgId,
         email_date:  emailDate,
         raw_subject: subject.slice(0, 500),
-        raw_snippet: body.slice(0, 500),
+        raw_snippet: (pdfBase64 && !body.trim() ? '[datos extraídos del PDF adjunto]' : body.slice(0, 500)),
         extracted:   extracted as never,
         status:      'pending',
       })

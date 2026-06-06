@@ -52,6 +52,34 @@ const BANK_FROM_PATTERNS = [
   'sinpe',
 ]
 
+function extractPdfFromMime(raw: string): string | null {
+  const lines = raw.split(/\r?\n/)
+  let state: 'scanning' | 'in_headers' | 'in_body' = 'scanning'
+  let isBase64 = false
+  const bodyLines: string[] = []
+
+  for (const line of lines) {
+    if (state === 'scanning') {
+      if (/^Content-Type:\s*application\/pdf/i.test(line)) {
+        state = 'in_headers'
+        isBase64 = false
+      }
+    } else if (state === 'in_headers') {
+      if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) {
+        isBase64 = true
+      } else if (line === '') {
+        state = isBase64 ? 'in_body' : 'scanning'
+      }
+    } else if (state === 'in_body') {
+      if (line.startsWith('--') || (line === '' && bodyLines.length > 0)) break
+      if (line) bodyLines.push(line)
+    }
+  }
+
+  if (!bodyLines.length) return null
+  return bodyLines.join('')
+}
+
 async function refreshYahooToken(refreshToken: string): Promise<string | null> {
   const credentials = Buffer.from(
     `${process.env.YAHOO_CLIENT_ID}:${process.env.YAHOO_CLIENT_SECRET}`
@@ -174,8 +202,9 @@ export async function POST(req: Request) {
 
         if (existing) continue
 
-        // Get plain text body
+        // Get plain text body and optional PDF attachment
         let body = ''
+        let pdfBase64: string | null = null
         if (msg.source) {
           const raw = msg.source.toString('utf-8')
           // Extract text/plain from raw email
@@ -196,21 +225,34 @@ export async function POST(req: Request) {
               .replace(/\s+/g, ' ').trim()
               .slice(0, 2000)
           }
+          // Try to extract PDF attachment
+          pdfBase64 = extractPdfFromMime(raw)
         }
 
-        const content = [
+        type ContentBlock =
+          | { type: 'text'; text: string }
+          | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+
+        const textContent = [
           subject ? `Asunto: ${subject}` : '',
           from    ? `De: ${from}` : '',
           body    ? `Cuerpo:\n${body}` : '',
         ].filter(Boolean).join('\n\n')
 
-        if (!content.trim()) continue
+        if (!textContent.trim() && !pdfBase64) continue
+
+        const userContent: string | ContentBlock[] = pdfBase64
+          ? [
+              { type: 'text', text: textContent || '(ver PDF adjunto)' },
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+            ]
+          : textContent
 
         const aiRes = await anthropic.messages.create({
           model:      'claude-haiku-4-5-20251001',
           max_tokens: 256,
           system,
-          messages:   [{ role: 'user', content }],
+          messages:   [{ role: 'user', content: userContent as never }],
         })
 
         const raw_ai = aiRes.content[0]?.type === 'text' ? aiRes.content[0].text.trim() : ''
@@ -229,7 +271,7 @@ export async function POST(req: Request) {
           email_id:    msgId,
           email_date:  emailDate,
           raw_subject: subject.slice(0, 500),
-          raw_snippet: body.slice(0, 500),
+          raw_snippet: (pdfBase64 && !body.trim() ? '[datos extraídos del PDF adjunto]' : body.slice(0, 500)),
           extracted:   extracted as never,
           status:      'pending',
         })
