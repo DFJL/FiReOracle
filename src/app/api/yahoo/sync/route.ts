@@ -225,8 +225,9 @@ export async function POST(req: Request) {
               .replace(/\s+/g, ' ').trim()
               .slice(0, 2000)
           }
-          // Only parse PDF when body is too short to contain transaction data
-          if (body.trim().length < 120) {
+          // Read PDF only if the body has no monetary amount (data is in the attachment)
+          const bodyHasAmount = /(₡|\$|colones?|CRC|USD|monto)\s*[\d,.]+/i.test(body)
+          if (!bodyHasAmount) {
             pdfBase64 = extractPdfFromMime(raw)
           }
         }

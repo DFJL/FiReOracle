@@ -162,9 +162,10 @@ async function syncAccount(
         ? new Date(parseInt(msg.internalDate)).toISOString()
         : new Date().toISOString()
 
-      // Only fetch PDF attachment when the text body is too short to contain transaction data
+      // Fetch PDF only if the body has no monetary amount (data is in the attachment)
+      const bodyHasAmount = /(₡|\$|colones?|CRC|USD|monto)\s*[\d,.]+/i.test(body)
       let pdfBase64: string | null = null
-      if (msg.payload && body.trim().length < 120) {
+      if (msg.payload && !bodyHasAmount) {
         const pdfPart = findPdfPart(msg.payload)
         if (pdfPart?.body?.attachmentId) {
           pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
