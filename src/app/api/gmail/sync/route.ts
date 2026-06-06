@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk'
 const anthropic = new Anthropic()
 
 const GMAIL_QUERY =
-  'newer_than:90d (from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:scotiabankcr.com OR from:bcr.fi.cr OR "SINPE Móvil" OR "SINPE movil" OR subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR subject:"Notificacion" OR subject:"Notificación")'
+  'newer_than:90d (from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:banconal.fi.cr OR from:scotiabankcr.com OR from:bcr.fi.cr OR "SINPE Móvil" OR "SINPE movil" OR subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR subject:"Notificacion" OR subject:"Notificación" OR subject:"Comprobante de Transacción" OR subject:"Comprobante de transaccion")'
 
 const EXTRACTION_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
@@ -15,12 +15,17 @@ REGLAS:
 - Montos en CRC salvo que el correo diga explícitamente USD
 - Fechas en YYYY-MM-DD; si no hay fecha en el correo, usá la fecha del correo o hoy
 - vendor = nombre del comercio, persona o banco
-- concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios")
-- movement_type: "expense" para débitos/compras, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
+- concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios", "Comprobante BNCR")
+- movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
+CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
+Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
+devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comprobante transacción") con amount=0 y confidence="low".
+NO uses skip:true para comprobantes bancarios aunque falte el monto.
+Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
 {"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
-Si no podés extraer datos de transacción: {"skip":true,"reason":"No es notificación de transacción"}`
+Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 type GmailPart = {
   mimeType: string

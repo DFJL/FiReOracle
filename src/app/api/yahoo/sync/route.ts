@@ -14,17 +14,24 @@ REGLAS:
 - Fechas en YYYY-MM-DD; si no hay fecha en el correo, usá la fecha del correo o hoy
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta
-- movement_type: "expense" para débitos/compras, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
+- movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
 - confidence: "high", "medium", o "low"
+CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
+Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
+devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comprobante transacción") con amount=0 y confidence="low".
+NO uses skip:true para comprobantes bancarios aunque falte el monto.
+Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
 {"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
-Si no podés extraer datos de transacción: {"skip":true,"reason":"No es notificación de transacción"}`
+Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 // Bank sender patterns to filter in Yahoo Mail
 const BANK_FROM_PATTERNS = [
   'baccredomatic',
   'bancobcr',
   'bncr.fi.cr',
+  'banconal.fi.cr',
+  'bncontacto',
   'scotiabank',
   'bcr.fi.cr',
   'sinpe',
@@ -58,13 +65,19 @@ function isBankEmail(from: string, subject: string): boolean {
   const subjectLC = subject.toLowerCase()
   return (
     subjectLC.includes('transacci') ||
+    subjectLC.includes('comprobante') ||
     subjectLC.includes('aviso') ||
     subjectLC.includes('débito') ||
+    subjectLC.includes('debito') ||
     subjectLC.includes('crédito') ||
+    subjectLC.includes('credito') ||
     subjectLC.includes('sinpe') ||
     subjectLC.includes('compra') ||
     subjectLC.includes('retiro') ||
-    subjectLC.includes('depósito')
+    subjectLC.includes('depósito') ||
+    subjectLC.includes('deposito') ||
+    subjectLC.includes('pago cuota') ||
+    subjectLC.includes('pago de cuota')
   )
 }
 
