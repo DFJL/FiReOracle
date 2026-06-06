@@ -167,8 +167,10 @@ async function syncAccount(
       let pdfBase64: string | null = null
       if (msg.payload && !bodyHasAmount) {
         const pdfPart = findPdfPart(msg.payload)
+        console.log(`[gmail-sync] ${msgId} bodyLen=${body.length} bodyHasAmount=${bodyHasAmount} pdfPart=${pdfPart?.mimeType ?? 'none'} attachmentId=${pdfPart?.body?.attachmentId ?? 'none'}`)
         if (pdfPart?.body?.attachmentId) {
           pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
+          console.log(`[gmail-sync] ${msgId} pdfBase64 length=${pdfBase64?.length ?? 0}`)
         }
       }
 
