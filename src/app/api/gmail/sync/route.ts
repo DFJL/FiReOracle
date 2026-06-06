@@ -44,7 +44,9 @@ type GmailPart = {
 }
 
 function findPdfPart(part: GmailPart): GmailPart | null {
-  if (part.mimeType === 'application/pdf' && part.body?.attachmentId) return part
+  const isPdf = part.mimeType === 'application/pdf' ||
+    part.filename?.toLowerCase().endsWith('.pdf')
+  if (isPdf && part.body?.attachmentId) return part
   if (part.parts) {
     for (const p of part.parts) {
       const found = findPdfPart(p)
@@ -167,7 +169,8 @@ async function syncAccount(
       let pdfBase64: string | null = null
       if (msg.payload && !bodyHasAmount) {
         const pdfPart = findPdfPart(msg.payload)
-        console.log(`[gmail-sync] ${msgId} bodyLen=${body.length} bodyHasAmount=${bodyHasAmount} pdfPart=${pdfPart?.mimeType ?? 'none'} attachmentId=${pdfPart?.body?.attachmentId ?? 'none'}`)
+        const allParts = JSON.stringify(msg.payload?.parts?.map(p => ({ mime: p.mimeType, file: p.filename, aid: p.body?.attachmentId })))
+        console.log(`[gmail-sync] ${msgId} bodyLen=${body.length} bodyHasAmount=${bodyHasAmount} pdfPart=${pdfPart?.mimeType ?? 'none'} file=${pdfPart?.filename ?? 'none'} attachmentId=${pdfPart?.body?.attachmentId ?? 'none'} parts=${allParts}`)
         if (pdfPart?.body?.attachmentId) {
           pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
           console.log(`[gmail-sync] ${msgId} pdfBase64 length=${pdfBase64?.length ?? 0}`)
