@@ -5,11 +5,20 @@ import Anthropic from '@anthropic-ai/sdk'
 const anthropic = new Anthropic()
 
 const GMAIL_QUERY =
-  'newer_than:90d (from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:banconal.fi.cr OR from:scotiabankcr.com OR from:bcr.fi.cr OR "SINPE Móvil" OR "SINPE movil" OR subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR subject:"Notificacion" OR subject:"Notificación" OR subject:"Comprobante de Transacción" OR subject:"Comprobante de transaccion")'
+  'newer_than:90d (' +
+  'from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:banconal.fi.cr OR ' +
+  'from:scotiabankcr.com OR from:bcr.fi.cr OR from:popular.fi.cr OR from:bpdc.fi.cr OR ' +
+  'from:davivienda.com OR from:promerica.fi.cr OR from:cathay.fi.cr OR ' +
+  '"SINPE Móvil" OR "SINPE movil" OR ' +
+  'subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR ' +
+  'subject:"Notificacion" OR subject:"Notificación" OR ' +
+  'subject:"Comprobante de Transacción" OR subject:"Comprobante de transaccion" OR ' +
+  'subject:"Pago de cuota" OR subject:"Débito automático" OR subject:"Debito automatico"' +
+  ')'
 
 const EXTRACTION_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
-Bancos soportados: BAC Costa Rica, Banco Nacional (BNCR), BCR, Scotiabank, SINPE Móvil.
+Bancos soportados: BAC Credomatic, Banco Nacional (BNCR/BN), BCR, Scotiabank, Banco Popular, Davivienda, Promerica, Banco Cathay, SINPE Móvil.
 HOY: __TODAY__
 REGLAS:
 - Montos en CRC salvo que el correo diga explícitamente USD

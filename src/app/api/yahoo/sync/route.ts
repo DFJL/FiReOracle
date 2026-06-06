@@ -7,7 +7,7 @@ const anthropic = new Anthropic()
 
 const EXTRACTION_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
-Bancos soportados: BAC Costa Rica, Banco Nacional (BNCR), BCR, Scotiabank, SINPE Móvil.
+Bancos soportados: BAC Credomatic, Banco Nacional (BNCR/BN), BCR, Scotiabank, Banco Popular, Davivienda, Promerica, Banco Cathay, SINPE Móvil.
 HOY: __TODAY__
 REGLAS:
 - Montos en CRC salvo que el correo diga explícitamente USD
@@ -27,13 +27,28 @@ Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacc
 
 // Bank sender patterns to filter in Yahoo Mail
 const BANK_FROM_PATTERNS = [
+  // BAC Credomatic
   'baccredomatic',
+  // BCR
   'bancobcr',
+  'bcr.fi.cr',
+  // BNCR / Banco Nacional
   'bncr.fi.cr',
   'banconal.fi.cr',
   'bncontacto',
+  // Scotiabank
   'scotiabank',
-  'bcr.fi.cr',
+  // Banco Popular
+  'popular.fi.cr',
+  'bpdc.fi.cr',
+  'bancopopular',
+  // Davivienda
+  'davivienda',
+  // Promerica
+  'promerica',
+  // Banco Cathay
+  'cathay.fi.cr',
+  // SINPE
   'sinpe',
 ]
 
