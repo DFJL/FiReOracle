@@ -7,7 +7,7 @@ import { InboxClient } from './InboxClient'
 export default async function MovimientosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ gmail?: string }>
+  searchParams: Promise<{ gmail?: string; yahoo?: string }>
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,7 +16,7 @@ export default async function MovimientosPage({
   const params = await searchParams
   const admin  = createAdminClient()
 
-  const [items, { data: categories }, { data: connectedAccounts }] = await Promise.all([
+  const [items, { data: categories }, { data: connectedAccounts }, { data: envelopes }] = await Promise.all([
     getInboxItems(),
     admin
       .from('transaction_categories')
@@ -28,6 +28,12 @@ export default async function MovimientosPage({
       .select('id, email, provider, connected_at')
       .eq('user_id', user.id)
       .order('connected_at'),
+    admin
+      .from('savings_envelopes')
+      .select('id, name, color')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
 
   return (
@@ -36,7 +42,8 @@ export default async function MovimientosPage({
         items={items}
         categories={categories ?? []}
         connectedAccounts={connectedAccounts ?? []}
-        gmailStatus={params.gmail ?? null}
+        envelopes={envelopes ?? []}
+        gmailStatus={params.gmail ?? params.yahoo ?? null}
       />
     </div>
   )

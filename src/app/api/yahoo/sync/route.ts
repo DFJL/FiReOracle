@@ -154,12 +154,19 @@ export async function POST(req: Request) {
           const plainMatch = raw.match(/Content-Type: text\/plain[^\n]*\n(?:[^\n]*\n)*\n([\s\S]*?)(?=\n--|\z)/)
           if (plainMatch) {
             body = plainMatch[1]
-              .replace(/=\r?\n/g, '')  // quoted-printable line continuations
+              .replace(/=\r?\n/g, '')
               .replace(/=[0-9A-F]{2}/gi, c => String.fromCharCode(parseInt(c.slice(1), 16)))
               .slice(0, 2000)
           } else {
-            // Fallback: strip all headers and use rest
-            body = raw.replace(/^[\s\S]*?\n\n/, '').replace(/<[^>]+>/g, ' ').slice(0, 2000)
+            // Fallback: strip headers and HTML tags
+            body = raw
+              .replace(/^[\s\S]*?\n\n/, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+              .replace(/\s+/g, ' ').trim()
+              .slice(0, 2000)
           }
         }
 
@@ -184,7 +191,8 @@ export async function POST(req: Request) {
           const match = raw_ai.match(/\{[\s\S]*\}/)
           if (match) {
             const parsed = JSON.parse(match[0]) as Record<string, unknown>
-            if (!parsed.skip) extracted = parsed
+            if (parsed.skip) continue  // Not a transaction — don't insert
+            extracted = parsed
           }
         } catch { /* skip */ }
 

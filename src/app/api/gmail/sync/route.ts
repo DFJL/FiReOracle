@@ -28,18 +28,26 @@ type GmailPart = {
   parts?: GmailPart[]
 }
 
+function stripHtml(text: string): string {
+  return text
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ').trim()
+}
+
 function decodeEmailBody(part: GmailPart): string {
   if (part.body?.data) {
-    return Buffer.from(part.body.data, 'base64url').toString('utf-8')
+    const raw = Buffer.from(part.body.data, 'base64url').toString('utf-8')
+    return part.mimeType === 'text/html' ? stripHtml(raw) : raw
   }
   if (part.parts) {
     const textPart = part.parts.find(p => p.mimeType === 'text/plain')
     if (textPart) return decodeEmailBody(textPart)
     const htmlPart = part.parts.find(p => p.mimeType === 'text/html')
-    if (htmlPart) {
-      const html = decodeEmailBody(htmlPart)
-      return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    }
+    if (htmlPart) return decodeEmailBody(htmlPart)
     for (const p of part.parts) {
       const body = decodeEmailBody(p)
       if (body) return body
@@ -137,7 +145,8 @@ async function syncAccount(
         const match = raw.match(/\{[\s\S]*\}/)
         if (match) {
           const parsed = JSON.parse(match[0]) as Record<string, unknown>
-          if (!parsed.skip) extracted = parsed
+          if (parsed.skip) continue  // Not a transaction — don't insert
+          extracted = parsed
         }
       } catch { /* skip */ }
 

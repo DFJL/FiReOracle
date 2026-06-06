@@ -57,6 +57,7 @@ export async function confirmInboxItem(
     expense_group?: string
     is_passive_income?: boolean
     notes?: string
+    envelope_id?: string
   },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
@@ -65,15 +66,10 @@ export async function confirmInboxItem(
 
   const admin = createAdminClient()
 
-  // Insert transaction
-  const d = new Date(tx.date)
+  // Insert transaction (year/month/day/weekday are generated columns — omit them)
   const { error: txErr } = await admin.from('transactions').insert({
     user_id:          user.id,
     date:             tx.date,
-    year:             d.getFullYear(),
-    month:            d.getMonth() + 1,
-    day:              d.getDate(),
-    weekday:          d.getDay(),
     vendor:           tx.vendor,
     concept:          tx.concept,
     amount:           tx.amount,
@@ -89,6 +85,19 @@ export async function confirmInboxItem(
   })
 
   if (txErr) return { error: txErr.message }
+
+  // Optionally link to a savings envelope
+  if (tx.envelope_id) {
+    const envMovType = tx.movement_type === 'income' ? 'deposito' : 'retiro'
+    await admin.from('envelope_movements').insert({
+      user_id:       user.id,
+      envelope_id:   tx.envelope_id,
+      date:          tx.date,
+      amount:        tx.amount,
+      movement_type: envMovType,
+      notes:         tx.concept,
+    })
+  }
 
   // Mark confirmed
   const { error: updErr } = await admin

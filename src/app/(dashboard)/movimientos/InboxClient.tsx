@@ -20,10 +20,17 @@ type ConnectedAccount = {
   connected_at: string | null
 }
 
+type Envelope = {
+  id: string
+  name: string
+  color: string | null
+}
+
 type Props = {
   items: InboxItem[]
   categories: Category[]
   connectedAccounts: ConnectedAccount[]
+  envelopes: Envelope[]
   gmailStatus: string | null
 }
 
@@ -47,13 +54,16 @@ function fmtAmt(amount: number, currency: string) {
 function ItemCard({
   item,
   categories,
+  envelopes,
 }: {
   item: InboxItem
   categories: Category[]
+  envelopes: Envelope[]
 }) {
   const [pending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(item.status === 'pending')
   const [err, setErr] = useState<string | null>(null)
+  const [envelopeId, setEnvelopeId] = useState<string>('')
 
   const ext = item.extracted
   const [fields, setFields] = useState<ExtractedFields>(
@@ -91,6 +101,7 @@ function ItemCard({
         category_code:     fields.category_code,
         expense_group:     fields.expense_group,
         is_passive_income: fields.is_passive_income,
+        envelope_id:       envelopeId || undefined,
       })
       if (res.error) setErr(res.error)
     })
@@ -260,6 +271,24 @@ function ItemCard({
                 ))}
               </select>
             </div>
+
+            {/* Envelope (sobre) */}
+            {envelopes.length > 0 && (
+              <div className="col-span-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Sobre / Bolsillo</label>
+                <select
+                  value={envelopeId}
+                  onChange={e => setEnvelopeId(e.target.value)}
+                  disabled={isProcessed}
+                  className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#111]">(ninguno)</option>
+                  {envelopes.map(env => (
+                    <option key={env.id} value={env.id} className="bg-[#111]">{env.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {err && (
@@ -518,7 +547,7 @@ function PastePanel() {
   )
 }
 
-export function InboxClient({ items, categories, connectedAccounts, gmailStatus }: Props) {
+export function InboxClient({ items, categories, connectedAccounts, envelopes, gmailStatus }: Props) {
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
 
   const pending   = items.filter(i => i.status === 'pending')
@@ -535,14 +564,14 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
       </div>
 
       {/* OAuth result banners */}
-      {(gmailStatus === 'connected') && (
+      {gmailStatus === 'connected' && (
         <p className="text-xs text-[#a3e635] bg-[#a3e635]/10 rounded-lg px-3 py-2">
           Cuenta conectada. Hacé clic en el ícono <RefreshCw size={10} className="inline" /> para sincronizar.
         </p>
       )}
-      {(gmailStatus === 'error') && (
+      {gmailStatus === 'error' && (
         <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">
-          No se pudo conectar la cuenta. Intentá de nuevo.
+          No se pudo conectar la cuenta. Verificá que las credenciales de la app estén configuradas.
         </p>
       )}
 
@@ -597,7 +626,7 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
       {/* Items */}
       <div className="space-y-3">
         {shown.map(item => (
-          <ItemCard key={item.id} item={item} categories={categories} />
+          <ItemCard key={item.id} item={item} categories={categories} envelopes={envelopes} />
         ))}
       </div>
     </div>

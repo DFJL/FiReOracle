@@ -13,6 +13,10 @@ export async function GET(_req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return new Response('Unauthorized', { status: 401 })
 
+  if (!process.env.YAHOO_CLIENT_ID || !process.env.YAHOO_CLIENT_SECRET) {
+    return NextResponse.redirect(`${getAppUrl()}/movimientos?yahoo=error&reason=not_configured`)
+  }
+
   const state = crypto.randomUUID()
   const redirectUri = `${getAppUrl()}/api/auth/yahoo/callback`
 
