@@ -2026,6 +2026,7 @@ export type Database = {
           gmail_email: string | null
           gmail_refresh_token: string | null
           goal_funding_alert_ratio: number
+          lifestyle_exclude_categories: string[] | null
           preferred_currency: string | null
           runway_green_months: number
           runway_yellow_months: number
@@ -2047,6 +2048,7 @@ export type Database = {
           gmail_email?: string | null
           gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
+          lifestyle_exclude_categories?: string[] | null
           preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
@@ -2068,6 +2070,7 @@ export type Database = {
           gmail_email?: string | null
           gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
+          lifestyle_exclude_categories?: string[] | null
           preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
@@ -2365,3 +2368,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

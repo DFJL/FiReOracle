@@ -37,6 +37,7 @@ export default async function ProgresoPage() {
     { data: envelopes },
     { data: assetRows },
     { data: snapshotRows },
+    { data: categories },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('user_investment_buckets')
@@ -59,6 +60,10 @@ export default async function ProgresoPage() {
       .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true }),
+    admin.from('transaction_categories')
+      .select('code, name, group_gasto')
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
 
   // Snapshot-based bucket balances
@@ -199,6 +204,70 @@ export default async function ProgresoPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
+  // ── Lifestyle Inflation ────────────────────────────────────────────────────
+  const MONTH_LABELS_LIFESTYLE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+  const excludeCats = (fireConfig?.lifestyle_exclude_categories as string[] | null) ?? []
+
+  const liCurEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
+  const liCurStart = new Date(now.getFullYear(), now.getMonth() - 12, 1)
+  const liPrvStart = new Date(now.getFullYear(), now.getMonth() - 24, 1)
+  const liCurEndStr   = liCurEnd.toISOString().slice(0, 10)
+  const liCurStartStr = liCurStart.toISOString().slice(0, 10)
+  const liPrvStartStr = liPrvStart.toISOString().slice(0, 10)
+
+  const isLifestyleTx = (tx: typeof txs extends (infer T)[] | null ? T : never) => {
+    if (!tx) return false
+    if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+    if (tx.expense_group === 'objetivos_financieros') return false
+    if (isValuation(tx.concept)) return false
+    if (tx.category_code && excludeCats.includes(tx.category_code)) return false
+    return true
+  }
+
+  const lifestyleTxs = (txs ?? []).filter(isLifestyleTx)
+
+  const liCurTotal = lifestyleTxs
+    .filter(tx => tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  const liPrvTotal = lifestyleTxs
+    .filter(tx => tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+  // Monthly trend — last 12 complete months
+  type LiMonth = { label: string; necesario: number; personal: number }
+  const liMonthly: LiMonth[] = []
+  for (let i = 11; i >= 0; i--) {
+    const d   = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
+    const ym  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const lbl = `${MONTH_LABELS_LIFESTYLE[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`
+    const monthTxs = lifestyleTxs.filter(tx => tx.date?.slice(0, 7) === ym)
+    liMonthly.push({
+      label:     lbl,
+      necesario: monthTxs.filter(tx => tx.expense_group === 'necesario').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
+      personal:  monthTxs.filter(tx => tx.expense_group === 'personal').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
+    })
+  }
+
+  // Top categories by avg monthly spend (current 12m)
+  const catSums: Record<string, { cur: number; prv: number }> = {}
+  for (const tx of lifestyleTxs) {
+    const code = tx.category_code ?? '__na__'
+    if (!catSums[code]) catSums[code] = { cur: 0, prv: 0 }
+    if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   catSums[code].cur += Number(tx.amount ?? 0)
+    if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) catSums[code].prv += Number(tx.amount ?? 0)
+  }
+  const catNameMap = Object.fromEntries((categories ?? []).map(c => [c.code, c.name]))
+  const liTopCats = Object.entries(catSums)
+    .filter(([, v]) => v.cur > 0)
+    .map(([code, v]) => ({
+      code,
+      name:    catNameMap[code] ?? code,
+      curAvg:  v.cur / 12,
+      yoyPct:  v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
+    }))
+    .sort((a, b) => b.curAvg - a.curAvg)
+    .slice(0, 8)
+
   // Wealth Delta: monthly NW attribution for last 12 complete months
   const MONTH_LABELS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
@@ -280,12 +349,18 @@ export default async function ProgresoPage() {
           liquid_crc:    Number((s as { liquid_crc?: number | null }).liquid_crc ?? 0),
         }))}
         exchangeRate={exchangeRate}
-        fireConfig={{
-          swr, targetExp, expReturn, inflation,
-        }}
+        fireConfig={{ swr, targetExp, expReturn, inflation }}
         runwayGreen={fireConfig?.runway_green_months  ?? 6}
         runwayYellow={fireConfig?.runway_yellow_months ?? 3}
         wealthDelta={wealthDelta}
+        lifestyle={{
+          inflationRate: inflation,
+          curTotal:      liCurTotal,
+          prvTotal:      liPrvTotal,
+          monthly:       liMonthly,
+          topCats:       liTopCats,
+          excludeCount:  excludeCats.length,
+        }}
       />
     </div>
   )

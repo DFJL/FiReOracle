@@ -15,6 +15,7 @@ export type FinancialConfigData = {
   savings_rate_yellow: number
   fcf_target_ratio: number
   preferred_currency: 'CRC' | 'USD'
+  lifestyle_exclude_categories: string[]
 }
 
 export async function upsertFinancialConfig(data: FinancialConfigData) {
