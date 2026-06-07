@@ -14,7 +14,7 @@ type LifestyleData = {
   curTotal: number
   prvTotal: number
   monthly: { label: string; necesario: number; personal: number }[]
-  topCats: { code: string; name: string; curAvg: number; yoyPct: number | null }[]
+  topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
   excludeCount: number
 }
 
@@ -1064,6 +1064,7 @@ function fmtCRC(n: number) {
 
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const { inflationRate, curTotal, prvTotal, monthly, topCats, excludeCount } = data
+  const [openCat, setOpenCat] = useState<string | null>(null)
 
   const totalPct    = prvTotal > 0 ? (curTotal - prvTotal) / prvTotal : null
   const delta       = totalPct !== null ? totalPct - inflationRate : null
@@ -1163,30 +1164,69 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
           <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-2">
             Top categorías · promedio mensual
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-0.5">
             {topCats.map(c => {
               const yoy    = c.yoyPct
               const color  = yoy === null ? '#71717a' : yoy > inflationRate ? '#f43f5e' : yoy >= 0 ? '#f59e0b' : '#a3e635'
               const maxAvg = topCats[0].curAvg
+              const isOpen = openCat === c.code
               return (
-                <div key={c.code} className="flex items-center gap-2">
-                  <p className="text-[10px] text-zinc-400 w-32 truncate shrink-0">{c.name}</p>
-                  <div className="flex-1 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{
-                      width: `${(c.curAvg / maxAvg) * 100}%`,
-                      backgroundColor: color, opacity: 0.6,
-                    }} />
+                <div key={c.code}>
+                  {/* Category row — clickable */}
+                  <div
+                    className="flex items-center gap-2 cursor-pointer hover:bg-white/[0.03] rounded-lg px-1 -mx-1 py-1 transition-colors"
+                    onClick={() => setOpenCat(prev => prev === c.code ? null : c.code)}
+                  >
+                    <span className="text-[9px] text-zinc-600 w-2.5 shrink-0 select-none" style={{
+                      display: 'inline-block',
+                      transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.15s',
+                    }}>›</span>
+                    <p className="text-[10px] text-zinc-400 w-28 truncate shrink-0">{c.name}</p>
+                    <div className="flex-1 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{
+                        width: `${(c.curAvg / maxAvg) * 100}%`,
+                        backgroundColor: color, opacity: 0.6,
+                      }} />
+                    </div>
+                    <p className="text-[10px] tabular-nums text-zinc-400 w-16 text-right shrink-0">{fmtCRC(c.curAvg)}</p>
+                    <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color }}>
+                      {yoy !== null ? `${yoy >= 0 ? '+' : ''}${(yoy * 100).toFixed(0)}%` : '—'}
+                    </p>
                   </div>
-                  <p className="text-[10px] tabular-nums text-zinc-400 w-16 text-right shrink-0">{fmtCRC(c.curAvg)}</p>
-                  <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color }}>
-                    {yoy !== null ? `${yoy >= 0 ? '+' : ''}${(yoy * 100).toFixed(0)}%` : '—'}
-                  </p>
+
+                  {/* Driver drill-down */}
+                  {isOpen && c.drivers.length > 0 && (
+                    <div className="ml-5 pl-2.5 border-l border-white/[0.06] mt-0.5 mb-1.5 space-y-0.5">
+                      {c.drivers.map(d => {
+                        const dColor = d.yoyPct === null ? '#52525b'
+                          : d.yoyPct > inflationRate ? '#f43f5e'
+                          : d.yoyPct >= 0 ? '#f59e0b' : '#a3e635'
+                        const isNew  = d.prvAvg === 0 && d.curAvg > 0
+                        return (
+                          <div key={d.key} className="flex items-center gap-2">
+                            <p className="text-[9px] text-zinc-500 w-28 truncate shrink-0">{d.key}</p>
+                            <div className="flex-1 h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                              <div className="h-full rounded-full opacity-50" style={{
+                                width: `${Math.min((d.curAvg / c.curAvg) * 100, 100)}%`,
+                                backgroundColor: dColor,
+                              }} />
+                            </div>
+                            <p className="text-[9px] tabular-nums text-zinc-500 w-14 text-right shrink-0">{fmtCRC(d.curAvg)}</p>
+                            <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color: dColor }}>
+                              {isNew ? 'nuevo' : d.yoyPct !== null ? `${d.yoyPct >= 0 ? '+' : ''}${(d.yoyPct * 100).toFixed(0)}%` : '—'}
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
           <p className="text-[8px] text-zinc-700 mt-2">
-            YoY = últimos 12m vs período anterior · rojo = sobre inflación · configurar exclusiones en Configuración → Perfil &amp; FIRE
+            Clic en categoría para ver drivers · YoY = últimos 12m vs período anterior · configurar exclusiones en Configuración → Perfil &amp; FIRE
           </p>
         </div>
       )}

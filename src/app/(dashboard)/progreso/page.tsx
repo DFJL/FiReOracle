@@ -61,7 +61,7 @@ export default async function ProgresoPage() {
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true }),
     admin.from('transaction_categories')
-      .select('code, name, group_gasto')
+      .select('code, name, group_gasto, parent_code')
       .eq('is_active', true)
       .order('sort_order'),
   ])
@@ -208,6 +208,17 @@ export default async function ProgresoPage() {
   const MONTH_LABELS_LIFESTYLE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
   const excludeCats = (fireConfig?.lifestyle_exclude_categories as string[] | null) ?? []
 
+  // Expand exclusions to cover children of any excluded parent category
+  const catChildMap = new Map<string, string>()
+  for (const cat of categories ?? []) {
+    if ((cat as { parent_code?: string | null }).parent_code)
+      catChildMap.set(cat.code, (cat as { parent_code: string }).parent_code)
+  }
+  const excludeExpanded = new Set(excludeCats)
+  for (const [child, parent] of catChildMap) {
+    if (excludeExpanded.has(parent)) excludeExpanded.add(child)
+  }
+
   const liCurEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
   const liCurStart = new Date(now.getFullYear(), now.getMonth() - 12, 1)
   const liPrvStart = new Date(now.getFullYear(), now.getMonth() - 24, 1)
@@ -220,7 +231,7 @@ export default async function ProgresoPage() {
     if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
     if (tx.expense_group === 'objetivos_financieros') return false
     if (isValuation(tx.concept)) return false
-    if (tx.category_code && excludeCats.includes(tx.category_code)) return false
+    if (tx.category_code && excludeExpanded.has(tx.category_code)) return false
     return true
   }
 
@@ -267,6 +278,29 @@ export default async function ProgresoPage() {
     }))
     .sort((a, b) => b.curAvg - a.curAvg)
     .slice(0, 8)
+
+  // Per-category vendor/concept breakdown (drill-down drivers)
+  const liTopCatsWithDrivers = liTopCats.map(cat => {
+    const catTxs = lifestyleTxs.filter(tx => (tx.category_code ?? '__na__') === cat.code)
+    const vendorSums: Record<string, { cur: number; prv: number }> = {}
+    for (const tx of catTxs) {
+      const key = (tx.vendor && tx.vendor.trim()) || (tx.concept && tx.concept.trim()) || '(sin etiqueta)'
+      if (!vendorSums[key]) vendorSums[key] = { cur: 0, prv: 0 }
+      if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   vendorSums[key].cur += Number(tx.amount ?? 0)
+      if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) vendorSums[key].prv += Number(tx.amount ?? 0)
+    }
+    const drivers = Object.entries(vendorSums)
+      .filter(([, v]) => v.cur > 0 || v.prv > 0)
+      .map(([key, v]) => ({
+        key,
+        curAvg:  v.cur / 12,
+        prvAvg:  v.prv / 12,
+        yoyPct:  v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
+      }))
+      .sort((a, b) => b.curAvg - a.curAvg)
+      .slice(0, 8)
+    return { ...cat, drivers }
+  })
 
   // Wealth Delta: monthly NW attribution for last 12 complete months
   const MONTH_LABELS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -358,7 +392,7 @@ export default async function ProgresoPage() {
           curTotal:      liCurTotal,
           prvTotal:      liPrvTotal,
           monthly:       liMonthly,
-          topCats:       liTopCats,
+          topCats:       liTopCatsWithDrivers,
           excludeCount:  excludeCats.length,
         }}
       />
