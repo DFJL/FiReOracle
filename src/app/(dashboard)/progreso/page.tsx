@@ -278,25 +278,25 @@ export default async function ProgresoPage() {
     .sort((a, b) => b.curAvg - a.curAvg)
     .slice(0, 8)
 
-  // Driver breakdown: subcategory names when children exist, concept otherwise
+  // Driver breakdown: group by concept (what the user typed), fall back to subcategory name
   const liTopCatsWithDrivers = liTopCats.map(cat => {
     const catTxs = lifestyleTxs.filter(tx =>
       getRootCode(tx.category_code ?? '__na__') === cat.code
     )
-    const subSums: Record<string, { cur: number; prv: number; displayName: string }> = {}
+    const subSums: Record<string, { cur: number; prv: number }> = {}
     for (const tx of catTxs) {
-      const leafCode = tx.category_code ?? '__na__'
-      const isChild  = catChildMap.has(leafCode) && catChildMap.get(leafCode) === cat.code
-      const key         = isChild ? leafCode : (tx.concept?.trim() || tx.vendor?.trim() || '(sin etiqueta)')
-      const displayName = isChild ? (catNameMap.get(leafCode) ?? leafCode) : key
-      if (!subSums[key]) subSums[key] = { cur: 0, prv: 0, displayName }
+      const key = tx.concept?.trim()
+        || catNameMap.get(tx.category_code ?? '')
+        || tx.vendor?.trim()
+        || '(sin etiqueta)'
+      if (!subSums[key]) subSums[key] = { cur: 0, prv: 0 }
       if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   subSums[key].cur += Number(tx.amount ?? 0)
       if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) subSums[key].prv += Number(tx.amount ?? 0)
     }
-    const drivers = Object.values(subSums)
-      .filter(v => v.cur > 0 || v.prv > 0)
-      .map(v => ({
-        key:    v.displayName,
+    const drivers = Object.entries(subSums)
+      .filter(([, v]) => v.cur > 0 || v.prv > 0)
+      .map(([key, v]) => ({
+        key,
         curAvg: v.cur / 12,
         prvAvg: v.prv / 12,
         yoyPct: v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
