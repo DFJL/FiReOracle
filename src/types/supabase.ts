@@ -2176,6 +2176,27 @@ export type Database = {
         }
         Relationships: []
       }
+      user_telegram_config: {
+        Row: {
+          chat_id: string
+          created_at: string
+          is_active: boolean
+          user_id: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          is_active?: boolean
+          user_id: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          is_active?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

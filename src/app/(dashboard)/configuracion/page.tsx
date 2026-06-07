@@ -5,6 +5,8 @@ import { SetupWizard } from './SetupWizard'
 import { EnvelopeManager } from './EnvelopeManager'
 import { BucketManager } from './BucketManager'
 import { FireConfigManager } from './FireConfigManager'
+import { TelegramManager } from './TelegramManager'
+import { getTelegramConfig } from '@/app/actions/telegram'
 
 export default async function ConfiguracionPage() {
   const supabase = await createClient()
@@ -15,7 +17,7 @@ export default async function ConfiguracionPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: profile }, { data: envelopes }, { data: buckets }, { data: accounts }, { data: fireConfig }] = await Promise.all([
+  const [{ data: profile }, { data: envelopes }, { data: buckets }, { data: accounts }, { data: fireConfig }, telegramConfig] = await Promise.all([
     supabase
       .from('user_profiles')
       .select('onboarding_done, display_name, monthly_income, savings_goal_pct, main_currency')
@@ -44,6 +46,7 @@ export default async function ConfiguracionPage() {
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle(),
+    getTelegramConfig(),
   ])
 
   return (
@@ -71,6 +74,16 @@ export default async function ConfiguracionPage() {
           </p>
           <p className="text-xs text-zinc-600 mb-4">Configura tu número FIRE, tasas y semáforos. Todos los módulos usan estos valores.</p>
           <FireConfigManager existing={fireConfig ?? null} />
+        </div>
+
+        <div className="border-t border-white/[0.06] pt-8">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-1">
+            Notificaciones Telegram
+          </p>
+          <p className="text-xs text-zinc-600 mb-4">
+            Recibí recordatorios de pago directamente en tu cel aunque la app esté cerrada.
+          </p>
+          <TelegramManager initial={telegramConfig} />
         </div>
 
         <div className="border-t border-white/[0.06] pt-8">
