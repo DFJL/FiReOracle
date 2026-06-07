@@ -58,6 +58,7 @@ export async function confirmInboxItem(
     is_passive_income?: boolean
     notes?: string
     envelope_id?: string
+    loan_id?: string
   },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
@@ -82,6 +83,7 @@ export async function confirmInboxItem(
     is_survival_expense: false,
     notes:            tx.notes ?? null,
     source:           'email',
+    loan_id:          tx.loan_id ?? null,
   })
 
   if (txErr) return { error: txErr.message }

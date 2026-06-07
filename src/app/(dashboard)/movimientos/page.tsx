@@ -16,7 +16,7 @@ export default async function MovimientosPage({
   const params = await searchParams
   const admin  = createAdminClient()
 
-  const [items, { data: categories }, { data: connectedAccounts }, { data: envelopes }] = await Promise.all([
+  const [items, { data: categories }, { data: connectedAccounts }, { data: envelopes }, { data: loans }] = await Promise.all([
     getInboxItems(),
     admin
       .from('transaction_categories')
@@ -34,6 +34,13 @@ export default async function MovimientosPage({
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
+    admin
+      .from('loans')
+      .select('id, name, lender, currency_code, current_balance')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('name'),
   ])
 
   return (
@@ -43,6 +50,7 @@ export default async function MovimientosPage({
         categories={categories ?? []}
         connectedAccounts={connectedAccounts ?? []}
         envelopes={envelopes ?? []}
+        loans={loans ?? []}
         gmailStatus={params.gmail ?? params.yahoo ?? null}
       />
     </div>

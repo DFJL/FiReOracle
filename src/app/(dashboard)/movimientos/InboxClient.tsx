@@ -26,11 +26,20 @@ type Envelope = {
   color: string | null
 }
 
+type Loan = {
+  id: string
+  name: string
+  lender: string | null
+  currency_code: string | null
+  current_balance: number | null
+}
+
 type Props = {
   items: InboxItem[]
   categories: Category[]
   connectedAccounts: ConnectedAccount[]
   envelopes: Envelope[]
+  loans: Loan[]
   gmailStatus: string | null
 }
 
@@ -55,15 +64,18 @@ function ItemCard({
   item,
   categories,
   envelopes,
+  loans,
 }: {
   item: InboxItem
   categories: Category[]
   envelopes: Envelope[]
+  loans: Loan[]
 }) {
   const [pending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(item.status === 'pending')
   const [err, setErr] = useState<string | null>(null)
   const [envelopeId, setEnvelopeId] = useState<string>('')
+  const [loanId, setLoanId] = useState<string>('')
 
   const ext = item.extracted
   const [fields, setFields] = useState<ExtractedFields>(
@@ -102,6 +114,7 @@ function ItemCard({
         expense_group:     fields.expense_group,
         is_passive_income: fields.is_passive_income,
         envelope_id:       envelopeId || undefined,
+        loan_id:           loanId || undefined,
       })
       if (res.error) setErr(res.error)
     })
@@ -286,6 +299,34 @@ function ItemCard({
                   {envelopes.map(env => (
                     <option key={env.id} value={env.id} className="bg-[#111]">{env.name}</option>
                   ))}
+                </select>
+              </div>
+            )}
+
+            {/* Loan selector — only for expenses */}
+            {loans.length > 0 && fields.movement_type === 'expense' && (
+              <div className="col-span-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
+                  Préstamo <span className="text-zinc-700 normal-case tracking-normal font-normal">(opcional)</span>
+                </label>
+                <select
+                  value={loanId}
+                  onChange={e => setLoanId(e.target.value)}
+                  disabled={isProcessed}
+                  className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#111]">— ninguno —</option>
+                  {loans.map(l => {
+                    const sym = l.currency_code === 'USD' ? '$' : '₡'
+                    const bal = l.current_balance != null
+                      ? `${sym}${Number(l.current_balance).toLocaleString('es-CR', { maximumFractionDigits: 0 })}`
+                      : ''
+                    return (
+                      <option key={l.id} value={l.id} className="bg-[#111]">
+                        {l.name}{l.lender ? ` · ${l.lender}` : ''}{bal ? ` · ${bal}` : ''}
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
             )}
@@ -547,7 +588,7 @@ function PastePanel() {
   )
 }
 
-export function InboxClient({ items, categories, connectedAccounts, envelopes, gmailStatus }: Props) {
+export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, gmailStatus }: Props) {
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
 
   const pending   = items.filter(i => i.status === 'pending')
@@ -626,7 +667,7 @@ export function InboxClient({ items, categories, connectedAccounts, envelopes, g
       {/* Items */}
       <div className="space-y-3">
         {shown.map(item => (
-          <ItemCard key={item.id} item={item} categories={categories} envelopes={envelopes} />
+          <ItemCard key={item.id} item={item} categories={categories} envelopes={envelopes} loans={loans} />
         ))}
       </div>
     </div>
