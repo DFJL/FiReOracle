@@ -6,7 +6,7 @@ import { saveTelegramConfig, deleteTelegramConfig } from '@/app/actions/telegram
 import type { TelegramConfig } from '@/app/actions/telegram'
 import { Bell, BellOff, Loader2, Send, Trash2, ExternalLink } from 'lucide-react'
 
-const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? 'FiReOracleBot'
+const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? 'OraReminderbot'
 
 export function TelegramManager({ initial }: { initial: TelegramConfig | null }) {
   const router = useRouter()
