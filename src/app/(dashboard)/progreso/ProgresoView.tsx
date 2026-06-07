@@ -1212,7 +1212,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                             </div>
                             <p className="text-[9px] tabular-nums text-zinc-500 w-14 text-right shrink-0">{fmtCRC(d.curAvg)}</p>
                             <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color: dColor }}>
-                              {isNew ? 'nuevo' : d.yoyPct !== null ? `${d.yoyPct >= 0 ? '+' : ''}${(d.yoyPct * 100).toFixed(0)}%` : '—'}
+                              {d.yoyPct !== null ? `${d.yoyPct >= 0 ? '+' : ''}${(d.yoyPct * 100).toFixed(0)}%` : '—'}
                             </p>
                           </div>
                         )
