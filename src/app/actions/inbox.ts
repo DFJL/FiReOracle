@@ -125,11 +125,12 @@ export async function confirmInboxItem(
   // Optionally link to a savings envelope
   if (tx.envelope_id) {
     const envMovType = tx.movement_type === 'income' ? 'deposito' : 'retiro'
+    const isDebit    = envMovType === 'retiro'
     await admin.from('envelope_movements').insert({
       user_id:       user.id,
       envelope_id:   tx.envelope_id,
       date:          tx.date,
-      amount:        tx.amount,
+      amount:        isDebit ? -Math.abs(tx.amount) : Math.abs(tx.amount),
       movement_type: envMovType,
       notes:         tx.concept,
     })
