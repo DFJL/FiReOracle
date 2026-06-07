@@ -206,18 +206,18 @@ export default async function ProgresoPage() {
 
   // ── Lifestyle Inflation ────────────────────────────────────────────────────
   const MONTH_LABELS_LIFESTYLE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  const excludeCats = (fireConfig?.lifestyle_exclude_categories as string[] | null) ?? []
-
-  // Expand exclusions to cover children of any excluded parent category
-  const catChildMap = new Map<string, string>()
+  // Build category hierarchy and name map
+  const catChildMap = new Map<string, string>()  // childCode → parentCode
+  const catNameMap  = new Map<string, string>()  // code → display name
   for (const cat of categories ?? []) {
-    if ((cat as { parent_code?: string | null }).parent_code)
-      catChildMap.set(cat.code, (cat as { parent_code: string }).parent_code)
+    catNameMap.set(cat.code, cat.name)
+    const c = cat as { code: string; name: string; parent_code?: string | null }
+    if (c.parent_code) catChildMap.set(c.code, c.parent_code)
   }
-  const excludeExpanded = new Set(excludeCats)
-  for (const [child, parent] of catChildMap) {
-    if (excludeExpanded.has(parent)) excludeExpanded.add(child)
-  }
+  const getRootCode = (code: string) => catChildMap.get(code) ?? code
+
+  // Hard-exclude debt payments: LOANS root and all its children
+  const DEBT_ROOTS = new Set(['LOANS'])
 
   const liCurEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
   const liCurStart = new Date(now.getFullYear(), now.getMonth() - 12, 1)
@@ -231,7 +231,7 @@ export default async function ProgresoPage() {
     if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
     if (tx.expense_group === 'objetivos_financieros') return false
     if (isValuation(tx.concept)) return false
-    if (tx.category_code && excludeExpanded.has(tx.category_code)) return false
+    if (tx.category_code && DEBT_ROOTS.has(getRootCode(tx.category_code))) return false
     return true
   }
 
@@ -259,43 +259,47 @@ export default async function ProgresoPage() {
     })
   }
 
-  // Top categories by avg monthly spend (current 12m)
-  const catSums: Record<string, { cur: number; prv: number }> = {}
+  // Top categories — aggregate at ROOT level so children roll up to parent
+  const rootSums: Record<string, { cur: number; prv: number }> = {}
   for (const tx of lifestyleTxs) {
-    const code = tx.category_code ?? '__na__'
-    if (!catSums[code]) catSums[code] = { cur: 0, prv: 0 }
-    if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   catSums[code].cur += Number(tx.amount ?? 0)
-    if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) catSums[code].prv += Number(tx.amount ?? 0)
+    const root = getRootCode(tx.category_code ?? '__na__')
+    if (!rootSums[root]) rootSums[root] = { cur: 0, prv: 0 }
+    if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   rootSums[root].cur += Number(tx.amount ?? 0)
+    if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) rootSums[root].prv += Number(tx.amount ?? 0)
   }
-  const catNameMap = Object.fromEntries((categories ?? []).map(c => [c.code, c.name]))
-  const liTopCats = Object.entries(catSums)
+  const liTopCats = Object.entries(rootSums)
     .filter(([, v]) => v.cur > 0)
     .map(([code, v]) => ({
       code,
-      name:    catNameMap[code] ?? code,
-      curAvg:  v.cur / 12,
-      yoyPct:  v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
+      name:   catNameMap.get(code) ?? code,
+      curAvg: v.cur / 12,
+      yoyPct: v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
     }))
     .sort((a, b) => b.curAvg - a.curAvg)
     .slice(0, 8)
 
-  // Per-category vendor/concept breakdown (drill-down drivers)
+  // Driver breakdown: subcategory names when children exist, concept otherwise
   const liTopCatsWithDrivers = liTopCats.map(cat => {
-    const catTxs = lifestyleTxs.filter(tx => (tx.category_code ?? '__na__') === cat.code)
-    const vendorSums: Record<string, { cur: number; prv: number }> = {}
+    const catTxs = lifestyleTxs.filter(tx =>
+      getRootCode(tx.category_code ?? '__na__') === cat.code
+    )
+    const subSums: Record<string, { cur: number; prv: number; displayName: string }> = {}
     for (const tx of catTxs) {
-      const key = (tx.vendor && tx.vendor.trim()) || (tx.concept && tx.concept.trim()) || '(sin etiqueta)'
-      if (!vendorSums[key]) vendorSums[key] = { cur: 0, prv: 0 }
-      if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   vendorSums[key].cur += Number(tx.amount ?? 0)
-      if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) vendorSums[key].prv += Number(tx.amount ?? 0)
+      const leafCode = tx.category_code ?? '__na__'
+      const isChild  = catChildMap.has(leafCode) && catChildMap.get(leafCode) === cat.code
+      const key         = isChild ? leafCode : (tx.concept?.trim() || tx.vendor?.trim() || '(sin etiqueta)')
+      const displayName = isChild ? (catNameMap.get(leafCode) ?? leafCode) : key
+      if (!subSums[key]) subSums[key] = { cur: 0, prv: 0, displayName }
+      if (tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)   subSums[key].cur += Number(tx.amount ?? 0)
+      if (tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr) subSums[key].prv += Number(tx.amount ?? 0)
     }
-    const drivers = Object.entries(vendorSums)
-      .filter(([, v]) => v.cur > 0 || v.prv > 0)
-      .map(([key, v]) => ({
-        key,
-        curAvg:  v.cur / 12,
-        prvAvg:  v.prv / 12,
-        yoyPct:  v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
+    const drivers = Object.values(subSums)
+      .filter(v => v.cur > 0 || v.prv > 0)
+      .map(v => ({
+        key:    v.displayName,
+        curAvg: v.cur / 12,
+        prvAvg: v.prv / 12,
+        yoyPct: v.prv > 0 ? (v.cur - v.prv) / v.prv : null,
       }))
       .sort((a, b) => b.curAvg - a.curAvg)
       .slice(0, 8)
@@ -393,7 +397,6 @@ export default async function ProgresoPage() {
           prvTotal:      liPrvTotal,
           monthly:       liMonthly,
           topCats:       liTopCatsWithDrivers,
-          excludeCount:  excludeCats.length,
         }}
       />
     </div>

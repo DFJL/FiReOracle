@@ -15,7 +15,6 @@ type LifestyleData = {
   prvTotal: number
   monthly: { label: string; necesario: number; personal: number }[]
   topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
-  excludeCount: number
 }
 
 type Props = {
@@ -1063,7 +1062,7 @@ function fmtCRC(n: number) {
 }
 
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
-  const { inflationRate, curTotal, prvTotal, monthly, topCats, excludeCount } = data
+  const { inflationRate, curTotal, prvTotal, monthly, topCats } = data
   const [openCat, setOpenCat] = useState<string | null>(null)
 
   const totalPct    = prvTotal > 0 ? (curTotal - prvTotal) / prvTotal : null
@@ -1082,8 +1081,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
             Inflación de Estilo de Vida
           </p>
           <p className="text-[9px] text-zinc-600">
-            Últimos 12m vs período anterior · excluye inversiones
-            {excludeCount > 0 && ` · ${excludeCount} categoría${excludeCount !== 1 ? 's' : ''} excluida${excludeCount !== 1 ? 's' : ''}`}
+            Últimos 12m vs período anterior · excluye inversiones y deuda
           </p>
         </div>
         <span className="shrink-0 text-[9px] font-black px-2.5 py-1 rounded-full"

@@ -35,7 +35,6 @@ export default async function ConfiguracionPage() {
     { data: buckets },
     { data: accounts },
     { data: fireConfig },
-    { data: expenseCategories },
     { data: loans },
     telegramConfig,
     paymentReminders,
@@ -57,10 +56,6 @@ export default async function ConfiguracionPage() {
       .eq('user_id', user.id).eq('is_active', true).order('name'),
     admin.from('user_financial_config')
       .select('*').eq('user_id', user.id).maybeSingle(),
-    admin.from('transaction_categories')
-      .select('code, name, group_gasto')
-      .eq('is_active', true).eq('category_type', 'expense')
-      .order('sort_order'),
     admin.from('loans')
       .select('id, name, payment_day, currency_code')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
@@ -86,7 +81,7 @@ export default async function ConfiguracionPage() {
 
         {/* ── 1. Perfil & FIRE ─────────────────────── */}
         <Section label="Perfil & FIRE" sub="Parámetros iniciales — actualizalos cuando cambien tus metas o ingresos.">
-          <FireConfigManager existing={fireConfig ?? null} expenseCategories={expenseCategories ?? []} />
+          <FireConfigManager existing={fireConfig ?? null} />
         </Section>
 
         {/* ── 2. Alertas & Recordatorios ───────────── */}

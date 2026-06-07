@@ -8,29 +8,25 @@ type ExistingConfig = Omit<FinancialConfigData, 'preferred_currency' | 'lifestyl
   lifestyle_exclude_categories?: string[] | null
 }
 
-type ExpenseCat = { code: string; name: string; group_gasto: string | null }
-
 type Props = {
   existing: ExistingConfig | null
-  expenseCategories: ExpenseCat[]
 }
 
 function pct(val: number) { return (val * 100).toFixed(1) }
 function rate(val: number) { return (val * 100).toFixed(2) }
 
-export function FireConfigManager({ existing, expenseCategories }: Props) {
-  const defaults: FinancialConfigData = {
-    fire_withdrawal_rate:   existing?.fire_withdrawal_rate   ?? 0.04,
+export function FireConfigManager({ existing }: Props) {
+  const defaults = {
+    fire_withdrawal_rate:    existing?.fire_withdrawal_rate    ?? 0.04,
     fire_target_monthly_exp: existing?.fire_target_monthly_exp ?? null,
-    fire_expected_return:   existing?.fire_expected_return   ?? 0.07,
-    fire_inflation_rate:    existing?.fire_inflation_rate    ?? 0.04,
-    runway_green_months:    existing?.runway_green_months    ?? 6,
-    runway_yellow_months:   existing?.runway_yellow_months   ?? 3,
-    savings_rate_green:              existing?.savings_rate_green              ?? 0.30,
-    savings_rate_yellow:             existing?.savings_rate_yellow             ?? 0.15,
-    fcf_target_ratio:                existing?.fcf_target_ratio                ?? 0.20,
-    preferred_currency:              (existing?.preferred_currency as 'CRC' | 'USD' | undefined) ?? 'USD',
-    lifestyle_exclude_categories:    (existing?.lifestyle_exclude_categories as string[] | null) ?? [],
+    fire_expected_return:    existing?.fire_expected_return    ?? 0.07,
+    fire_inflation_rate:     existing?.fire_inflation_rate     ?? 0.04,
+    runway_green_months:     existing?.runway_green_months     ?? 6,
+    runway_yellow_months:    existing?.runway_yellow_months    ?? 3,
+    savings_rate_green:      existing?.savings_rate_green      ?? 0.30,
+    savings_rate_yellow:     existing?.savings_rate_yellow     ?? 0.15,
+    fcf_target_ratio:        existing?.fcf_target_ratio        ?? 0.20,
+    preferred_currency:      (existing?.preferred_currency as 'CRC' | 'USD' | undefined) ?? 'USD',
   }
 
   const [withdrawal, setWithdrawal]         = useState(pct(defaults.fire_withdrawal_rate))
@@ -42,10 +38,9 @@ export function FireConfigManager({ existing, expenseCategories }: Props) {
   const [srGreen, setSrGreen]               = useState(pct(defaults.savings_rate_green))
   const [srYellow, setSrYellow]             = useState(pct(defaults.savings_rate_yellow))
   const [fcfTarget, setFcfTarget]           = useState(pct(defaults.fcf_target_ratio))
-  const [currency, setCurrency]             = useState<'CRC' | 'USD'>(defaults.preferred_currency ?? 'USD')
-  const [excludeCats, setExcludeCats]       = useState<string[]>(defaults.lifestyle_exclude_categories)
-  const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [currency, setCurrency]             = useState<'CRC' | 'USD'>(defaults.preferred_currency)
+  const [error, setError]   = useState<string | null>(null)
+  const [saved, setSaved]   = useState(false)
   const [isPending, startTransition] = useTransition()
 
   function submit(e: React.FormEvent) {
@@ -60,11 +55,10 @@ export function FireConfigManager({ existing, expenseCategories }: Props) {
       fire_inflation_rate:     parseFloat(inflation) / 100,
       runway_green_months:     parseInt(runwayGreen),
       runway_yellow_months:    parseInt(runwayYellow),
-      savings_rate_green:              parseFloat(srGreen) / 100,
-      savings_rate_yellow:             parseFloat(srYellow) / 100,
-      fcf_target_ratio:                parseFloat(fcfTarget) / 100,
-      preferred_currency:              currency,
-      lifestyle_exclude_categories:    excludeCats,
+      savings_rate_green:      parseFloat(srGreen) / 100,
+      savings_rate_yellow:     parseFloat(srYellow) / 100,
+      fcf_target_ratio:        parseFloat(fcfTarget) / 100,
+      preferred_currency:      currency,
     }
 
     startTransition(async () => {
@@ -159,49 +153,6 @@ export function FireConfigManager({ existing, expenseCategories }: Props) {
             onChange={e => setFcfTarget(e.target.value)} className={inputCls} />
         </div>
       </div>
-
-      {/* Lifestyle inflation exclusions */}
-      {expenseCategories.length > 0 && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">Excluir del análisis de inflación de estilo de vida</p>
-            <p className="text-[9px] text-zinc-700 mt-0.5">Marcá categorías one-time o no recurrentes (ej: remodelación, compra de casa)</p>
-          </div>
-          <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-            {(['necesario', 'personal', null] as const).map(group => {
-              const cats = expenseCategories.filter(c => c.group_gasto === group)
-              if (cats.length === 0) return null
-              const groupLabel = group === 'necesario' ? 'Necesario' : group === 'personal' ? 'Personal' : 'Sin grupo'
-              return (
-                <div key={group ?? 'na'} className="space-y-0.5">
-                  <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.12em] px-1 pt-1.5">{groupLabel}</p>
-                  {cats.map(c => {
-                    const checked = excludeCats.includes(c.code)
-                    return (
-                      <label key={c.code} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                        checked ? 'bg-rose-500/10 border border-rose-500/20' : 'hover:bg-white/[0.03] border border-transparent'
-                      }`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={e => setExcludeCats(prev =>
-                            e.target.checked ? [...prev, c.code] : prev.filter(x => x !== c.code)
-                          )}
-                          className="accent-rose-400 w-3 h-3 shrink-0"
-                        />
-                        <span className={`text-[10px] ${checked ? 'text-rose-300' : 'text-zinc-400'}`}>{c.name}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
-          {excludeCats.length > 0 && (
-            <p className="text-[9px] text-rose-400/70">{excludeCats.length} categoría{excludeCats.length !== 1 ? 's' : ''} excluida{excludeCats.length !== 1 ? 's' : ''}</p>
-          )}
-        </div>
-      )}
 
       {/* Currency preference */}
       <div className="space-y-3">
