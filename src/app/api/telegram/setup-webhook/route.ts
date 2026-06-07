@@ -13,7 +13,7 @@ export async function GET() {
   if (!token)  return Response.json({ error: 'TELEGRAM_BOT_TOKEN no configurado' }, { status: 503 })
   if (!appUrl) return Response.json({ error: 'NEXT_PUBLIC_APP_URL no configurado' }, { status: 503 })
 
-  const webhookUrl = `https://${appUrl.replace(/^https?:\/\//, '')}/api/telegram/webhook`
+  const webhookUrl = `https://${appUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')}/api/telegram/webhook`
   const secret     = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
 
   const res = await fetch(
