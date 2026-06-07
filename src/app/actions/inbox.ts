@@ -390,3 +390,68 @@ export async function deletePaymentReminder(id: string): Promise<{ error: string
 
   return { error: error?.message ?? null }
 }
+
+// ── Reminder suggestions from transaction history ─────────────────────────────
+
+export type ReminderSuggestion = {
+  vendor: string
+  amount: number
+  currency_code: string
+  due_day: number
+  frequency: number
+}
+
+export async function suggestPaymentReminders(): Promise<ReminderSuggestion[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const since = new Date()
+  since.setMonth(since.getMonth() - 6)
+
+  const { data: txs } = await createAdminClient()
+    .from('transactions')
+    .select('vendor, amount, currency_code, date')
+    .eq('user_id', user.id)
+    .eq('movement_type', 'expense')
+    .gte('date', since.toISOString().slice(0, 10))
+    .not('vendor', 'is', null)
+    .not('amount', 'is', null)
+    .limit(600)
+
+  if (!txs || txs.length === 0) return []
+
+  const groups: Record<string, { amounts: number[]; days: number[]; currency: string; origName: string }> = {}
+  for (const tx of txs) {
+    if (!tx.vendor || !tx.amount || !tx.date) continue
+    const key = tx.vendor.toLowerCase().trim()
+    if (!groups[key]) groups[key] = { amounts: [], days: [], currency: tx.currency_code ?? 'CRC', origName: tx.vendor }
+    groups[key].amounts.push(Number(tx.amount))
+    groups[key].days.push(new Date(tx.date + 'T12:00:00').getDate())
+  }
+
+  const suggestions: ReminderSuggestion[] = []
+
+  for (const data of Object.values(groups)) {
+    if (data.amounts.length < 3) continue
+
+    const avg = data.amounts.reduce((a, b) => a + b, 0) / data.amounts.length
+    // Skip vendors with wildly varying amounts — not recurring fixed payments
+    const tooVariable = data.amounts.some(a => Math.abs(a - avg) / avg > 0.5)
+    if (tooVariable) continue
+
+    const dayFreq: Record<number, number> = {}
+    for (const d of data.days) dayFreq[d] = (dayFreq[d] ?? 0) + 1
+    const dueDay = parseInt(Object.entries(dayFreq).sort((a, b) => b[1] - a[1])[0][0])
+
+    suggestions.push({
+      vendor:        data.origName,
+      amount:        Math.round(avg),
+      currency_code: data.currency,
+      due_day:       dueDay,
+      frequency:     data.amounts.length,
+    })
+  }
+
+  return suggestions.sort((a, b) => b.frequency - a.frequency).slice(0, 8)
+}

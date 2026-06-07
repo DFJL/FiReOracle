@@ -5,13 +5,12 @@ import { useRouter } from 'next/navigation'
 import {
   confirmInboxItem, discardInboxItem, insertManualInboxItem,
   reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
-  upsertPaymentReminder, deletePaymentReminder,
 } from '@/app/actions/inbox'
-import type { InboxItem, ExtractedFields, PaymentReminder } from '@/app/actions/inbox'
+import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
 import {
   CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox,
-  ClipboardPaste, Loader2, RefreshCw, Plus, Trash2, Bell, BellPlus,
-  Sparkles, RotateCcw, CalendarClock,
+  ClipboardPaste, Loader2, RefreshCw, Plus, Trash2,
+  Sparkles, RotateCcw,
 } from 'lucide-react'
 
 type Category = {
@@ -42,7 +41,6 @@ type Loan = {
   lender: string | null
   currency_code: string | null
   current_balance: number | null
-  payment_day: number | null
 }
 
 type Props = {
@@ -51,7 +49,6 @@ type Props = {
   connectedAccounts: ConnectedAccount[]
   envelopes: Envelope[]
   loans: Loan[]
-  paymentReminders: PaymentReminder[]
   gmailStatus: string | null
 }
 
@@ -82,16 +79,6 @@ function relativeTime(iso: string | null): string {
   if (hrs < 24) return `hace ${hrs}h`
   const days = Math.floor(hrs / 24)
   return `hace ${days}d`
-}
-
-function nextDueDate(dueDay: number, today: Date): Date {
-  const d = new Date(today.getFullYear(), today.getMonth(), dueDay)
-  if (d <= today) d.setMonth(d.getMonth() + 1)
-  return d
-}
-
-function daysUntil(target: Date, today: Date): number {
-  return Math.ceil((target.getTime() - today.setHours(0, 0, 0, 0)) / 86400000)
 }
 
 // ── ItemCard ─────────────────────────────────────────────────────────────────
@@ -610,194 +597,6 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
   )
 }
 
-// ── PaymentRemindersPanel ─────────────────────────────────────────────────────
-
-function PaymentRemindersPanel({
-  loans,
-  initialReminders,
-}: {
-  loans: Loan[]
-  initialReminders: PaymentReminder[]
-}) {
-  const router = useRouter()
-  const [reminders, setReminders] = useState<PaymentReminder[]>(initialReminders)
-  const [showAdd, setShowAdd] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', amount: '', currency_code: 'CRC', due_day: '', notes: '' })
-
-  const today = new Date()
-
-  type UpcomingItem = {
-    key: string
-    name: string
-    daysLeft: number
-    dueDate: Date
-    amount: number | null
-    currency: string | null
-    type: 'loan' | 'reminder'
-    id?: string
-  }
-
-  const upcomingLoans: UpcomingItem[] = loans
-    .filter(l => l.payment_day != null)
-    .map(l => {
-      const due = nextDueDate(l.payment_day!, today)
-      return { key: `loan-${l.id}`, name: l.name, daysLeft: daysUntil(due, new Date(today)), dueDate: due, amount: null, currency: l.currency_code, type: 'loan' as const }
-    })
-
-  const upcomingReminders: UpcomingItem[] = reminders.map(r => {
-    const due = nextDueDate(r.due_day, today)
-    return { key: `rem-${r.id}`, name: r.name, daysLeft: daysUntil(due, new Date(today)), dueDate: due, amount: r.amount, currency: r.currency_code, type: 'reminder' as const, id: r.id }
-  })
-
-  const all = [...upcomingLoans, ...upcomingReminders]
-    .filter(i => i.daysLeft <= 45)
-    .sort((a, b) => a.daysLeft - b.daysLeft)
-
-  async function handleAdd() {
-    if (!form.name || !form.due_day) return
-    setSaving(true)
-    const res = await upsertPaymentReminder({
-      name:          form.name,
-      amount:        form.amount ? parseFloat(form.amount) : null,
-      currency_code: form.currency_code,
-      due_day:       parseInt(form.due_day),
-      notes:         form.notes || null,
-    })
-    setSaving(false)
-    if (!res.error) {
-      setForm({ name: '', amount: '', currency_code: 'CRC', due_day: '', notes: '' })
-      setShowAdd(false)
-      router.refresh()
-    }
-  }
-
-  async function handleDelete(id: string) {
-    setDeleting(id)
-    await deletePaymentReminder(id)
-    setReminders(r => r.filter(x => x.id !== id))
-    setDeleting(null)
-  }
-
-  function urgencyColor(days: number) {
-    if (days <= 3)  return 'text-rose-400 bg-rose-500/10 border-rose-500/20'
-    if (days <= 7)  return 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-    return 'text-zinc-400 bg-white/[0.03] border-white/[0.06]'
-  }
-
-  return (
-    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <CalendarClock size={13} className="text-zinc-500 shrink-0" />
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] flex-1">Recordatorios de pago</p>
-        <button
-          onClick={() => setShowAdd(o => !o)}
-          className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors"
-        >
-          <BellPlus size={10} />
-          Agregar
-        </button>
-      </div>
-
-      {all.length === 0 && !showAdd && (
-        <p className="text-[10px] text-zinc-600 px-1">Sin pagos próximos en los próximos 45 días.</p>
-      )}
-
-      {all.length > 0 && (
-        <div className="space-y-1.5">
-          {all.map(item => (
-            <div key={item.key} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs ${urgencyColor(item.daysLeft)}`}>
-              <Bell size={11} className="shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold truncate">{item.name}</p>
-                {item.amount && item.currency && (
-                  <p className="text-[9px] opacity-70">{fmtAmt(item.amount, item.currency)}</p>
-                )}
-              </div>
-              <div className="text-right shrink-0">
-                <p className="font-black text-[11px]">
-                  {item.daysLeft === 0 ? '¡Hoy!' : item.daysLeft === 1 ? 'Mañana' : `${item.daysLeft}d`}
-                </p>
-                <p className="text-[9px] opacity-60">
-                  {item.dueDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short' })}
-                </p>
-              </div>
-              {item.type === 'reminder' && item.id && (
-                <button
-                  onClick={() => handleDelete(item.id!)}
-                  disabled={deleting === item.id}
-                  className="p-1 rounded hover:bg-white/[0.08] opacity-50 hover:opacity-100 transition-opacity"
-                >
-                  {deleting === item.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Add reminder form */}
-      {showAdd && (
-        <div className="border-t border-white/[0.06] pt-3 space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="col-span-2">
-              <input
-                type="text"
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Nombre del pago (ej: Internet, Agua)"
-                className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
-              />
-            </div>
-            <input
-              type="number"
-              value={form.amount}
-              onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-              placeholder="Monto (opcional)"
-              className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
-            />
-            <div className="flex gap-1">
-              <select
-                value={form.currency_code}
-                onChange={e => setForm(f => ({ ...f, currency_code: e.target.value }))}
-                className="w-20 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none"
-              >
-                <option value="CRC" className="bg-[#111]">₡ CRC</option>
-                <option value="USD" className="bg-[#111]">$ USD</option>
-              </select>
-              <input
-                type="number"
-                value={form.due_day}
-                onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))}
-                placeholder="Día (1-31)"
-                min={1} max={31}
-                className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
-              />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAdd}
-              disabled={saving || !form.name || !form.due_day}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors disabled:opacity-40"
-            >
-              {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-              Guardar
-            </button>
-            <button
-              onClick={() => setShowAdd(false)}
-              className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── PastePanel ────────────────────────────────────────────────────────────────
 
 function PastePanel() {
@@ -898,7 +697,7 @@ function PastePanel() {
 
 // ── InboxClient (main) ────────────────────────────────────────────────────────
 
-export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, paymentReminders, gmailStatus }: Props) {
+export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, gmailStatus }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
   const [batchPending, setBatchPending] = useState(false)
@@ -974,11 +773,6 @@ export function InboxClient({ items, categories, connectedAccounts, envelopes, l
 
       {/* Email accounts panel */}
       <EmailAccountsPanel accounts={connectedAccounts} />
-
-      {/* Payment reminders */}
-      {(loans.some(l => l.payment_day) || paymentReminders.length > 0) && (
-        <PaymentRemindersPanel loans={loans} initialReminders={paymentReminders} />
-      )}
 
       {/* Paste panel */}
       <PastePanel />

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
-import { getInboxItems, getPaymentReminders } from '@/app/actions/inbox'
+import { getInboxItems } from '@/app/actions/inbox'
 import { InboxClient } from './InboxClient'
 
 export default async function MovimientosPage({
@@ -16,7 +16,7 @@ export default async function MovimientosPage({
   const params = await searchParams
   const admin  = createAdminClient()
 
-  const [items, { data: categories }, { data: connectedAccounts }, { data: envelopes }, { data: loans }, paymentReminders] = await Promise.all([
+  const [items, { data: categories }, { data: connectedAccounts }, { data: envelopes }, { data: loans }] = await Promise.all([
     getInboxItems(),
     admin
       .from('transaction_categories')
@@ -36,12 +36,11 @@ export default async function MovimientosPage({
       .order('sort_order'),
     admin
       .from('loans')
-      .select('id, name, lender, currency_code, current_balance, payment_day')
+      .select('id, name, lender, currency_code, current_balance')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
       .order('name'),
-    getPaymentReminders(),
   ])
 
   return (
@@ -52,7 +51,6 @@ export default async function MovimientosPage({
         connectedAccounts={connectedAccounts ?? []}
         envelopes={envelopes ?? []}
         loans={loans ?? []}
-        paymentReminders={paymentReminders}
         gmailStatus={params.gmail ?? params.yahoo ?? null}
       />
     </div>
