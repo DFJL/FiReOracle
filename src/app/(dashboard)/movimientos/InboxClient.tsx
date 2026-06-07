@@ -1,9 +1,18 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { confirmInboxItem, discardInboxItem, insertManualInboxItem } from '@/app/actions/inbox'
-import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
-import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox, ClipboardPaste, Loader2, RefreshCw, Plus, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import {
+  confirmInboxItem, discardInboxItem, insertManualInboxItem,
+  reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
+  upsertPaymentReminder, deletePaymentReminder,
+} from '@/app/actions/inbox'
+import type { InboxItem, ExtractedFields, PaymentReminder } from '@/app/actions/inbox'
+import {
+  CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox,
+  ClipboardPaste, Loader2, RefreshCw, Plus, Trash2, Bell, BellPlus,
+  Sparkles, RotateCcw, CalendarClock,
+} from 'lucide-react'
 
 type Category = {
   code: string
@@ -18,6 +27,7 @@ type ConnectedAccount = {
   email: string
   provider: string
   connected_at: string | null
+  last_synced_at: string | null
 }
 
 type Envelope = {
@@ -32,6 +42,7 @@ type Loan = {
   lender: string | null
   currency_code: string | null
   current_balance: number | null
+  payment_day: number | null
 }
 
 type Props = {
@@ -40,13 +51,14 @@ type Props = {
   connectedAccounts: ConnectedAccount[]
   envelopes: Envelope[]
   loans: Loan[]
+  paymentReminders: PaymentReminder[]
   gmailStatus: string | null
 }
 
 const MOVEMENT_LABELS: Record<string, string> = {
-  expense:          'Gasto',
-  income:           'Ingreso',
-  cash_withdrawal:  'Retiro',
+  expense:         'Gasto',
+  income:          'Ingreso',
+  cash_withdrawal: 'Retiro',
 }
 
 const CONFIDENCE_COLOR: Record<string, string> = {
@@ -60,6 +72,30 @@ function fmtAmt(amount: number, currency: string) {
   return `${sym}${Math.round(amount).toLocaleString('es-CR')}`
 }
 
+function relativeTime(iso: string | null): string {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 2) return 'hace un momento'
+  if (mins < 60) return `hace ${mins}m`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `hace ${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `hace ${days}d`
+}
+
+function nextDueDate(dueDay: number, today: Date): Date {
+  const d = new Date(today.getFullYear(), today.getMonth(), dueDay)
+  if (d <= today) d.setMonth(d.getMonth() + 1)
+  return d
+}
+
+function daysUntil(target: Date, today: Date): number {
+  return Math.ceil((target.getTime() - today.setHours(0, 0, 0, 0)) / 86400000)
+}
+
+// ── ItemCard ─────────────────────────────────────────────────────────────────
+
 function ItemCard({
   item,
   categories,
@@ -71,33 +107,64 @@ function ItemCard({
   envelopes: Envelope[]
   loans: Loan[]
 }) {
+  const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(item.status === 'pending')
   const [err, setErr] = useState<string | null>(null)
   const [envelopeId, setEnvelopeId] = useState<string>('')
   const [loanId, setLoanId] = useState<string>('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState<string | null>(null)
+  const [reExtracting, setReExtracting] = useState(false)
 
   const ext = item.extracted
   const [fields, setFields] = useState<ExtractedFields>(
     ext ?? {
-      amount: 0,
-      currency: 'CRC',
-      vendor: '',
-      concept: '',
-      date: new Date().toISOString().slice(0, 10),
+      amount:        0,
+      currency:      'CRC',
+      vendor:        '',
+      concept:       '',
+      date:          new Date().toISOString().slice(0, 10),
       movement_type: 'expense',
-      confidence: 'low',
+      confidence:    'low',
     },
   )
 
+  const isOld = item.email_date
+    ? Date.now() - new Date(item.email_date).getTime() > 30 * 86400000
+    : false
+
   function handleCategoryChange(code: string) {
     const cat = categories.find(c => c.code === code)
+    setSuggestion(null)
     setFields(f => ({
       ...f,
-      category_code:   code || undefined,
-      expense_group:   cat?.group_gasto && cat.group_gasto !== 'na' ? cat.group_gasto : f.expense_group,
+      category_code:     code || undefined,
+      expense_group:     cat?.group_gasto && cat.group_gasto !== 'na' ? cat.group_gasto : f.expense_group,
       is_passive_income: cat?.is_passive_income ?? f.is_passive_income,
     }))
+  }
+
+  async function handleSuggestCategory() {
+    if (!fields.vendor) return
+    setSuggesting(true)
+    const code = await suggestCategory(fields.vendor)
+    setSuggesting(false)
+    if (code) {
+      setSuggestion(code)
+      handleCategoryChange(code)
+    } else {
+      setSuggestion('')
+    }
+  }
+
+  async function handleReExtract() {
+    setReExtracting(true)
+    setErr(null)
+    const res = await reExtractInboxItem(item.id)
+    setReExtracting(false)
+    if (res.error) setErr(res.error)
+    else router.refresh()
   }
 
   function handleConfirm() {
@@ -129,16 +196,13 @@ function ItemCard({
   }
 
   const isProcessed = item.status !== 'pending'
-
-  const incomeCategories  = categories.filter(c => c.category_type === 'income')
-  const expenseCategories = categories.filter(c => c.category_type === 'expense')
-  const relevantCats = fields.movement_type === 'income' ? incomeCategories : expenseCategories
+  const relevantCats = categories.filter(c =>
+    c.category_type === (fields.movement_type === 'income' ? 'income' : 'expense')
+  )
 
   return (
     <div className={`bg-white/[0.03] rounded-xl border transition-colors ${
-      isProcessed
-        ? 'border-white/[0.04] opacity-60'
-        : 'border-white/[0.08]'
+      isProcessed ? 'border-white/[0.04] opacity-60' : 'border-white/[0.08]'
     }`}>
       {/* Header row */}
       <button
@@ -156,6 +220,9 @@ function ItemCard({
             )}
             {item.status === 'discarded' && (
               <span className="text-[9px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">descartado</span>
+            )}
+            {isOld && item.status === 'pending' && (
+              <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">Antiguo +30d</span>
             )}
           </div>
           {ext && item.status === 'pending' && (
@@ -189,7 +256,6 @@ function ItemCard({
           {/* Editable fields */}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 grid grid-cols-3 gap-3">
-              {/* Movement type */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Tipo</label>
                 <select
@@ -204,7 +270,6 @@ function ItemCard({
                 </select>
               </div>
 
-              {/* Currency */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Moneda</label>
                 <select
@@ -218,7 +283,6 @@ function ItemCard({
                 </select>
               </div>
 
-              {/* Amount */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Monto</label>
                 <input
@@ -231,7 +295,6 @@ function ItemCard({
               </div>
             </div>
 
-            {/* Date */}
             <div>
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Fecha</label>
               <input
@@ -243,7 +306,6 @@ function ItemCard({
               />
             </div>
 
-            {/* Vendor */}
             <div>
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Comercio / Pagador</label>
               <input
@@ -256,7 +318,6 @@ function ItemCard({
               />
             </div>
 
-            {/* Concept */}
             <div className="col-span-2">
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Concepto</label>
               <input
@@ -269,23 +330,38 @@ function ItemCard({
               />
             </div>
 
-            {/* Category */}
+            {/* Category + auto-suggest */}
             <div className="col-span-2">
-              <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Categoría</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Categoría</label>
+                {!isProcessed && fields.vendor && (
+                  <button
+                    onClick={handleSuggestCategory}
+                    disabled={suggesting}
+                    className="flex items-center gap-1 text-[9px] text-zinc-500 hover:text-[#a3e635] transition-colors disabled:opacity-40"
+                  >
+                    {suggesting ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+                    Sugerir
+                  </button>
+                )}
+              </div>
               <select
                 value={fields.category_code ?? ''}
                 onChange={e => handleCategoryChange(e.target.value)}
                 disabled={isProcessed}
-                className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
               >
                 <option value="" className="bg-[#111]">(sin categoría)</option>
                 {relevantCats.map(c => (
                   <option key={c.code} value={c.code} className="bg-[#111]">{c.name}</option>
                 ))}
               </select>
+              {suggestion === '' && (
+                <p className="text-[9px] text-zinc-600 mt-0.5">Sin historial para este comercio</p>
+              )}
             </div>
 
-            {/* Envelope (sobre) */}
+            {/* Envelope */}
             {envelopes.length > 0 && (
               <div className="col-span-2">
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Sobre / Bolsillo</label>
@@ -338,7 +414,7 @@ function ItemCard({
 
           {/* Actions */}
           {!isProcessed && (
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-2 pt-1 flex-wrap">
               <button
                 onClick={handleConfirm}
                 disabled={pending || !fields.vendor || !fields.amount}
@@ -355,6 +431,15 @@ function ItemCard({
                 <XCircle size={13} />
                 Descartar
               </button>
+              <button
+                onClick={handleReExtract}
+                disabled={reExtracting || pending}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.04] text-zinc-500 text-xs font-semibold hover:bg-white/[0.08] hover:text-zinc-300 transition-colors disabled:opacity-40 ml-auto"
+                title="Re-analizar con IA"
+              >
+                {reExtracting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                Re-extraer
+              </button>
             </div>
           )}
         </div>
@@ -363,22 +448,23 @@ function ItemCard({
   )
 }
 
+// ── EmailAccountsPanel ────────────────────────────────────────────────────────
+
 function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[] }) {
+  const router = useRouter()
   const [accounts,  setAccounts]  = useState<ConnectedAccount[]>(initialAccounts)
-  const [syncing,   setSyncing]   = useState<string | null>(null)  // account id being synced
+  const [syncing,   setSyncing]   = useState<string | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
   const [removing,  setRemoving]  = useState<string | null>(null)
   const [msgs,      setMsgs]      = useState<Record<string, { ok: boolean; text: string }>>({})
 
-  async function handleSync(acc: ConnectedAccount) {
+  async function doSync(acc: ConnectedAccount): Promise<boolean> {
     setSyncing(acc.id)
     setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
     try {
       const endpoint = acc.provider === 'yahoo' ? '/api/yahoo/sync' : '/api/gmail/sync'
-      const body     = acc.provider === 'yahoo'
-        ? JSON.stringify({ accountId: acc.id })
-        : undefined
-
-      const res  = await fetch(endpoint, {
+      const body     = acc.provider === 'yahoo' ? JSON.stringify({ accountId: acc.id }) : undefined
+      const res      = await fetch(endpoint, {
         method:  'POST',
         headers: acc.provider === 'yahoo' ? { 'Content-Type': 'application/json' } : {},
         body,
@@ -386,25 +472,46 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
       const data = await res.json() as { found?: number; inserted?: number; error?: string }
 
       if (!res.ok || data.error) {
-        setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' } }))
-      } else {
-        const { found = 0, inserted = 0 } = data
-        setMsgs(m => ({
-          ...m,
-          [acc.id]: {
-            ok:   true,
-            text: inserted > 0
-              ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
-              : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
-          },
-        }))
-        if (inserted > 0) window.location.reload()
+        const isToken = data.error?.toLowerCase().includes('token') || res.status === 401
+        setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' + (isToken ? ' — reconectá la cuenta' : '') } }))
+        return false
       }
+
+      const { found = 0, inserted = 0 } = data
+      setMsgs(m => ({
+        ...m,
+        [acc.id]: {
+          ok:   true,
+          text: inserted > 0
+            ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
+            : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
+        },
+      }))
+      // Update last_synced_at locally
+      setAccounts(a => a.map(a2 => a2.id === acc.id ? { ...a2, last_synced_at: new Date().toISOString() } : a2))
+      return inserted > 0
     } catch (e) {
       setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: String(e) } }))
+      return false
     } finally {
       setSyncing(null)
     }
+  }
+
+  async function handleSync(acc: ConnectedAccount) {
+    const hadNew = await doSync(acc)
+    if (hadNew) router.refresh()
+  }
+
+  async function handleSyncAll() {
+    setSyncingAll(true)
+    let anyNew = false
+    for (const acc of accounts) {
+      const hadNew = await doSync(acc)
+      if (hadNew) anyNew = true
+    }
+    setSyncingAll(false)
+    if (anyNew) router.refresh()
   }
 
   async function handleRemove(id: string) {
@@ -423,10 +530,19 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
 
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3 space-y-2">
-      {/* Header + connect buttons */}
       <div className="flex items-center gap-2 flex-wrap">
         <Mail size={13} className="text-zinc-500 shrink-0" />
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] flex-1">Cuentas conectadas</p>
+        {accounts.length > 1 && (
+          <button
+            onClick={handleSyncAll}
+            disabled={syncingAll || !!syncing}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.06] text-zinc-300 text-[10px] font-bold hover:bg-white/[0.10] transition-colors disabled:opacity-40"
+          >
+            {syncingAll ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+            Sync todas
+          </button>
+        )}
         <a
           href="/api/auth/gmail"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#a3e635] text-black text-[10px] font-black hover:bg-[#b4f040] transition-colors"
@@ -443,7 +559,6 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
         </a>
       </div>
 
-      {/* Connected accounts list */}
       {accounts.length === 0 ? (
         <p className="text-[10px] text-zinc-600 px-1">
           Sin cuentas conectadas — conectá Gmail o Yahoo para importar correos bancarios.
@@ -459,15 +574,17 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-zinc-300 truncate">{acc.email}</p>
-                {msgs[acc.id] && (
+                {msgs[acc.id] ? (
                   <p className={`text-[9px] ${msgs[acc.id].ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>
                     {msgs[acc.id].text}
                   </p>
-                )}
+                ) : acc.last_synced_at ? (
+                  <p className="text-[9px] text-zinc-600">{relativeTime(acc.last_synced_at)}</p>
+                ) : null}
               </div>
               <button
                 onClick={() => handleSync(acc)}
-                disabled={syncing === acc.id}
+                disabled={syncing === acc.id || syncingAll}
                 className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-40"
                 title="Sync"
               >
@@ -493,7 +610,198 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
   )
 }
 
+// ── PaymentRemindersPanel ─────────────────────────────────────────────────────
+
+function PaymentRemindersPanel({
+  loans,
+  initialReminders,
+}: {
+  loans: Loan[]
+  initialReminders: PaymentReminder[]
+}) {
+  const router = useRouter()
+  const [reminders, setReminders] = useState<PaymentReminder[]>(initialReminders)
+  const [showAdd, setShowAdd] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [form, setForm] = useState({ name: '', amount: '', currency_code: 'CRC', due_day: '', notes: '' })
+
+  const today = new Date()
+
+  type UpcomingItem = {
+    key: string
+    name: string
+    daysLeft: number
+    dueDate: Date
+    amount: number | null
+    currency: string | null
+    type: 'loan' | 'reminder'
+    id?: string
+  }
+
+  const upcomingLoans: UpcomingItem[] = loans
+    .filter(l => l.payment_day != null)
+    .map(l => {
+      const due = nextDueDate(l.payment_day!, today)
+      return { key: `loan-${l.id}`, name: l.name, daysLeft: daysUntil(due, new Date(today)), dueDate: due, amount: null, currency: l.currency_code, type: 'loan' as const }
+    })
+
+  const upcomingReminders: UpcomingItem[] = reminders.map(r => {
+    const due = nextDueDate(r.due_day, today)
+    return { key: `rem-${r.id}`, name: r.name, daysLeft: daysUntil(due, new Date(today)), dueDate: due, amount: r.amount, currency: r.currency_code, type: 'reminder' as const, id: r.id }
+  })
+
+  const all = [...upcomingLoans, ...upcomingReminders]
+    .filter(i => i.daysLeft <= 45)
+    .sort((a, b) => a.daysLeft - b.daysLeft)
+
+  async function handleAdd() {
+    if (!form.name || !form.due_day) return
+    setSaving(true)
+    const res = await upsertPaymentReminder({
+      name:          form.name,
+      amount:        form.amount ? parseFloat(form.amount) : null,
+      currency_code: form.currency_code,
+      due_day:       parseInt(form.due_day),
+      notes:         form.notes || null,
+    })
+    setSaving(false)
+    if (!res.error) {
+      setForm({ name: '', amount: '', currency_code: 'CRC', due_day: '', notes: '' })
+      setShowAdd(false)
+      router.refresh()
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeleting(id)
+    await deletePaymentReminder(id)
+    setReminders(r => r.filter(x => x.id !== id))
+    setDeleting(null)
+  }
+
+  function urgencyColor(days: number) {
+    if (days <= 3)  return 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+    if (days <= 7)  return 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+    return 'text-zinc-400 bg-white/[0.03] border-white/[0.06]'
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <CalendarClock size={13} className="text-zinc-500 shrink-0" />
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] flex-1">Recordatorios de pago</p>
+        <button
+          onClick={() => setShowAdd(o => !o)}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors"
+        >
+          <BellPlus size={10} />
+          Agregar
+        </button>
+      </div>
+
+      {all.length === 0 && !showAdd && (
+        <p className="text-[10px] text-zinc-600 px-1">Sin pagos próximos en los próximos 45 días.</p>
+      )}
+
+      {all.length > 0 && (
+        <div className="space-y-1.5">
+          {all.map(item => (
+            <div key={item.key} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs ${urgencyColor(item.daysLeft)}`}>
+              <Bell size={11} className="shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold truncate">{item.name}</p>
+                {item.amount && item.currency && (
+                  <p className="text-[9px] opacity-70">{fmtAmt(item.amount, item.currency)}</p>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <p className="font-black text-[11px]">
+                  {item.daysLeft === 0 ? '¡Hoy!' : item.daysLeft === 1 ? 'Mañana' : `${item.daysLeft}d`}
+                </p>
+                <p className="text-[9px] opacity-60">
+                  {item.dueDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short' })}
+                </p>
+              </div>
+              {item.type === 'reminder' && item.id && (
+                <button
+                  onClick={() => handleDelete(item.id!)}
+                  disabled={deleting === item.id}
+                  className="p-1 rounded hover:bg-white/[0.08] opacity-50 hover:opacity-100 transition-opacity"
+                >
+                  {deleting === item.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add reminder form */}
+      {showAdd && (
+        <div className="border-t border-white/[0.06] pt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="col-span-2">
+              <input
+                type="text"
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="Nombre del pago (ej: Internet, Agua)"
+                className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
+              />
+            </div>
+            <input
+              type="number"
+              value={form.amount}
+              onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+              placeholder="Monto (opcional)"
+              className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
+            />
+            <div className="flex gap-1">
+              <select
+                value={form.currency_code}
+                onChange={e => setForm(f => ({ ...f, currency_code: e.target.value }))}
+                className="w-20 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none"
+              >
+                <option value="CRC" className="bg-[#111]">₡ CRC</option>
+                <option value="USD" className="bg-[#111]">$ USD</option>
+              </select>
+              <input
+                type="number"
+                value={form.due_day}
+                onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))}
+                placeholder="Día (1-31)"
+                min={1} max={31}
+                className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleAdd}
+              disabled={saving || !form.name || !form.due_day}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors disabled:opacity-40"
+            >
+              {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+              Guardar
+            </button>
+            <button
+              onClick={() => setShowAdd(false)}
+              className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── PastePanel ────────────────────────────────────────────────────────────────
+
 function PastePanel() {
+  const router = useRouter()
   const [open, setOpen]         = useState(false)
   const [text, setText]         = useState('')
   const [loading, setLoading]   = useState(false)
@@ -506,7 +814,6 @@ function PastePanel() {
     setMsg(null)
 
     try {
-      // Extract via Claude
       const res = await fetch('/api/inbox/extract', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -521,14 +828,14 @@ function PastePanel() {
       }
 
       const extracted: ExtractedFields = {
-        amount:       Number(data.amount ?? 0),
-        currency:     (data.currency ?? 'CRC') as 'CRC' | 'USD',
-        vendor:       String(data.vendor ?? ''),
-        concept:      String(data.concept ?? ''),
-        date:         String(data.date ?? new Date().toISOString().slice(0, 10)),
+        amount:        Number(data.amount ?? 0),
+        currency:      (data.currency ?? 'CRC') as 'CRC' | 'USD',
+        vendor:        String(data.vendor ?? ''),
+        concept:       String(data.concept ?? ''),
+        date:          String(data.date ?? new Date().toISOString().slice(0, 10)),
         movement_type: (data.movement_type ?? 'expense') as ExtractedFields['movement_type'],
         category_code: data.category_code,
-        confidence:   (data.confidence ?? 'medium') as ExtractedFields['confidence'],
+        confidence:    (data.confidence ?? 'medium') as ExtractedFields['confidence'],
       }
 
       startTransition(async () => {
@@ -539,6 +846,7 @@ function PastePanel() {
           setMsg({ ok: true, text: `Transacción extraída: ${extracted.vendor} · ${extracted.amount} ${extracted.currency}` })
           setText('')
           setOpen(false)
+          router.refresh()
         }
         setLoading(false)
       })
@@ -588,13 +896,38 @@ function PastePanel() {
   )
 }
 
-export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, gmailStatus }: Props) {
+// ── InboxClient (main) ────────────────────────────────────────────────────────
+
+export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, paymentReminders, gmailStatus }: Props) {
+  const router = useRouter()
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
+  const [batchPending, setBatchPending] = useState(false)
+  const [batchMsg, setBatchMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const pending   = items.filter(i => i.status === 'pending')
   const processed = items.filter(i => i.status !== 'pending')
+  const shown     = tab === 'pending' ? pending : processed
 
-  const shown = tab === 'pending' ? pending : processed
+  const highConfidenceCount = pending.filter(i => {
+    const ext = i.extracted
+    return ext?.confidence === 'high' && ext.amount > 0 && ext.vendor
+  }).length
+
+  async function handleBatchConfirm() {
+    setBatchPending(true)
+    setBatchMsg(null)
+    const res = await batchConfirmHighConfidence()
+    setBatchPending(false)
+    if (res.error) {
+      setBatchMsg({ ok: false, text: res.error })
+    } else {
+      setBatchMsg({
+        ok:   true,
+        text: `${res.confirmed} confirmado${res.confirmed !== 1 ? 's' : ''}${res.skipped > 0 ? `, ${res.skipped} omitido${res.skipped !== 1 ? 's' : ''}` : ''}`,
+      })
+      if (res.confirmed > 0) router.refresh()
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -642,8 +975,30 @@ export function InboxClient({ items, categories, connectedAccounts, envelopes, l
       {/* Email accounts panel */}
       <EmailAccountsPanel accounts={connectedAccounts} />
 
-      {/* Paste panel — always visible */}
+      {/* Payment reminders */}
+      {(loans.some(l => l.payment_day) || paymentReminders.length > 0) && (
+        <PaymentRemindersPanel loans={loans} initialReminders={paymentReminders} />
+      )}
+
+      {/* Paste panel */}
       <PastePanel />
+
+      {/* Batch confirm button */}
+      {tab === 'pending' && highConfidenceCount > 0 && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleBatchConfirm}
+            disabled={batchPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-xs font-bold hover:bg-[#a3e635]/20 transition-colors disabled:opacity-40"
+          >
+            {batchPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+            Confirmar todos los de alta confianza ({highConfidenceCount})
+          </button>
+          {batchMsg && (
+            <p className={`text-xs ${batchMsg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>{batchMsg.text}</p>
+          )}
+        </div>
+      )}
 
       {/* Empty state */}
       {shown.length === 0 && (

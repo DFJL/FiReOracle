@@ -115,29 +115,40 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 async function syncAccount(
   accessToken: string,
   userId: string,
+  accountId: string,
   admin: ReturnType<typeof import('@/lib/supabase/admin').createAdminClient>,
   today: string,
 ): Promise<{ found: number; inserted: number }> {
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=${encodeURIComponent(GMAIL_QUERY)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  )
-  if (!listRes.ok) return { found: 0, inserted: 0 }
+  // Paginate through all matching messages (max 200 per page)
+  const allIds: string[] = []
+  let pageToken: string | undefined
+  do {
+    const url =
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=200&q=${encodeURIComponent(GMAIL_QUERY)}` +
+      (pageToken ? `&pageToken=${pageToken}` : '')
+    const listRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (!listRes.ok) break
+    const listData = await listRes.json() as { messages?: { id: string }[]; nextPageToken?: string }
+    allIds.push(...(listData.messages ?? []).map(m => m.id))
+    pageToken = listData.nextPageToken
+  } while (pageToken)
 
-  const listData = await listRes.json() as { messages?: { id: string }[] }
-  const messageIds = (listData.messages ?? []).map(m => m.id)
-  if (messageIds.length === 0) return { found: 0, inserted: 0 }
+  await admin.from('connected_email_accounts')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('id', accountId)
+
+  if (allIds.length === 0) return { found: 0, inserted: 0 }
 
   const { data: existing } = await admin
     .from('transaction_inbox')
     .select('email_id')
     .eq('user_id', userId)
-    .in('email_id', messageIds)
+    .in('email_id', allIds)
 
   const existingIds = new Set((existing ?? []).map(r => r.email_id))
-  const newIds = messageIds.filter(id => !existingIds.has(id))
+  const newIds = allIds.filter(id => !existingIds.has(id))
 
-  if (newIds.length === 0) return { found: messageIds.length, inserted: 0 }
+  if (newIds.length === 0) return { found: allIds.length, inserted: 0 }
 
   const system = EXTRACTION_SYSTEM.replace('__TODAY__', today)
   let inserted = 0
@@ -213,6 +224,7 @@ async function syncAccount(
 
       await admin.from('transaction_inbox').insert({
         user_id:     userId,
+        account_id:  accountId,
         email_id:    msgId,
         email_date:  emailDate,
         raw_subject: subject.slice(0, 500),
@@ -226,7 +238,7 @@ async function syncAccount(
     }
   }
 
-  return { found: messageIds.length, inserted }
+  return { found: allIds.length, inserted }
 }
 
 export async function POST() {
@@ -256,7 +268,7 @@ export async function POST() {
       results.push({ email: account.email, found: 0, inserted: 0, error: 'Token inválido' })
       continue
     }
-    const { found, inserted } = await syncAccount(accessToken, user.id, admin, today)
+    const { found, inserted } = await syncAccount(accessToken, user.id, account.id, admin, today)
     totalFound    += found
     totalInserted += inserted
     results.push({ email: account.email, found, inserted })

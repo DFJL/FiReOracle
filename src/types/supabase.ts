@@ -544,6 +544,7 @@ export type Database = {
           created_at: string | null
           email: string
           id: string
+          last_synced_at: string | null
           provider: string
           refresh_token: string
           user_id: string
@@ -553,6 +554,7 @@ export type Database = {
           created_at?: string | null
           email: string
           id?: string
+          last_synced_at?: string | null
           provider?: string
           refresh_token: string
           user_id: string
@@ -562,6 +564,7 @@ export type Database = {
           created_at?: string | null
           email?: string
           id?: string
+          last_synced_at?: string | null
           provider?: string
           refresh_token?: string
           user_id?: string
@@ -1272,6 +1275,42 @@ export type Database = {
           },
         ]
       }
+      payment_reminders: {
+        Row: {
+          amount: number | null
+          created_at: string
+          currency_code: string
+          due_day: number
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          user_id: string
+        }
+        Insert: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          due_day: number
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          due_day?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       payment_sources: {
         Row: {
           bank_name: string | null
@@ -1784,6 +1823,7 @@ export type Database = {
       }
       transaction_inbox: {
         Row: {
+          account_id: string | null
           created_at: string
           email_date: string | null
           email_id: string
@@ -1795,6 +1835,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          account_id?: string | null
           created_at?: string
           email_date?: string | null
           email_id: string
@@ -1806,6 +1847,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          account_id?: string | null
           created_at?: string
           email_date?: string | null
           email_id?: string
@@ -1816,7 +1858,15 @@ export type Database = {
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "transaction_inbox_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "connected_email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       transactions: {
         Row: {

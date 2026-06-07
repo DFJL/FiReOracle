@@ -256,6 +256,7 @@ export async function POST(req: Request) {
 
         await admin.from('transaction_inbox').insert({
           user_id:     user.id,
+          account_id:  accountId,
           email_id:    msgId,
           email_date:  emailDate,
           raw_subject: subject.slice(0, 500),
@@ -270,6 +271,9 @@ export async function POST(req: Request) {
     }
 
     await client.logout()
+    await admin.from('connected_email_accounts')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', accountId)
   } catch (err) {
     console.error('Yahoo IMAP error:', err)
     return Response.json({ error: 'Error conectando a Yahoo Mail — verificá los permisos de la app' }, { status: 502 })
