@@ -534,7 +534,7 @@ function EditTransactionModal({ tx, categories, onClose }: {
   // Loan linkage (for LOAN_PAYMENT transactions)
   const [loans, setLoans]                       = useState<ActiveLoan[]>([])
   const [selectedLoanId, setSelectedLoanId]     = useState('')
-  const [initialLoanLink, setInitialLoanLink]   = useState<{ loanPaymentId: string; loanName: string; balanceAfter: number } | null>(null)
+  const [initialLoanLink, setInitialLoanLink]   = useState<{ loanPaymentId: string; loanId: string; loanName: string; balanceAfter: number } | null>(null)
   const [loanBalAfter, setLoanBalAfter]         = useState('')
   const [loansReady, setLoansReady]             = useState(false)
 
