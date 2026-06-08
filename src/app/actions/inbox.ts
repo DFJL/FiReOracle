@@ -76,6 +76,7 @@ export async function confirmInboxItem(
     envelope_id?: string
     loan_id?: string
   },
+  options?: { force?: boolean },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -83,22 +84,38 @@ export async function confirmInboxItem(
 
   const admin = createAdminClient()
 
-  // Soft duplicate check: same movement_type + amount within ±1% on ±1 day
-  const dayBefore = new Date(new Date(tx.date).getTime() - 86400000).toISOString().slice(0, 10)
-  const dayAfter  = new Date(new Date(tx.date).getTime() + 86400000).toISOString().slice(0, 10)
-  const { data: dupes } = await admin
-    .from('transactions')
-    .select('id, amount, date')
-    .eq('user_id', user.id)
-    .eq('movement_type', tx.movement_type)
-    .gte('date', dayBefore)
-    .lte('date', dayAfter)
-    .gte('amount', tx.amount * 0.99)
-    .lte('amount', tx.amount * 1.01)
-    .limit(1)
+  if (!options?.force) {
+    // Soft duplicate check: same movement_type + amount within ±1% on ±1 day
+    // Also fetch vendor so we can skip the warning when vendors are clearly different
+    const dayBefore = new Date(new Date(tx.date).getTime() - 86400000).toISOString().slice(0, 10)
+    const dayAfter  = new Date(new Date(tx.date).getTime() + 86400000).toISOString().slice(0, 10)
+    const { data: dupes } = await admin
+      .from('transactions')
+      .select('id, amount, date, vendor, concept')
+      .eq('user_id', user.id)
+      .eq('movement_type', tx.movement_type)
+      .gte('date', dayBefore)
+      .lte('date', dayAfter)
+      .gte('amount', tx.amount * 0.99)
+      .lte('amount', tx.amount * 1.01)
+      .limit(5)
 
-  if (dupes && dupes.length > 0) {
-    return { error: `Posible duplicado: ya existe una tx similar del ${dupes[0].date} por ${dupes[0].amount}` }
+    const newVendor = tx.vendor?.trim().toLowerCase() ?? ''
+    const realDupe = (dupes ?? []).find(d => {
+      const existVendor = (d.vendor as string | null)?.trim().toLowerCase() ?? ''
+      // If both have vendors and neither contains the first 4 chars of the other → different place, not a dupe
+      if (newVendor.length >= 4 && existVendor.length >= 4) {
+        const overlap = newVendor.slice(0, 4) === existVendor.slice(0, 4)
+          || existVendor.includes(newVendor.slice(0, 6))
+          || newVendor.includes(existVendor.slice(0, 6))
+        if (!overlap) return false
+      }
+      return true
+    })
+
+    if (realDupe) {
+      return { error: `Posible duplicado: ya existe una tx similar del ${realDupe.date} por ${realDupe.amount}` }
+    }
   }
 
   // Insert transaction (year/month/day/weekday are generated columns — omit them)

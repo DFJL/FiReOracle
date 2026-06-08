@@ -98,6 +98,7 @@ function ItemCard({
   const [pending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(item.status === 'pending')
   const [err, setErr] = useState<string | null>(null)
+  const [dupeForce, setDupeForce] = useState(false)
   const [envelopeId, setEnvelopeId] = useState<string>('')
   const [loanId, setLoanId] = useState<string>('')
   const [suggesting, setSuggesting] = useState(false)
@@ -154,7 +155,7 @@ function ItemCard({
     else router.refresh()
   }
 
-  function handleConfirm() {
+  function handleConfirm(force = false) {
     setErr(null)
     startTransition(async () => {
       const res = await confirmInboxItem(item.id, {
@@ -169,8 +170,11 @@ function ItemCard({
         is_passive_income: fields.is_passive_income,
         envelope_id:       envelopeId || undefined,
         loan_id:           loanId || undefined,
-      })
-      if (res.error) setErr(res.error)
+      }, { force })
+      if (res.error) {
+        if (res.error.startsWith('Posible duplicado')) setDupeForce(true)
+        setErr(res.error)
+      }
     })
   }
 
@@ -396,14 +400,25 @@ function ItemCard({
           </div>
 
           {err && (
-            <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{err}</p>
+            <div className="rounded-lg px-3 py-2 bg-rose-500/10 space-y-2">
+              <p className="text-xs text-rose-400">{err}</p>
+              {dupeForce && (
+                <button
+                  onClick={() => handleConfirm(true)}
+                  disabled={pending}
+                  className="text-[11px] font-black text-amber-400 underline underline-offset-2 hover:text-amber-300 transition-colors disabled:opacity-40"
+                >
+                  Guardar de todas formas
+                </button>
+              )}
+            </div>
           )}
 
           {/* Actions */}
           {!isProcessed && (
             <div className="flex gap-2 pt-1 flex-wrap">
               <button
-                onClick={handleConfirm}
+                onClick={() => handleConfirm(false)}
                 disabled={pending || !fields.vendor || !fields.amount}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
