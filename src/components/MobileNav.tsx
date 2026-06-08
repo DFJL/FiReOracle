@@ -20,6 +20,7 @@ import {
   FileText,
   Grid3x3,
   X,
+  LogOut,
 } from 'lucide-react'
 
 interface BottomItem {
@@ -100,6 +101,31 @@ function isActive(pathname: string, href: string) {
   return pathname === href || (href !== '/resumen' && pathname.startsWith(href))
 }
 
+const ROUTE_LABELS: Record<string, string> = {
+  '/resumen':       'Resumen',
+  '/flujo':         'Flujo de Caja',
+  '/presupuesto':   'Presupuesto',
+  '/movimientos':   'Bandeja',
+  '/inversiones':   'Portafolio',
+  '/liquidez':      'Liquidez',
+  '/prestamos':     'Préstamos',
+  '/patrimonio':    'Patrimonio',
+  '/progreso':      'FIRE · Progreso',
+  '/metas':         'FIRE · Metas',
+  '/oracle':        'Oracle',
+  '/reporte':       'Reporte Mensual',
+  '/auditoria':     'Auditoría',
+  '/configuracion': 'Configuración',
+}
+
+export function MobilePageTitle() {
+  const pathname = usePathname()
+  const key = Object.keys(ROUTE_LABELS).find(k => pathname === k || (k !== '/resumen' && pathname.startsWith(k)))
+  const label = key ? ROUTE_LABELS[key] : ''
+  if (!label) return null
+  return <span className="text-xs font-bold tracking-wider text-zinc-300 truncate max-w-[160px]">{label}</span>
+}
+
 export function MobileNav({ pendingCount }: { pendingCount: number }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -137,7 +163,7 @@ export function MobileNav({ pendingCount }: { pendingCount: number }) {
 
         <div className="px-4 pb-5 overflow-y-auto max-h-[65vh]">
           {MORE_GROUPS.map(group => (
-            <div key={group.label} className="mb-4 last:mb-0">
+            <div key={group.label} className="mb-4">
               <p className="px-1 mb-2 text-[9px] font-black tracking-[0.2em] uppercase text-zinc-700">
                 {group.label}
               </p>
@@ -164,6 +190,19 @@ export function MobileNav({ pendingCount }: { pendingCount: number }) {
               </div>
             </div>
           ))}
+
+          {/* Logout */}
+          <div className="mt-2 pt-3 border-t border-white/[0.06]">
+            <form action="/auth/signout" method="POST">
+              <button
+                type="submit"
+                className="w-full flex items-center gap-2.5 px-3.5 py-3 rounded-xl text-sm font-semibold text-zinc-500 hover:text-rose-400 hover:bg-white/[0.04] transition-colors"
+              >
+                <LogOut size={18} />
+                Cerrar sesión
+              </button>
+            </form>
+          </div>
         </div>
       </div>
 

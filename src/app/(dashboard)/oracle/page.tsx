@@ -76,7 +76,7 @@ function fmtCRC(n: number) {
 }
 
 function isValuation(concept: string | null) {
-  return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
+  return /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(concept ?? '')
 }
 
 function isOutflow(tx: Tx) {
@@ -266,7 +266,7 @@ export default async function OraclePage() {
 
   // ── FIRE metrics ──────────────────────────────────────────────────────────
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
+  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgLifestyleExpenses
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const latestSnap = (snapshots ?? []).slice(-1)[0]
