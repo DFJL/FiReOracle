@@ -192,7 +192,13 @@ export default async function ProgresoPage() {
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
-  const runway     = avgMonthlyExpenses > 0 ? liquidBalance / avgMonthlyExpenses : 0
+  // Net burn = lifestyle expenses minus monthly passive income (crypto, dividends, rent, airdrops)
+  // Runway denominator uses net burn so recurring passive income is properly credited
+  const avgMonthlyPassiveIncome = passiveIncome12m / 12
+  const avgNetBurn = Math.max(avgMonthlyExpenses - avgMonthlyPassiveIncome, 0)
+  const runway = avgNetBurn > 0
+    ? liquidBalance / avgNetBurn
+    : avgMonthlyExpenses > 0 ? liquidBalance / avgMonthlyExpenses : 0
 
   const leanFireNumber = avgMonthlySurvivalExpenses > 0
     ? (avgMonthlySurvivalExpenses * 12) / swr

@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { computeAlerts } from '@/lib/alerts'
 import { AlertsBanner } from '@/components/AlertsBanner'
+import { isLoanPayment } from './resumen/categoryUtils'
 
 export async function AlertsServer({ userId }: { userId: string }) {
   const admin = createAdminClient()
@@ -40,20 +41,32 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   const { data: prevTx } = await admin
     .from('transactions')
-    .select('amount, date, category_code, movement_type')
+    .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income')
     .eq('user_id', userId)
-    .in('movement_type', ['expense', 'cash_withdrawal'])
     .gte('date', threeMonthsBackStr)
     .lt('date', thisMonthStart)
 
+  // Lifestyle expenses only — same filter as Oracle's isLifestyleOutflow and progreso's avgMonthlyExpenses
   const monthlyTotals: Record<string, number> = {}
+  const monthlyPassive: Record<string, number> = {}
   for (const tx of prevTx ?? []) {
     if (!tx.date) continue
     const ym = tx.date.slice(0, 7)
-    monthlyTotals[ym] = (monthlyTotals[ym] ?? 0) + Number(tx.amount)
+    if (tx.movement_type === 'income' && tx.is_passive_income) {
+      monthlyPassive[ym] = (monthlyPassive[ym] ?? 0) + Number(tx.amount)
+    } else if (
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      tx.expense_group !== 'objetivos_financieros' &&
+      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+    ) {
+      monthlyTotals[ym] = (monthlyTotals[ym] ?? 0) + Number(tx.amount)
+    }
   }
   const totalMonths = Object.keys(monthlyTotals).length || 1
   const avgMonthlyExpense = Object.values(monthlyTotals).reduce((s, v) => s + v, 0) / totalMonths
+  // Net burn = lifestyle expenses minus recurring passive income (crypto, airdrops, dividends, rent)
+  const avgMonthlyPassive = Object.values(monthlyPassive).reduce((s, v) => s + v, 0) / totalMonths
+  const avgNetBurn = Math.max(avgMonthlyExpense - avgMonthlyPassive, 0)
 
   // This month's spending by category_code (for budget alerts)
   const { data: thisMoTx } = await admin
@@ -135,7 +148,7 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   const alerts = computeAlerts({
     liquidBalance,
-    avgMonthlyExpense,
+    avgMonthlyExpense: avgNetBurn > 0 ? avgNetBurn : avgMonthlyExpense,
     runwayYellowMonths: Number(config.runway_yellow_months ?? 3),
     runwayGreenMonths: Number(config.runway_green_months ?? 6),
     budgetsWithCode,

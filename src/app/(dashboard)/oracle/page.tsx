@@ -279,8 +279,12 @@ export default async function OraclePage() {
   const invested   = latestSnap ? Number(latestSnap.invested_crc ?? 0) : 0
   const activosInvertibles = liquid + invested
   const fireProgress  = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
-  // Runway based on lifestyle only — how long liquid assets cover real living costs
-  const runway        = avgLifestyleExpenses > 0 ? liquid / avgLifestyleExpenses : null
+  // Runway using net burn = lifestyle minus recurring passive income
+  const avgMonthlyPassiveIncome = c.totalPassiveIncome / 12
+  const avgNetBurn = Math.max(avgLifestyleExpenses - avgMonthlyPassiveIncome, 0)
+  const runway = avgNetBurn > 0
+    ? liquid / avgNetBurn
+    : avgLifestyleExpenses > 0 ? liquid / avgLifestyleExpenses : null
 
   // Real portfolio return from NW snapshot deltas (not from cash transactions)
   // This captures NAV appreciation from funds like Dominion/TRANSCOMER that don't pay cash dividends
@@ -421,7 +425,8 @@ Ahorro / Inversión:      ${fmtCRC(c.totalSavings)} → ${fmtCRC(c.totalSavings 
 Tasa de ahorro:          ${savingsRate.toFixed(1)}%
 Margen neto:             ${netMargin.toFixed(1)}%  [% del ingreso no destinado a gasto de vida]
 Cobertura pasiva:        ${passiveCoverage.toFixed(1)}%
-Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses de gasto de vida` : 'n/d'}
+Quema neta mensual:      ${fmtCRC(avgNetBurn > 0 ? avgNetBurn : avgLifestyleExpenses)}  [gasto vida − pasivo mensual; denominador real del runway]
+Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}  [liquidez ÷ quema neta]
 
 ══════════════════════════════════════════════════════════
  AÑO CONTRA AÑO (12m actual vs 12m anterior)
@@ -489,7 +494,7 @@ Activos invertibles:     ${fmtCRC(activosInvertibles)} (${usd(activosInvertibles
   — Inversiones:         ${fmtCRC(invested)}
 Retorno esperado:        ${(expReturn * 100).toFixed(0)}% anual
 Años estimados a FIRE:   ${yearsToFire > 0 ? `~${yearsToFire} años` : fireProgress >= 100 ? 'FIRE alcanzado' : 'n/d'}
-Runway:                  ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
+Runway (quema neta):     ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
 
 ══════════════════════════════════════════════════════════
  LIQUIDEZ — SALDO POR SOBRE

@@ -88,10 +88,13 @@ export function ProgresoView({
 
   // Alert signals
   const alerts: { level: 'danger' | 'warning'; msg: string }[] = []
-  if (runway < runwayYellow && avgMonthlyExpenses > 0) {
-    alerts.push({ level: 'danger', msg: `Runway crítico: ${runway.toFixed(1)} meses de liquidez` })
-  } else if (runway < runwayGreen && avgMonthlyExpenses > 0) {
-    alerts.push({ level: 'warning', msg: `Runway bajo: ${runway.toFixed(1)} meses — meta: ${runwayGreen}m` })
+  const netBurn = Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 0)
+  if (netBurn > 0) {
+    if (runway < runwayYellow) {
+      alerts.push({ level: 'danger', msg: `Runway crítico: ${runway.toFixed(1)} meses de quema neta` })
+    } else if (runway < runwayGreen) {
+      alerts.push({ level: 'warning', msg: `Runway bajo: ${runway.toFixed(1)} meses — meta: ${runwayGreen}m` })
+    }
   }
   if (realizedReturnRate !== null && realizedReturnRate < fireConfig.inflation) {
     alerts.push({
@@ -236,9 +239,11 @@ export function ProgresoView({
           label="Runway"
           value={runway >= 999 ? '∞' : runway.toFixed(1)}
           unit="meses"
-          sub={`${fmt(avgMonthlyExpenses)}/mes`}
+          sub={passiveMonthlyAvg > 0
+            ? `quema neta ${fmt(Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 0))}/mes`
+            : `${fmt(avgMonthlyExpenses)}/mes`}
           color={runwayColor}
-          tooltip="Cuántos meses podés vivir con tu liquidez actual sin ningún ingreso. Se calcula como: saldo líquido ÷ gasto mensual promedio."
+          tooltip={`Saldo líquido ÷ quema neta mensual. Quema neta = gasto de vida (${fmt(avgMonthlyExpenses)}/mes) menos ingresos pasivos recurrentes (${fmt(passiveMonthlyAvg)}/mes). Incluye crypto, dividendos, alquileres, airdrops.`}
         />
 
         <KpiCard
