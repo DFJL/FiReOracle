@@ -113,6 +113,7 @@ export default async function OraclePage() {
     { data: bucketsRaw },
     { data: envelopesRaw },
     { data: movementsRaw },
+    { data: loanPaymentsRaw },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('transactions')
@@ -126,7 +127,7 @@ export default async function OraclePage() {
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true }),
     admin.from('loans')
-      .select('name, lender, loan_type, currency_code, current_balance, interest_rate, end_date')
+      .select('id, name, lender, loan_type, currency_code, current_balance, interest_rate, end_date')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     admin.from('assets')
       .select('name, asset_type, value_crc, is_investable')
@@ -143,6 +144,11 @@ export default async function OraclePage() {
     admin.from('envelope_movements')
       .select('amount, movement_type, envelope_id, date')
       .eq('user_id', user.id),
+    admin.from('loan_payments')
+      .select('loan_id, payment_type, amount, payment_date')
+      .eq('user_id', user.id)
+      .gte('payment_date', cutStr)
+      .lt('payment_date', endStr),
   ])
 
   const exchangeRate = await fetchExchangeRate()
@@ -162,12 +168,17 @@ export default async function OraclePage() {
 
   // ── KPI helpers ────────────────────────────────────────────────────────────
   function kpis(txs: Tx[]) {
-    const activeIncome  = txs.filter(tx => tx.movement_type === 'income' && !tx.is_passive_income && !tx.is_settlement)
+    // Active income: includes settlements (matches progreso formula exactly)
+    const activeIncome  = txs.filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
     const passiveIncome = txs.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
     const expenses      = txs.filter(isOutflow)
+    // Savings: must be SAVINGS_* code, no settlements, no valuations (matches progreso exactly)
     const savings       = txs.filter(tx =>
-      tx.expense_group === SAVINGS_EXPENSE_GROUP && !tx.is_settlement &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      tx.expense_group === SAVINGS_EXPENSE_GROUP &&
+      !tx.is_settlement &&
+      (tx.category_code ?? '').startsWith('SAVINGS_') &&
+      !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')
     )
     const totalActiveIncome  = sum(activeIncome)
     const totalPassiveIncome = sum(passiveIncome)
@@ -182,7 +193,8 @@ export default async function OraclePage() {
   const p = kpis(prev12)
 
   const avgMonthlyExpenses = c.totalExpenses / 12
-  const savingsRate     = c.totalIncome > 0 ? (c.totalSavings / c.totalIncome) * 100 : 0
+  // Savings rate denominator = active income only (matches progreso formula exactly)
+  const savingsRate     = c.totalActiveIncome > 0 ? (c.totalSavings / c.totalActiveIncome) * 100 : 0
   const netMargin       = c.totalIncome > 0 ? ((c.totalIncome - c.totalExpenses) / c.totalIncome) * 100 : 0
   const passiveCoverage = avgMonthlyExpenses > 0 ? ((c.totalPassiveIncome / 12) / avgMonthlyExpenses) * 100 : 0
 
@@ -295,6 +307,58 @@ export default async function OraclePage() {
 
   const monthLabel = `${rolling12Start.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })} — ${new Date(endStr).toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })}`
 
+  // ── Loan payment breakdown (normal vs extraordinary) ──────────────────────
+  const loanPayments = loanPaymentsRaw ?? []
+  type LoanPaymentSummary = {
+    name: string
+    normalCount: number; normalTotal: number; normalAvgMonthly: number
+    extraCount: number;  extraTotal: number
+  }
+  const loanSummaries: LoanPaymentSummary[] = (loansRaw ?? []).map(loan => {
+    const payments = loanPayments.filter(p => p.loan_id === (loan as { id?: string }).id)
+    const normal = payments.filter(p => p.payment_type === 'normal')
+    const extra  = payments.filter(p => p.payment_type === 'extra' || p.payment_type === 'partial')
+    return {
+      name:             loan.name ?? 'Préstamo',
+      normalCount:      normal.length,
+      normalTotal:      normal.reduce((s, p) => s + Number(p.amount ?? 0), 0),
+      normalAvgMonthly: normal.length > 0 ? normal.reduce((s, p) => s + Number(p.amount ?? 0), 0) / 12 : 0,
+      extraCount:       extra.length,
+      extraTotal:       extra.reduce((s, p) => s + Number(p.amount ?? 0), 0),
+    }
+  })
+
+  // ── Expense pattern analysis (median vs average, spike detection) ──────────
+  function median(vals: number[]): number {
+    if (!vals.length) return 0
+    const sorted = [...vals].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  }
+
+  // Per top-category: monthly totals → average, median, max
+  const catMonthlyTotals: Record<string, number[]> = {}
+  for (const tx of c.expenses) {
+    const cat = resolveDisplayCat(tx, vMap, cMap)
+    const m   = (tx.date ?? '').slice(0, 7)
+    if (!m) continue
+    if (!catMonthlyTotals[cat]) catMonthlyTotals[cat] = Array(12).fill(0)
+    const mIdx = months.indexOf(m)
+    if (mIdx >= 0) catMonthlyTotals[cat][mIdx] += Number(tx.amount ?? 0)
+  }
+
+  const expensePatterns = topCats.map(([cat]) => {
+    const monthly = catMonthlyTotals[cat] ?? []
+    const nonZero = monthly.filter(v => v > 0)
+    const avg     = monthly.reduce((s, v) => s + v, 0) / 12
+    const med     = median(monthly)
+    const max     = Math.max(...monthly, 0)
+    const activeMonths = nonZero.length
+    // Spike: any month > 3× median (and median > 0)
+    const spikeMonths = med > 0 ? monthly.filter(v => v > med * 3).length : 0
+    return { cat, avg, med, max, activeMonths, spikeMonths }
+  }).filter(p => p.avg > 0)
+
   // ─────────────────────────── BUILD CONTEXT ──────────────────────────────────
   const context = `FECHA HOY: ${now.toISOString().slice(0, 10)}
 TIPO DE CAMBIO: ₡${tcSell.toLocaleString('es-CR')} por USD
@@ -370,13 +434,34 @@ ${envelopeRows.length > 0
   : 'Sin sobres activos'}
 
 ══════════════════════════════════════════════════════════
- PRÉSTAMOS ACTIVOS
+ PRÉSTAMOS ACTIVOS (saldo + pagos 12m)
 ══════════════════════════════════════════════════════════
-${(loansRaw ?? []).map(l => {
-  const bal = Number(l.current_balance)
-  const balCrc = l.currency_code === 'USD' ? bal * tcSell : bal
-  return `${(l.name ?? '').padEnd(28)} ${l.currency_code === 'USD' ? `$${bal.toLocaleString('en-US')}` : fmtCRC(bal).padStart(14)} @ ${Number(l.interest_rate).toFixed(2)}% · vence ${l.end_date ?? 'n/d'} (${usd(balCrc)} equiv)`
-}).join('\n') || 'Sin préstamos activos'}
+${loanSummaries.length > 0 ? loanSummaries.map(ls => {
+  const loan = (loansRaw ?? []).find(l => l.name === ls.name)
+  const bal = Number(loan?.current_balance ?? 0)
+  const balCrc = loan?.currency_code === 'USD' ? bal * tcSell : bal
+  const balStr = loan?.currency_code === 'USD' ? `$${bal.toLocaleString('en-US')}` : fmtCRC(bal)
+  let s = `${ls.name.padEnd(28)} saldo: ${balStr} @ ${Number(loan?.interest_rate ?? 0).toFixed(2)}% · vence ${loan?.end_date ?? 'n/d'}`
+  if (ls.normalCount > 0) {
+    s += `\n  → Cuotas normales (12m): ${ls.normalCount} pagos · total ${fmtCRC(ls.normalTotal)} · promedio ${fmtCRC(ls.normalAvgMonthly)}/mes`
+  }
+  if (ls.extraCount > 0) {
+    s += `\n  → Abonos extraordinarios (12m): ${ls.extraCount} pagos · total ${fmtCRC(ls.extraTotal)} [NO son gasto recurrente — reducen capital directamente]`
+  }
+  if (ls.normalCount === 0 && ls.extraCount === 0) {
+    s += `\n  → Sin pagos registrados en los últimos 12m`
+  }
+  return s
+}).join('\n') : 'Sin préstamos activos'}
+
+══════════════════════════════════════════════════════════
+ PATRONES DE GASTO — RECURRENTE vs PUNTUAL
+══════════════════════════════════════════════════════════
+IMPORTANTE: usa esta tabla para distinguir gastos recurrentes de spikes. No trates un spike como gasto mensual habitual.
+Categoría                    Prom/mes      Mediana/mes   Meses activos  Spikes
+${expensePatterns.map(p =>
+  `${p.cat.slice(0, 28).padEnd(28)} ${fmtCRC(p.avg).padStart(13)} ${fmtCRC(p.med).padStart(13)}   ${String(p.activeMonths).padStart(2)}/12           ${p.spikeMonths > 0 ? `⚠ ${p.spikeMonths} mes(es) atípico(s) (>${fmtCRC(p.med * 3)})` : 'recurrente'}`
+).join('\n') || 'Sin datos'}
 
 ══════════════════════════════════════════════════════════
  ACTIVOS
