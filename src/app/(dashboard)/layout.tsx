@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import { NavLink } from '@/components/nav-link'
+import { MobileNav } from '@/components/MobileNav'
 import { TransactionEntryWrapper } from './movimientos/TransactionEntryWrapper'
 import Link from 'next/link'
 import {
@@ -64,14 +65,6 @@ function buildNavGroups(pendingCount: number): NavGroup[] {
   ]
 }
 
-// Subset shown in mobile bottom bar
-const BOTTOM_NAV = [
-  { href: '/resumen',     label: 'Resumen',    icon: <LayoutDashboard size={20} /> },
-  { href: '/inversiones', label: 'Portafolio', icon: <TrendingUp size={20} /> },
-  { href: '/liquidez',    label: 'Liquidez',   icon: <Wallet size={20} /> },
-  { href: '/patrimonio',  label: 'Patrimonio', icon: <Landmark size={20} /> },
-  { href: '/progreso',    label: 'FIRE',       icon: <Target size={20} /> },
-]
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -184,12 +177,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <TransactionEntryWrapper />
       </Suspense>
 
-      {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#080c08]/95 backdrop-blur-sm border-t border-[#a3e635]/[0.08] flex items-stretch">
-        {BOTTOM_NAV.map((item) => (
-          <NavLink key={item.href} href={item.href} label={item.label} icon={item.icon} mobile />
-        ))}
-      </nav>
+      {/* Mobile bottom nav — 5 pinned tabs + slide-up "Más" menu covering all modules */}
+      <MobileNav pendingCount={pendingCount} />
     </div>
   )
 }
