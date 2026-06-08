@@ -9,6 +9,14 @@ export type WealthDeltaMonth = {
   delta: number; savings: number; returns: number; residual: number
 }
 
+type LifestyleData = {
+  inflationRate: number
+  curTotal: number
+  prvTotal: number
+  monthly: { label: string; necesario: number; personal: number }[]
+  topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
+}
+
 type Props = {
   activosInvertibles: number
   liquidBalance: number
@@ -30,6 +38,7 @@ type Props = {
   runwayGreen: number
   runwayYellow: number
   wealthDelta: WealthDeltaMonth[]
+  lifestyle: LifestyleData
 }
 
 function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
@@ -46,7 +55,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, lifestyle,
 }: Props) {
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const rate = exchangeRate.sell
@@ -321,6 +330,9 @@ export function ProgresoView({
       {wealthDelta.length > 0 && (
         <WealthDeltaSection data={wealthDelta} currency={currency} rate={rate} />
       )}
+
+      {/* Lifestyle Inflation */}
+      <LifestyleTrendSection data={lifestyle} />
 
       {/* Footer hint */}
       {fireNumber > 0 && (
@@ -1036,6 +1048,196 @@ function CombinedChart({
           </text>
         ))}
       </svg>
+    </div>
+  )
+}
+
+// ── LifestyleTrendSection ─────────────────────────────────────────────────────
+
+function fmtCRC(n: number) {
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `₡${(n / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000)     return `₡${(n / 1_000).toFixed(0)}K`
+  return `₡${Math.round(n).toLocaleString('es-CR')}`
+}
+
+function LifestyleTrendSection({ data }: { data: LifestyleData }) {
+  const { inflationRate, curTotal, prvTotal, monthly, topCats } = data
+  const [openCat, setOpenCat] = useState<string | null>(null)
+
+  const totalPct    = prvTotal > 0 ? (curTotal - prvTotal) / prvTotal : null
+  const delta       = totalPct !== null ? totalPct - inflationRate : null
+  const isBad       = delta !== null && delta >= 0.05
+  const isWarn      = delta !== null && delta >= 0 && delta < 0.05
+  const signalColor = isBad ? '#f43f5e' : isWarn ? '#f59e0b' : '#a3e635'
+  const signalLabel = isBad ? 'Alerta' : isWarn ? 'Atención' : 'Óptimo'
+  const hasOutliers = topCats.some(c => c.outlierCount > 0)
+  const maxBar      = Math.max(...monthly.map(m => m.necesario + m.personal), 1)
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-0.5">
+            Inflación de Estilo de Vida
+          </p>
+          <p className="text-[9px] text-zinc-600">
+            Últimos 12m vs período anterior · excluye inversiones y deuda
+          </p>
+        </div>
+        <span className="shrink-0 text-[9px] font-black px-2.5 py-1 rounded-full"
+          style={{ backgroundColor: `${signalColor}22`, color: signalColor }}>
+          {signalLabel}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">
+            Crecimiento{hasOutliers ? ' ~' : ''}
+          </p>
+          <p className={`text-2xl font-black leading-none ${
+            totalPct === null ? 'text-zinc-500' : totalPct > inflationRate ? 'text-rose-400' : 'text-[#a3e635]'
+          }`}>
+            {totalPct !== null ? `${totalPct >= 0 ? '+' : ''}${(totalPct * 100).toFixed(1)}%` : '—'}
+          </p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            {fmtCRC(curTotal / 12)}/mes{hasOutliers ? ' · excl. outliers' : ''}
+          </p>
+        </div>
+        <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Inflación ref.</p>
+          <p className="text-2xl font-black leading-none text-zinc-300">
+            {(inflationRate * 100).toFixed(1)}%
+          </p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">anual config.</p>
+        </div>
+        <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Delta</p>
+          <p className="text-2xl font-black leading-none" style={{ color: signalColor }}>
+            {delta !== null ? `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%` : '—'}
+          </p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            {delta === null ? '—' : delta < 0 ? 'poder adquisitivo ↑' : isBad ? 'erosión de ahorro' : 'dentro del rango'}
+          </p>
+        </div>
+      </div>
+
+      {monthly.length > 0 && (
+        <div>
+          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-3">Tendencia mensual</p>
+          <div className="flex items-end gap-1 h-20">
+            {monthly.map((m, i) => {
+              const necH = (m.necesario / maxBar) * 100
+              const perH = (m.personal  / maxBar) * 100
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center group relative">
+                  <div className="w-full flex flex-col justify-end" style={{ height: '72px' }}>
+                    <div className="w-full rounded-t-sm" style={{ height: `${perH}%`, backgroundColor: '#a3e635', opacity: 0.55 }} />
+                    <div className="w-full"               style={{ height: `${necH}%`, backgroundColor: '#22d3ee', opacity: 0.55 }} />
+                  </div>
+                  <p className="text-[7px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
+                    {m.label.split(' ')[0]}
+                  </p>
+                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+                    <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
+                      <p className="text-zinc-300 font-bold">{m.label}</p>
+                      <p className="text-cyan-400">Nec: {fmtCRC(m.necesario)}</p>
+                      <p style={{ color: '#a3e635' }}>Per: {fmtCRC(m.personal)}</p>
+                      <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(m.necesario + m.personal)}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex items-center gap-4 mt-2 text-[9px] text-zinc-600">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-sm inline-block bg-cyan-400/55" />Necesario
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-sm inline-block opacity-55" style={{ backgroundColor: '#a3e635' }} />Personal
+            </span>
+          </div>
+        </div>
+      )}
+
+      {topCats.length > 0 && (
+        <div>
+          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-2">
+            Top categorías · promedio mensual
+          </p>
+          <div className="space-y-0.5">
+            {topCats.map(c => {
+              const yoy    = c.yoyPct
+              const color  = yoy === null ? '#71717a' : yoy > inflationRate ? '#f43f5e' : yoy >= 0 ? '#f59e0b' : '#a3e635'
+              const maxAvg = topCats[0].curAvg
+              const isOpen = openCat === c.code
+              return (
+                <div key={c.code}>
+                  {/* Category row — clickable */}
+                  <div
+                    className="flex items-center gap-2 cursor-pointer hover:bg-white/[0.03] rounded-lg px-1 -mx-1 py-1 transition-colors"
+                    onClick={() => setOpenCat(prev => prev === c.code ? null : c.code)}
+                  >
+                    <span className="text-[9px] text-zinc-600 w-2.5 shrink-0 select-none" style={{
+                      display: 'inline-block',
+                      transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.15s',
+                    }}>›</span>
+                    <p className="text-[10px] text-zinc-400 w-28 truncate shrink-0">{c.name}</p>
+                    <div className="flex-1 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{
+                        width: `${(c.curAvg / maxAvg) * 100}%`,
+                        backgroundColor: color, opacity: 0.6,
+                      }} />
+                    </div>
+                    <p className="text-[10px] tabular-nums text-zinc-400 w-16 text-right shrink-0">{fmtCRC(c.curAvg)}</p>
+                    <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color }}>
+                      {c.outlierCount > 0 && <span className="text-zinc-600 font-normal" title={`${c.outlierCount} mes${c.outlierCount > 1 ? 'es' : ''} atípico${c.outlierCount > 1 ? 's' : ''} excluido${c.outlierCount > 1 ? 's' : ''}`}>~</span>}
+                      {yoy !== null ? `${yoy >= 0 ? '+' : ''}${(yoy * 100).toFixed(0)}%` : '—'}
+                    </p>
+                  </div>
+
+                  {/* Driver drill-down */}
+                  {isOpen && c.drivers.length > 0 && (
+                    <div className="ml-5 pl-2.5 border-l border-white/[0.06] mt-0.5 mb-1.5 space-y-0.5">
+                      {c.drivers.map(d => {
+                        const dColor = d.yoyPct === null ? '#52525b'
+                          : d.yoyPct > inflationRate ? '#f43f5e'
+                          : d.yoyPct >= 0 ? '#f59e0b' : '#a3e635'
+                        const isNew  = d.prvAvg === 0 && d.curAvg > 0
+                        return (
+                          <div key={d.key} className="flex items-center gap-2">
+                            <p className="text-[9px] text-zinc-500 w-28 truncate shrink-0">{d.key}</p>
+                            <div className="flex-1 h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                              <div className="h-full rounded-full opacity-50" style={{
+                                width: `${Math.min((d.curAvg / c.curAvg) * 100, 100)}%`,
+                                backgroundColor: dColor,
+                              }} />
+                            </div>
+                            <p className="text-[9px] tabular-nums text-zinc-500 w-14 text-right shrink-0">{fmtCRC(d.curAvg)}</p>
+                            <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color: dColor }}>
+                              {d.yoyPct !== null ? `${d.yoyPct >= 0 ? '+' : ''}${(d.yoyPct * 100).toFixed(0)}%` : '—'}
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[8px] text-zinc-700 mt-2">
+            Clic en categoría para ver drivers · YoY = últimos 12m vs período anterior · configurar exclusiones en Configuración → Perfil &amp; FIRE
+          </p>
+        </div>
+      )}
+
+      {prvTotal === 0 && (
+        <p className="text-[10px] text-zinc-600 text-center py-2">Sin datos del período anterior para comparar.</p>
+      )}
     </div>
   )
 }
