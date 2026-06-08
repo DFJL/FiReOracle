@@ -9,6 +9,7 @@ import type { ExchangeRate } from '@/lib/exchange-rate'
 import {
   updateTransaction, deleteTransaction, type UpdateTransactionInput,
   getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
+  updateTransactionWithLinks,
 } from '@/app/actions/transactions'
 import {
   getActiveLoans, getLoanPaymentForTransaction, linkTransactionToLoan,
@@ -563,61 +564,55 @@ function EditTransactionModal({ tx, categories, onClose }: {
     e.preventDefault()
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
+
+    const envelopeChanged = envelopeId !== initialEnvelopeId
+    const loanChanged = isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId
+
+    let balAfterNum: number | undefined
+    let loan: ActiveLoan | undefined
+    if (loanChanged) {
+      loan = loans.find(l => l.id === selectedLoanId)
+      balAfterNum = loanBalAfter.trim()
+        ? parseFloat(loanBalAfter)
+        : Math.max(0, (loan?.currentBalance ?? 0) - amt)
+      if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
+    }
+
     startTransition(async () => {
-      const result = await updateTransaction(tx.id, {
-        date: date || undefined,
-        amount: amt,
-        vendor: vendor.trim() || null,
-        concept: concept.trim() || null,
-        category_code: categoryCode || null,
-        expense_group: expenseGroup,
-        notes: notes.trim() || null,
-        is_passive_income: isPassive,
-        is_settlement: isSettlement,
-        is_survival_expense: isSurvival,
-      } satisfies UpdateTransactionInput)
+      const result = await updateTransactionWithLinks(
+        tx.id,
+        {
+          date: date || undefined,
+          amount: amt,
+          vendor: vendor.trim() || null,
+          concept: concept.trim() || null,
+          category_code: categoryCode || null,
+          expense_group: expenseGroup,
+          notes: notes.trim() || null,
+          is_passive_income: isPassive,
+          is_settlement: isSettlement,
+          is_survival_expense: isSurvival,
+        } satisfies UpdateTransactionInput,
+        loanChanged && selectedLoanId && balAfterNum !== undefined ? {
+          loanId:         selectedLoanId,
+          payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
+          payment_type:   'normal',
+          amount:         amt,
+          balance_before: loan?.currentBalance ?? balAfterNum,
+          balance_after:  balAfterNum,
+          rate_applied:   loan?.interestRate ?? 0,
+          notes:          notes.trim() || undefined,
+        } : undefined,
+        envelopeChanged ? {
+          envelopeId: envelopeId || null,
+          txDate:     date,
+          txAmount:   amt,
+          txConcept:  concept.trim() || null,
+          txVendor:   vendor.trim() || null,
+        } : undefined,
+      )
       if (result?.error) { setError(result.error); return }
-
-      // Build parallel secondary operations
-      const secondaryOps: Promise<{ error?: string | null } | null>[] = []
-
-      if (envelopeId !== initialEnvelopeId) {
-        secondaryOps.push(
-          updateTransactionEnvelopeLink(
-            tx.id, envelopeId || null, date, amt,
-            concept.trim() || null, vendor.trim() || null,
-          )
-        )
-      } else {
-        secondaryOps.push(Promise.resolve(null))
-      }
-
-      if (isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId) {
-        const loan = loans.find(l => l.id === selectedLoanId)
-        const balAfterNum = loanBalAfter.trim()
-          ? parseFloat(loanBalAfter)
-          : Math.max(0, (loan?.currentBalance ?? 0) - amt)
-        if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
-        secondaryOps.push(
-          linkTransactionToLoan(tx.id, selectedLoanId, {
-            payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
-            payment_type:   'normal',
-            amount:         amt,
-            balance_before: loan?.currentBalance ?? balAfterNum,
-            balance_after:  balAfterNum,
-            rate_applied:   loan?.interestRate ?? 0,
-            notes:          notes.trim() || undefined,
-          })
-        )
-      } else {
-        secondaryOps.push(Promise.resolve(null))
-      }
-
-      const [envResult, loanRes] = await Promise.all(secondaryOps)
-      if (envResult?.error) { setError(envResult.error); return }
-      if (envelopeId !== initialEnvelopeId && !envResult?.error) setInitialEnvelopeId(envelopeId)
-      if (loanRes?.error) { setError(loanRes.error); return }
-
+      if (envelopeChanged) setInitialEnvelopeId(envelopeId)
       onClose()
     })
   }

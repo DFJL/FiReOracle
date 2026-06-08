@@ -348,6 +348,134 @@ export type UpdateTransactionInput = {
   investment_bucket_id?: string | null
 }
 
+export type LoanLinkInput = {
+  loanId: string
+  payment_date: string
+  payment_type: 'normal' | 'extra' | 'partial'
+  amount: number
+  balance_before: number
+  balance_after: number
+  rate_applied: number
+  notes?: string
+}
+
+export type EnvelopeLinkInput = {
+  envelopeId: string | null
+  txDate: string
+  txAmount: number
+  txConcept: string | null
+  txVendor: string | null
+}
+
+/**
+ * Updates a transaction and optionally links it to a loan + envelope in a
+ * single server round-trip. Secondary operations run in parallel after the
+ * transaction update succeeds.
+ */
+export async function updateTransactionWithLinks(
+  id: string,
+  input: UpdateTransactionInput,
+  loanLink?: LoanLinkInput,
+  envelopeLink?: EnvelopeLinkInput,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  // 1. Update the transaction first
+  const { error: txErr } = await admin
+    .from('transactions')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', user.id)
+  if (txErr) return { error: txErr.message }
+
+  // 2. Run secondary operations in parallel
+  const secondaryOps: Promise<string | null>[] = []
+
+  if (loanLink) {
+    const { loanId, ...paymentData } = loanLink
+    const principal = paymentData.balance_before - paymentData.balance_after
+    const interest  = Math.max(0, paymentData.amount - principal)
+    secondaryOps.push(
+      Promise.all([
+        admin.from('loan_payments').insert({
+          loan_id:        loanId,
+          user_id:        user.id,
+          payment_date:   paymentData.payment_date,
+          payment_type:   paymentData.payment_type,
+          amount:         paymentData.amount,
+          principal,
+          interest,
+          insurance:      0,
+          balance_before: paymentData.balance_before,
+          balance_after:  paymentData.balance_after,
+          rate_applied:   paymentData.rate_applied,
+          notes:          paymentData.notes ?? null,
+          transaction_id: id,
+        }),
+        admin.from('loans')
+          .update({ current_balance: paymentData.balance_after })
+          .eq('id', loanId)
+          .eq('user_id', user.id),
+      ]).then(([insertRes, updateRes]) =>
+        insertRes.error?.message ?? updateRes.error?.message ?? null
+      )
+    )
+  }
+
+  if (envelopeLink) {
+    const { envelopeId, txDate, txAmount, txConcept, txVendor } = envelopeLink
+    secondaryOps.push(
+      (async () => {
+        const { error: delErr } = await admin
+          .from('envelope_movements')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('source_tx_id' as never, id)
+        if (delErr) return delErr.message
+
+        if (envelopeId) {
+          const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
+          const debit   = Math.abs(txAmount)
+          if (balance < debit) {
+            const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+            return `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})`
+          }
+          const { error: insErr } = await admin.from('envelope_movements').insert({
+            user_id:       user.id,
+            envelope_id:   envelopeId,
+            movement_type: 'retiro',
+            amount:        -Math.abs(txAmount),
+            date:          txDate,
+            notes:         `Tx: ${txConcept || txVendor || ''}`.trim(),
+            source_tx_id:  id,
+          } as never)
+          if (insErr) return insErr.message
+        }
+        return null
+      })()
+    )
+  }
+
+  if (secondaryOps.length > 0) {
+    const results = await Promise.all(secondaryOps)
+    const firstErr = results.find(r => r !== null)
+    if (firstErr) return { error: firstErr }
+  }
+
+  revalidatePath('/resumen')
+  revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
+  if (envelopeLink) revalidatePath('/liquidez')
+  if (loanLink) revalidatePath('/prestamos')
+  return { error: null }
+}
+
 export async function updateTransaction(id: string, input: UpdateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
