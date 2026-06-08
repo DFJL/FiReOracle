@@ -8,7 +8,7 @@ import {
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
-import { createLoan, updateLoanSortOrder, updateLoanBalance } from '@/app/actions/loans'
+import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment } from '@/app/actions/loans'
 
 type Payment = {
   id: string
@@ -399,15 +399,145 @@ function CreateLoanForm({
   )
 }
 
+// ── Record payment form ──────────────────────────────────────────────────────
+
+function RecordPaymentForm({
+  loan,
+  onSaved,
+  onCancel,
+}: {
+  loan: LoanData
+  onSaved: (payment: Payment, newBalance: number) => void
+  onCancel: () => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const isUSD = loan.currencyCode === 'USD'
+  const fmt   = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
+
+  const [isPending, startTransition] = useTransition()
+  const [error, setError]            = useState<string | null>(null)
+  const [date, setDate]              = useState(today)
+  const [type, setType]              = useState<'normal' | 'extra'>('normal')
+  const [amountStr, setAmountStr]    = useState('')
+  const [balAfterStr, setBalAfterStr] = useState('')
+  const [notes, setNotes]            = useState('')
+
+  const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+  const lbl      = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  const amount   = parseFloat(amountStr)
+  const balAfter = parseFloat(balAfterStr)
+  const balBefore = loan.currentBalance
+  const principal = !isNaN(balAfter) ? Math.max(0, balBefore - balAfter) : null
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (isNaN(amount) || amount <= 0) { setError('Monto inválido'); return }
+    if (isNaN(balAfter) || balAfter < 0) { setError('Saldo después inválido'); return }
+    if (balAfter > balBefore) { setError(`Saldo después no puede ser mayor al saldo actual (${fmt(balBefore)})`); return }
+    setError(null)
+    startTransition(async () => {
+      const res = await recordLoanPayment(loan.id, {
+        payment_date:   date,
+        payment_type:   type,
+        amount,
+        balance_before: balBefore,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes.trim() || undefined,
+      })
+      if (res.error) { setError(res.error); return }
+      const p: Payment = {
+        id:             crypto.randomUUID(),
+        payment_date:   date,
+        payment_type:   type,
+        amount,
+        principal:      Math.max(0, balBefore - balAfter),
+        interest:       Math.max(0, amount - Math.max(0, balBefore - balAfter)),
+        insurance:      0,
+        balance_before: balBefore,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes.trim() || null,
+      }
+      onSaved(p, balAfter)
+    })
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-2xl bg-white/[0.03] border border-[#a3e635]/[0.12] p-4 space-y-4">
+      <p className="text-[9px] font-black text-[#a3e635]/70 uppercase tracking-[0.14em]">Registrar pago</p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={lbl}>Fecha</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Tipo</label>
+          <select value={type} onChange={e => setType(e.target.value as 'normal' | 'extra')} className={inputCls}>
+            <option value="normal">Normal</option>
+            <option value="extra">Abono extra</option>
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Monto pagado ({isUSD ? 'USD' : 'CRC'})</label>
+          <input type="number" min="0" step="any" value={amountStr}
+            onChange={e => setAmountStr(e.target.value)}
+            placeholder={isUSD ? '838.50' : '593 000'}
+            className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Saldo después del pago</label>
+          <input type="number" min="0" step="any" value={balAfterStr}
+            onChange={e => setBalAfterStr(e.target.value)}
+            placeholder={fmt(balBefore)}
+            className={inputCls} required />
+          {principal !== null && (
+            <p className="text-[9px] text-zinc-600 mt-1">Capital: {fmt(principal)}</p>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <label className={lbl}>Saldo actual en sistema</label>
+        <p className="text-sm font-black text-zinc-300">{fmt(balBefore)}</p>
+        <p className="text-[9px] text-zinc-600">Ingresá el saldo real del estado de cuenta como "saldo después"</p>
+      </div>
+
+      <div>
+        <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+        <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Pago junio 2026…" className={inputCls} />
+      </div>
+
+      {error && <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="flex gap-2 justify-end">
+        <button type="button" onClick={onCancel}
+          className="px-4 py-2 rounded-xl border border-white/[0.08] text-zinc-400 text-xs font-black hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+        <button type="submit" disabled={isPending}
+          className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+          {isPending ? <><Loader2 size={12} className="animate-spin" /> Guardando…</> : 'Registrar'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 // ── Per-loan card ────────────────────────────────────────────────────────────
 
-function LoanCard({ loan }: { loan: LoanData }) {
+function LoanCard({ loan: initialLoan }: { loan: LoanData }) {
+  const [loan, setLoan]         = useState<LoanData>(initialLoan)
   const [tab, setTab]           = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
   const [showAll, setShowAll]   = useState(false)
   const [editingBal, setEditingBal] = useState(false)
   const [newBalStr, setNewBalStr]   = useState('')
   const [balErr, setBalErr]         = useState<string | null>(null)
   const [isPendingBal, startBal]    = useTransition()
+  const [showPayForm, setShowPayForm] = useState(false)
 
   const schedule = computeSchedule(
     loan.currentBalance,
@@ -604,6 +734,35 @@ function LoanCard({ loan }: { loan: LoanData }) {
 
       {/* Historial tab */}
       {tab === 'historial' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
+              {loan.payments.length} pago{loan.payments.length !== 1 ? 's' : ''} registrado{loan.payments.length !== 1 ? 's' : ''}
+            </p>
+            <button
+              onClick={() => setShowPayForm(v => !v)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-colors"
+            >
+              <Plus size={11} strokeWidth={3} />
+              Registrar pago
+            </button>
+          </div>
+
+          {showPayForm && (
+            <RecordPaymentForm
+              loan={loan}
+              onSaved={(payment, newBalance) => {
+                setLoan(prev => ({
+                  ...prev,
+                  currentBalance: newBalance,
+                  payments: [payment, ...prev.payments],
+                }))
+                setShowPayForm(false)
+              }}
+              onCancel={() => setShowPayForm(false)}
+            />
+          )}
+
         <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
           {loan.payments.length === 0 ? (
             <p className="text-xs text-zinc-600 text-center py-8">Sin pagos registrados.</p>
@@ -644,6 +803,7 @@ function LoanCard({ loan }: { loan: LoanData }) {
               </table>
             </div>
           )}
+        </div>
         </div>
       )}
 
