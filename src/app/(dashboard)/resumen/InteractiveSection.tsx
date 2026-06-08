@@ -196,8 +196,9 @@ const isInflow = isLiquidIncome
 function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  // Only explicit SAVINGS_* codes count — matches progreso page logic
   if (!(tx.category_code ?? '').startsWith('SAVINGS_')) return false
+  if (tx.is_settlement) return false  // liquidations are not new deposits
+  if (/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
   return true
 }
 
@@ -1212,6 +1213,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
     const kpiTxs = kpiEnd ? periodTxs.filter(tx => tx.date && tx.date < kpiEnd) : periodTxs
 
     let income = 0, passiveIncome = 0, rendimientos = 0, expenses = 0, invested = 0
+    let activeIncomeForSavings = 0  // progreso formula: income && !passive (incl. settlements)
     for (const tx of kpiTxs) {
       const amt = Number(tx.amount ?? 0)
       if (isLiquidIncome(tx)) {
@@ -1220,11 +1222,11 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       } else if (isPatrimonialIncome(tx)) rendimientos += amt
       else if (isOutflow(tx))       expenses += amt
       else if (isSavings(tx))       invested += amt
+      if (tx.movement_type === 'income' && !tx.is_passive_income) activeIncomeForSavings += amt
     }
     const net = income - expenses
-    // Tasa de ahorro FIRE: ahorros/inversión vs ingresos activos (excl. pasivos) — igual que progreso
-    const activeIncome   = income - passiveIncome
-    const savingsRate    = activeIncome > 0 ? (invested / activeIncome) * 100 : 0
+    const activeIncome = income - passiveIncome  // kept for netMargin / other KPIs
+    const savingsRate  = activeIncomeForSavings > 0 ? (invested / activeIncomeForSavings) * 100 : 0
     // Margen neto: lo que sobra después de gastos (puede ser negativo)
     const netMargin      = income > 0 ? (net / income) * 100 : 0
     const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
