@@ -436,6 +436,35 @@ export default async function ProgresoPage() {
     })
   }
 
+  // Savings rate trend — month-by-month for the last 12 complete months
+  const savingsRateTrend: { label: string; rate: number; deposits: number; income: number }[] = []
+  for (let i = 12; i >= 1; i--) {
+    const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const monthTxs = (txs ?? []).filter(tx => tx.date?.slice(0, 7) === ym)
+
+    const income = monthTxs
+      .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+    const deposits = monthTxs
+      .filter(tx =>
+        (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+        tx.expense_group === 'objetivos_financieros' &&
+        !tx.is_settlement &&
+        (tx.category_code ?? '').startsWith('SAVINGS_') &&
+        !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')
+      )
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+    savingsRateTrend.push({
+      label:    `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+      rate:     income > 0 ? deposits / income : 0,
+      deposits,
+      income,
+    })
+  }
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
       <ProgresoView
@@ -464,6 +493,7 @@ export default async function ProgresoPage() {
         runwayGreen={fireConfig?.runway_green_months  ?? 6}
         runwayYellow={fireConfig?.runway_yellow_months ?? 3}
         wealthDelta={wealthDelta}
+        savingsRateTrend={savingsRateTrend}
         lifestyle={{
           inflationRate: inflation,
           curTotal:      liCurTotal,

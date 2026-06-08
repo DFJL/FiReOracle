@@ -18,6 +18,13 @@ type LifestyleData = {
   topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
 }
 
+type SavingsRateMonth = {
+  label: string
+  rate: number
+  deposits: number
+  income: number
+}
+
 type Props = {
   activosInvertibles: number
   liquidBalance: number
@@ -39,6 +46,7 @@ type Props = {
   runwayGreen: number
   runwayYellow: number
   wealthDelta: WealthDeltaMonth[]
+  savingsRateTrend: SavingsRateMonth[]
   lifestyle: LifestyleData
 }
 
@@ -56,7 +64,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta, lifestyle,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, lifestyle,
 }: Props) {
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const rate = exchangeRate.sell
@@ -286,6 +294,11 @@ export function ProgresoView({
           tooltip="Financial Security: % de tus gastos básicos de sobrevivencia (vivienda, comida, salud) cubiertos por ingresos pasivos. Al 100% tenés seguridad financiera total."
         />
       </div>
+
+      {/* Savings rate trend */}
+      {savingsRateTrend.length > 0 && (
+        <SavingsRateTrendChart data={savingsRateTrend} avg12m={savingsRate} fmt={fmt} />
+      )}
 
       {/* Combined historical + forecast chart */}
       {/* Combined chart — show historical even without FIRE config, forecast only when configured */}
@@ -632,6 +645,128 @@ function FuMoneyChart({
           </text>
         ))}
       </svg>
+    </div>
+  )
+}
+
+function SavingsRateTrendChart({
+  data, avg12m, fmt,
+}: {
+  data: { label: string; rate: number; deposits: number; income: number }[]
+  avg12m: number
+  fmt: (v: number) => string
+}) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+
+  const TARGET = 0.30
+  const maxRate = Math.max(...data.map(d => d.rate), TARGET + 0.05, 0.01)
+  const hov     = hovIdx !== null ? data[hovIdx] : null
+
+  function barColor(rate: number) {
+    if (rate >= TARGET)       return '#a3e635'
+    if (rate >= TARGET * 0.5) return '#f59e0b'
+    return '#f43f5e'
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Tasa de ahorro mensual</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">Aportes a inversiones / ingreso activo · últimos 12 meses completos</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs font-black" style={{ color: barColor(avg12m) }}>
+            {(avg12m * 100).toFixed(0)}% promedio
+          </p>
+          <p className="text-[9px] text-zinc-600">meta: 30%</p>
+        </div>
+      </div>
+
+      {/* Bar chart */}
+      <div className="flex items-end gap-1.5 h-28">
+        {data.map((m, i) => {
+          const pct    = Math.min(m.rate / (maxRate * 1.05), 1)
+          const color  = barColor(m.rate)
+          const isHov  = hovIdx === i
+          const targetH = (TARGET / (maxRate * 1.05)) * 100
+
+          return (
+            <div
+              key={i}
+              className="flex-1 flex flex-col items-center relative cursor-default"
+              style={{ height: '100%' }}
+              onMouseEnter={() => setHovIdx(i)}
+              onMouseLeave={() => setHovIdx(null)}
+            >
+              <div className="w-full flex flex-col justify-end relative" style={{ height: '88px' }}>
+                {/* Target line indicator */}
+                <div
+                  className="absolute w-full border-t border-dashed border-[#a3e635]/30 pointer-events-none"
+                  style={{ bottom: `${targetH}%` }}
+                />
+                <div
+                  className="w-full rounded-t-sm transition-opacity"
+                  style={{
+                    height: `${pct * 100}%`,
+                    backgroundColor: color,
+                    opacity: isHov ? 0.9 : 0.6,
+                    minHeight: m.rate > 0 ? '2px' : undefined,
+                  }}
+                />
+              </div>
+              <p className="text-[7px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
+                {m.label.split(' ')[0]}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 text-[9px] text-zinc-600">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-0.5 border-t border-dashed border-[#a3e635]/50 inline-block" />
+          Meta 30%
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm bg-[#a3e635]/60 inline-block" />≥30%
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm bg-amber-400/60 inline-block" />15–30%
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm bg-rose-400/60 inline-block" />&lt;15%
+        </span>
+      </div>
+
+      {/* Hover detail */}
+      <div className={`rounded-xl border transition-all duration-150 overflow-hidden ${
+        hov ? 'border-white/[0.08] bg-white/[0.02]' : 'border-transparent bg-transparent'
+      }`}>
+        {hov ? (
+          <div className="p-3 grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-0.5">{hov.label}</p>
+              <p className="text-sm font-black" style={{ color: barColor(hov.rate) }}>
+                {(hov.rate * 100).toFixed(0)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-0.5">Aportes</p>
+              <p className="text-sm font-black text-zinc-200">{fmt(hov.deposits)}</p>
+            </div>
+            <div>
+              <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-0.5">Ingreso activo</p>
+              <p className="text-sm font-black text-zinc-200">{fmt(hov.income)}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 h-[52px] flex items-center justify-center">
+            <p className="text-[9px] text-zinc-700">Hover sobre un mes para ver detalle</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
