@@ -495,8 +495,9 @@ function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
 
 // ── edit modal ────────────────────────────────────────────────────────────────
 
-function EditTransactionModal({ tx, categories, onClose }: {
+function EditTransactionModal({ tx, categories, onClose, onSaved }: {
   tx: TxClient; categories: Category[]; onClose: () => void
+  onSaved?: (updated: TxClient) => void
 }) {
   const [date, setDate]               = useState(tx.date ?? '')
   const [amount, setAmount]           = useState(String(tx.amount ?? ''))
@@ -613,6 +614,19 @@ function EditTransactionModal({ tx, categories, onClose }: {
       )
       if (result?.error) { setError(result.error); return }
       if (envelopeChanged) setInitialEnvelopeId(envelopeId)
+      onSaved?.({
+        ...tx,
+        date:                date || tx.date,
+        amount:              amt,
+        vendor:              vendor.trim() || null,
+        concept:             concept.trim() || null,
+        category_code:       categoryCode || null,
+        expense_group:       expenseGroup,
+        notes:               notes.trim() || null,
+        is_passive_income:   isPassive,
+        is_settlement:       isSettlement,
+        is_survival_expense: isSurvival,
+      })
       onClose()
     })
   }
@@ -804,9 +818,11 @@ function EditTransactionModal({ tx, categories, onClose }: {
 
 type TxSortKey = 'date' | 'amount' | 'vendor' | 'category' | 'created_at'
 
-function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
+function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, onTxUpdated, onTxDeleted }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
   currency: 'CRC' | 'USD'; tcSell: number; categories: Category[]
+  onTxUpdated?: (updated: TxClient) => void
+  onTxDeleted?: (id: string) => void
 }) {
   const [search, setSearch]         = useState('')
   const [sortKey, setSortKey]       = useState<TxSortKey>('date')
@@ -823,6 +839,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
     startDelTrans(async () => {
       await deleteTransaction(id)
       setConfirmDel(null)
+      onTxDeleted?.(id)
     })
   }
 
@@ -859,7 +876,12 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
   return (
     <>
     {editingTx && (
-      <EditTransactionModal tx={editingTx} categories={categories} onClose={() => setEditingTx(null)} />
+      <EditTransactionModal
+        tx={editingTx}
+        categories={categories}
+        onClose={() => setEditingTx(null)}
+        onSaved={(updated) => { onTxUpdated?.(updated); setEditingTx(null) }}
+      />
     )}
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between gap-3 flex-wrap">
@@ -999,6 +1021,16 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   exchangeRate?: ExchangeRate
   defaultCurrency?: 'CRC' | 'USD'
 }) {
+  // Local copy so edits/deletes are reflected instantly without a page re-render
+  const [txList, setTxList] = useState<TxClient[]>(transactions)
+
+  function handleTxUpdated(updated: TxClient) {
+    setTxList(prev => prev.map(t => t.id === updated.id ? updated : t))
+  }
+  function handleTxDeleted(id: string) {
+    setTxList(prev => prev.filter(t => t.id !== id))
+  }
+
   const [period, setPeriod]         = useState<PeriodKey>('all')
   const [tab, setTab]               = useState<TabKey>('gastos')
   const [incomeSubtab, setIncomeSub]     = useState<IncomeSubtab>('activo')
@@ -1035,8 +1067,8 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   const [aiCodes, setAiCodes] = useState<Record<string, string>>({})
 
   // Build learning maps from ALL transactions (full history, not period-filtered)
-  const vMap = useMemo(() => buildVendorCatMap(transactions), [transactions])
-  const cMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
+  const vMap = useMemo(() => buildVendorCatMap(txList), [txList])
+  const cMap = useMemo(() => buildConceptCatMap(txList), [txList])
   const getCat = (tx: TxClient) => {
     const code = resolveCategory(tx, vMap, cMap)
     if (code === 'MISC' && aiCodes[tx.id]) return aiCodes[tx.id]
@@ -1045,7 +1077,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
 
   // Classify MISC transactions with Claude Haiku on mount
   useEffect(() => {
-    const miscTxs = transactions.filter(tx => resolveCategory(tx, vMap, cMap) === 'MISC')
+    const miscTxs = txList.filter(tx => resolveCategory(tx, vMap, cMap) === 'MISC')
     if (!miscTxs.length) return
     classifyTransactions(miscTxs.map(tx => ({
       id: tx.id,
@@ -1057,13 +1089,13 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       if (Object.keys(result).length) setAiCodes(prev => ({ ...prev, ...result }))
     }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions])
+  }, [txList])
 
   // Period filter — client-side, no page reload
   const cutoff = useMemo(() => periodCutoff(period), [period])
   const periodTxs = useMemo(() =>
-    cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions,
-  [transactions, cutoff])
+    cutoff ? txList.filter(tx => tx.date && tx.date >= cutoff) : txList,
+  [txList, cutoff])
 
   // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
   const tabTxs = useMemo(() => {
@@ -1414,7 +1446,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
         )}
 
         {/* L3 — full width */}
-        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} />
+        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} onTxUpdated={handleTxUpdated} onTxDeleted={handleTxDeleted} />
       </>)}
     </div>
   )

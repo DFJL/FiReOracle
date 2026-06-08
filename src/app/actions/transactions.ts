@@ -466,7 +466,7 @@ export async function updateTransactionWithLinks(
     if (firstErr) return { error: firstErr }
   }
 
-  revalidatePath('/resumen')
+  // Skip /resumen revalidation — the client updates its local state via onSaved callback
   revalidatePath('/flujo')
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
@@ -510,7 +510,7 @@ export async function deleteTransaction(id: string) {
     .eq('user_id', user.id)
   if (error) return { error: error.message }
 
-  revalidatePath('/resumen')
+  // Skip /resumen revalidation — the client removes the tx via onTxDeleted callback
   revalidatePath('/flujo')
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
