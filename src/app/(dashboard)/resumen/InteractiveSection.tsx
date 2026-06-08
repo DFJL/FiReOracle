@@ -192,8 +192,10 @@ function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
   if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false
+  // If a specific (non-generic) category code is present, it must be SAVINGS_*
+  // This excludes RENTAL_EXPENSE, MISC_EXPENSE non-valuation items, etc.
+  if (tx.category_code && !GENERIC_CODES.has(tx.category_code) && !tx.category_code.startsWith('SAVINGS_')) return false
   // Exclude valuation/accounting entries (pérdida/aumento valor) — not real cash savings
-  // Check covers both null category_code and generic codes (MISC, etc.) that reach inferCategory
   if ((!tx.category_code || GENERIC_CODES.has(tx.category_code)) && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
   return true
 }

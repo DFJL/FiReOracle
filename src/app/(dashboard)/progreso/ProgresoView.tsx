@@ -30,6 +30,7 @@ type Props = {
   avgMonthlySurvivalExpenses: number
   avgMonthlyIncome: number
   avgMonthlyDeposits: number
+  savingsHasOutlier: boolean
   passiveIncome12m: number
   realizedReturnRate: number | null
   forecastYears: { year: number; balance: number }[]
@@ -53,7 +54,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
   fireNumber, leanFireNumber, fireProgress, runway,
-  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
+  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits, savingsHasOutlier,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, wealthDelta, lifestyle,
@@ -251,12 +252,12 @@ export function ProgresoView({
         />
 
         <KpiCard
-          label="Tasa de ahorro"
+          label={`Tasa de ahorro${savingsHasOutlier ? ' ~' : ''}`}
           value={`${(savingsRate * 100).toFixed(0)}%`}
           unit="últimos 12m"
-          sub={`${fmt(monthlySavings)}/mes aportado`}
+          sub={`${fmt(monthlySavings)}/mes aportado${savingsHasOutlier ? ' · excl. outliers' : ''}`}
           color="#60a5fa"
-          tooltip="Porcentaje de tus ingresos activos que fue a ahorros e inversiones en los últimos 12 meses. Fórmula: aportado ÷ ingresos activos. Meta FIRE: ≥30%."
+          tooltip={`Porcentaje de tus ingresos activos que fue a ahorros e inversiones (categorías SAVINGS_*) en los últimos 12 meses. Fórmula: aportado ÷ ingresos activos. Meta FIRE: ≥30%.${savingsHasOutlier ? ' ~ = se excluyeron meses con compras atípicas (ej. bienes raíces).' : ''}`}
         />
 
         <KpiCard

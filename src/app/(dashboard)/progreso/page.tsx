@@ -153,11 +153,30 @@ export default async function ProgresoPage() {
     .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
-  // Actual investment deposits — used as monthly savings for forecast & savings rate
-  const avgMonthlyDeposits = recent
-    .filter(tx => tx.expense_group === 'objetivos_financieros' && !tx.is_settlement &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal'))
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+  // Actual investment deposits — SAVINGS_* categories only (excl. losses, loan payments, rental expenses)
+  // Outlier months (e.g. one-off real estate purchase) are removed via IQR to smooth the average
+  const depositByMonth: Record<string, number> = {}
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(rolling12Start.getFullYear(), rolling12Start.getMonth() + i, 1)
+    depositByMonth[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`] = 0
+  }
+  for (const tx of recent) {
+    if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') continue
+    if (tx.expense_group !== 'objetivos_financieros' || tx.is_settlement) continue
+    if (!(tx.category_code ?? '').startsWith('SAVINGS_')) continue
+    if (/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) continue
+    const ym = tx.date?.slice(0, 7)
+    if (ym && ym in depositByMonth) depositByMonth[ym] += Number(tx.amount ?? 0)
+  }
+  const monthlyDepositValues = Object.values(depositByMonth).sort((a, b) => a - b)
+  const dq1     = monthlyDepositValues[Math.floor(monthlyDepositValues.length * 0.25)]
+  const dq3     = monthlyDepositValues[Math.floor(monthlyDepositValues.length * 0.75)]
+  const dMedian = monthlyDepositValues[Math.floor(monthlyDepositValues.length / 2)]
+  // Fence: standard IQR, but at least 4× median so isolated bitcoin/pension months aren't removed
+  const depositFence = Math.max(dq3 + 1.5 * (dq3 - dq1), dMedian * 4)
+  const cleanedDepositValues = Object.values(depositByMonth).filter(v => v <= depositFence)
+  const savingsHasOutlier = cleanedDepositValues.length < 12
+  const avgMonthlyDeposits = cleanedDepositValues.reduce((s, v) => s + v, 0) / 12
 
   const passiveIncome12m = recent
     .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
@@ -444,6 +463,7 @@ export default async function ProgresoPage() {
         avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         avgMonthlyIncome={avgMonthlyIncome}
         avgMonthlyDeposits={avgMonthlyDeposits}
+        savingsHasOutlier={savingsHasOutlier}
         passiveIncome12m={passiveIncome12m}
         realizedReturnRate={realizedReturnRate}
         forecastYears={forecastYears}
