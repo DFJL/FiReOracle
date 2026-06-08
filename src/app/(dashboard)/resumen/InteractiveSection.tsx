@@ -1212,25 +1212,36 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       : null
     const kpiTxs = kpiEnd ? periodTxs.filter(tx => tx.date && tx.date < kpiEnd) : periodTxs
 
-    let income = 0, passiveIncome = 0, rendimientos = 0, expenses = 0, invested = 0
-    let activeIncomeForSavings = 0  // progreso formula: income && !passive (incl. settlements)
+    let income = 0, passiveIncome = 0, rendimientos = 0
+    let lifestyleExp = 0, survivalExp = 0, loanPayments = 0, invested = 0
+    let activeIncomeForSavings = 0
     for (const tx of kpiTxs) {
       const amt = Number(tx.amount ?? 0)
       if (isLiquidIncome(tx)) {
         income += amt
         if (tx.is_passive_income) passiveIncome += amt
-      } else if (isPatrimonialIncome(tx)) rendimientos += amt
-      else if (isOutflow(tx))       expenses += amt
-      else if (isSavings(tx))       invested += amt
+      } else if (isPatrimonialIncome(tx)) {
+        rendimientos += amt
+      } else if (isOutflow(tx)) {
+        if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) {
+          loanPayments += amt
+        } else {
+          lifestyleExp += amt
+          if (tx.is_survival_expense) survivalExp += amt
+        }
+      } else if (isSavings(tx)) {
+        invested += amt
+      }
       if (tx.movement_type === 'income' && !tx.is_passive_income) activeIncomeForSavings += amt
     }
-    const net = income - expenses
-    const activeIncome = income - passiveIncome  // kept for netMargin / other KPIs
+    const discrecionalExp = lifestyleExp - survivalExp
+    const expenses  = lifestyleExp + loanPayments
+    const net       = income - expenses
     const savingsRate  = activeIncomeForSavings > 0 ? (invested / activeIncomeForSavings) * 100 : 0
-    // Margen neto: lo que sobra después de gastos (puede ser negativo)
-    const netMargin      = income > 0 ? (net / income) * 100 : 0
-    const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
-    return { income, passiveIncome, rendimientos, expenses, invested, net, savingsRate, netMargin, coverage }
+    // Margen neto: ingreso no consumido por gasto de vida (préstamos construyen patrimonio)
+    const netMargin      = income > 0 ? ((income - lifestyleExp) / income) * 100 : 0
+    const coverage       = lifestyleExp > 0 ? (passiveIncome / lifestyleExp) * 100 : 0
+    return { income, passiveIncome, rendimientos, lifestyleExp, survivalExp, discrecionalExp, loanPayments, expenses, invested, net, savingsRate, netMargin, coverage }
   }, [periodTxs, period])
 
   const now = new Date()
@@ -1281,11 +1292,11 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
               sub: kpis.rendimientos > 0 ? `+${fmtAmt(kpis.rendimientos)} val. pasiva` : null as string | null,
             },
             {
-              label: 'Gastos',
-              display: fmtAmt(kpis.expenses),
+              label: 'Gastos vida',
+              display: fmtAmt(kpis.lifestyleExp),
               color: 'text-rose-400',
-              secondary: currency === 'CRC' ? `$${Math.round(toUSD(kpis.expenses)).toLocaleString('en-US')}` : null,
-              sub: null,
+              secondary: currency === 'CRC' ? `$${Math.round(toUSD(kpis.lifestyleExp)).toLocaleString('en-US')}` : null,
+              sub: kpis.loanPayments > 0 ? `+${fmtAmt(kpis.loanPayments)} cuotas` : null,
             },
             {
               label: 'Tasa de ahorro',
@@ -1310,6 +1321,43 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
             </div>
           ))}
         </div>
+
+        {/* ── Expense breakdown bar ─────────────────────────────────────────── */}
+        {(kpis.survivalExp > 0 || kpis.discrecionalExp > 0 || kpis.loanPayments > 0 || kpis.invested > 0) && (() => {
+          const total = kpis.lifestyleExp + kpis.loanPayments + kpis.invested
+          const pct = (v: number) => total > 0 ? `${((v / total) * 100).toFixed(0)}%` : '0%'
+          const segments = [
+            { key: 'survival',     value: kpis.survivalExp,    label: 'Necesario',       color: 'bg-blue-400/80' },
+            { key: 'discrecional', value: kpis.discrecionalExp, label: 'Discrecional',    color: 'bg-amber-400/70' },
+            { key: 'loans',        value: kpis.loanPayments,   label: 'Cuotas',           color: 'bg-zinc-500' },
+            { key: 'savings',      value: kpis.invested,       label: 'Ahorro/Inversión', color: 'bg-[#a3e635]/75' },
+          ].filter(s => s.value > 0)
+          return (
+            <div className="mt-3 px-4 py-3 bg-white/[0.02] rounded-xl border border-white/[0.05]">
+              <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-2.5">
+                Composición del dinero saliente
+              </p>
+              {/* Stacked bar */}
+              <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
+                {segments.map(s => (
+                  <div key={s.key} className={`${s.color} transition-all`} style={{ flex: s.value }} />
+                ))}
+              </div>
+              {/* Legend grid */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                {segments.map(s => (
+                  <div key={s.key} className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2 h-2 rounded-sm shrink-0 ${s.color}`} />
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-zinc-500 uppercase tracking-wider leading-none">{s.label} · {pct(s.value)}</p>
+                      <p className="text-[11px] font-semibold text-zinc-300 tabular-nums mt-0.5 truncate">{fmtAmt(s.value)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
       </div>
 

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { ProgresoView } from './ProgresoView'
+import { isLoanPayment } from '../resumen/categoryUtils'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -133,18 +134,23 @@ export default async function ProgresoPage() {
     tx.date && tx.date >= rolling12StartStr && tx.date < rolling12EndStr
   )
 
+  // Lifestyle expenses: excludes savings/investments (objetivos_financieros) AND loan payments
+  // Matches Oracle's isLifestyleOutflow so runway denominators are identical across modules
   const avgMonthlyExpenses = recent
     .filter(tx =>
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
       tx.expense_group !== 'objetivos_financieros' &&
-      !isValuation(tx.concept)
+      !isValuation(tx.concept) &&
+      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
   const avgMonthlySurvivalExpenses = recent
     .filter(tx =>
       tx.is_survival_expense &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      tx.expense_group !== 'objetivos_financieros' &&
+      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 

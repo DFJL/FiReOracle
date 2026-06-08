@@ -282,6 +282,16 @@ export default async function OraclePage() {
   // Runway based on lifestyle only — how long liquid assets cover real living costs
   const runway        = avgLifestyleExpenses > 0 ? liquid / avgLifestyleExpenses : null
 
+  // Real portfolio return from NW snapshot deltas (not from cash transactions)
+  // This captures NAV appreciation from funds like Dominion/TRANSCOMER that don't pay cash dividends
+  const sortedSnaps   = [...(snapshots ?? [])].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+  const snap12mAgo    = sortedSnaps.filter(s => s.snapshot_date <= cutStr).slice(-1)[0]
+  const invested12mAgo = snap12mAgo ? Number(snap12mAgo.invested_crc ?? 0) : 0
+  // portfolioReturn = change in invested balance − new deposits sent during the period
+  const portfolioReturn12m = invested12mAgo > 0 ? invested - invested12mAgo - c.totalSavings : null
+  const portfolioReturnPct = invested12mAgo > 0 && portfolioReturn12m !== null
+    ? (portfolioReturn12m / invested12mAgo) * 100 : null
+
   // Monthly simulation — matches progreso's forecast formula exactly
   const avgMonthlySavings = c.totalSavings / 12
   const monthlyReturn     = Math.pow(1 + expReturn, 1 / 12) - 1
@@ -444,6 +454,25 @@ ${topVendors.map(([v, amt]) => `${v.slice(0, 30).padEnd(30)} ${fmtCRC(amt).padSt
  INGRESOS PASIVOS (12m)
 ══════════════════════════════════════════════════════════
 ${Object.entries(passiveCatMap).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k.padEnd(28)} ${fmtCRC(v)}`).join('\n') || 'Sin registros'}
+
+══════════════════════════════════════════════════════════
+ RENDIMIENTO REAL DEL PORTAFOLIO (12m — via apreciación NAV)
+══════════════════════════════════════════════════════════
+NOTA CRÍTICA: fondos como Dominion, TRANSCOMER, acciones y crypto generan retorno
+principalmente via apreciación del NAV — NO pagan dividendos en efectivo.
+El retorno real se mide como el cambio en el valor del portafolio menos nuevos aportes,
+NO como ingresos pasivos en transacciones.
+
+Portafolio inicio período (${snap12mAgo?.snapshot_date ?? 'sin dato'}):  ${fmtCRC(invested12mAgo)}
+Portafolio fin período (${latestSnap?.snapshot_date ?? 'sin dato'}):     ${fmtCRC(invested)}
+Nuevos aportes al portafolio (12m):   ${fmtCRC(c.totalSavings)}
+Apreciación / Retorno neto estimado:  ${portfolioReturn12m !== null ? `${fmtCRC(portfolioReturn12m)} (${portfolioReturnPct !== null ? portfolioReturnPct.toFixed(1) : 'n/d'}% sobre capital inicial)` : 'Insuficientes snapshots para calcular'}
+Distribuciones en efectivo (pasivos): ${fmtCRC(c.totalPassiveIncome)}  [solo la parte que llegó como ingreso a cuenta]
+Retorno total estimado (apreciación + distribuciones): ${portfolioReturn12m !== null ? fmtCRC(portfolioReturn12m + c.totalPassiveIncome) : 'n/d'}
+
+IMPORTANTE: NO uses la tasa de "ingresos pasivos / portafolio" como rendimiento.
+Esa tasa solo mide distribuciones en efectivo, no la apreciación del NAV.
+La tasa relevante es: Retorno total estimado / Portafolio inicio.
 
 ══════════════════════════════════════════════════════════
  AHORRO E INVERSIÓN (12m)
