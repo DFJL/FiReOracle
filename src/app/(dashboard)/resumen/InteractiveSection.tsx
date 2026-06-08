@@ -590,9 +590,12 @@ function EditTransactionModal({ tx, categories, onClose }: {
 
       // Link to loan payment if selected and not already linked to this loan
       if (isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId) {
-        const balAfterNum = parseFloat(loanBalAfter)
-        if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
         const loan = loans.find(l => l.id === selectedLoanId)
+        // If balance not entered, estimate: currentBalance - payment amount (user can correct in historial)
+        const balAfterNum = loanBalAfter.trim()
+          ? parseFloat(loanBalAfter)
+          : Math.max(0, (loan?.currentBalance ?? 0) - amt)
+        if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
         const loanRes = await linkTransactionToLoan(tx.id, selectedLoanId, {
           payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
           payment_type:   'normal',
@@ -760,7 +763,7 @@ function EditTransactionModal({ tx, categories, onClose }: {
                           <label className={lbl}>Saldo del préstamo después de este pago</label>
                           <input type="number" min="0" step="any" value={loanBalAfter}
                             onChange={e => setLoanBalAfter(e.target.value)}
-                            placeholder="Saldo según estado de cuenta"
+                            placeholder="Dejar vacío para estimar automáticamente"
                             className={inputCls} />
                         </div>
                       )}
