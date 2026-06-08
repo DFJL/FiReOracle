@@ -14,7 +14,7 @@ type LifestyleData = {
   curTotal: number
   prvTotal: number
   monthly: { label: string; necesario: number; personal: number }[]
-  topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
+  topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
 }
 
 type Props = {
@@ -1189,6 +1189,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                     </div>
                     <p className="text-[10px] tabular-nums text-zinc-400 w-16 text-right shrink-0">{fmtCRC(c.curAvg)}</p>
                     <p className="text-[9px] font-black tabular-nums w-12 text-right shrink-0" style={{ color }}>
+                      {c.outlierCount > 0 && <span className="text-zinc-600 font-normal" title={`${c.outlierCount} mes${c.outlierCount > 1 ? 'es' : ''} atípico${c.outlierCount > 1 ? 's' : ''} excluido${c.outlierCount > 1 ? 's' : ''}`}>~</span>}
                       {yoy !== null ? `${yoy >= 0 ? '+' : ''}${(yoy * 100).toFixed(0)}%` : '—'}
                     </p>
                   </div>
