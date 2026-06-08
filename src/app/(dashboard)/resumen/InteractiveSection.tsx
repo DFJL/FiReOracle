@@ -7,7 +7,7 @@ import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import {
-  updateTransaction, deleteTransaction, type UpdateTransactionInput,
+  deleteTransaction, type UpdateTransactionInput,
   getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
   updateTransactionWithLinks,
 } from '@/app/actions/transactions'

@@ -27,7 +27,7 @@ export default async function ResumenPage() {
       .order('sort_order'),
   ])
 
-  // Initial account balances — separate liquid (checking/cash) from savings/investment
+  // Initial account balances — parallel fetch, one query per account
   const { data: accountRows } = await admin
     .from('financial_accounts')
     .select('id, account_type')
@@ -36,18 +36,21 @@ export default async function ResumenPage() {
 
   let liquidBalance = 0
   let savingsBalance = 0
-  if (accountRows) {
-    for (const acc of accountRows) {
-      const { data: snap } = await admin
-        .from('account_balance_snapshots')
-        .select('real_balance')
-        .eq('account_id', acc.id)
-        .order('snapshot_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (!snap?.real_balance) continue
-      const bal = Number(snap.real_balance)
-      if (acc.account_type === 'checking' || acc.account_type === 'cash') liquidBalance += bal
+  if (accountRows?.length) {
+    const snaps = await Promise.all(
+      accountRows.map(acc =>
+        admin.from('account_balance_snapshots')
+          .select('real_balance')
+          .eq('account_id', acc.id)
+          .order('snapshot_date', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+          .then(({ data }) => ({ type: acc.account_type, bal: data?.real_balance ? Number(data.real_balance) : 0 }))
+      )
+    )
+    for (const { type, bal } of snaps) {
+      if (!bal) continue
+      if (type === 'checking' || type === 'cash') liquidBalance += bal
       else savingsBalance += bal
     }
   }
