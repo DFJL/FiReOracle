@@ -147,7 +147,7 @@ export function MobileNav({ pendingCount }: { pendingCount: number }) {
       {/* Slide-up sheet */}
       <div
         className={`md:hidden fixed left-0 right-0 z-50 bg-[#0c1209] border-t border-[#a3e635]/[0.12] rounded-t-2xl transition-transform duration-250 ease-out ${
-          open ? 'translate-y-0' : 'translate-y-full'
+          open ? 'translate-y-0 pointer-events-auto' : 'translate-y-full pointer-events-none'
         }`}
         style={{ bottom: 60 }}
       >
