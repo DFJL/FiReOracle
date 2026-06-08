@@ -604,6 +604,7 @@ export type Database = {
           id: string
           movement_type: string
           notes: string | null
+          source_tx_id: string | null
           user_id: string
         }
         Insert: {
@@ -614,6 +615,7 @@ export type Database = {
           id?: string
           movement_type: string
           notes?: string | null
+          source_tx_id?: string | null
           user_id: string
         }
         Update: {
@@ -624,6 +626,7 @@ export type Database = {
           id?: string
           movement_type?: string
           notes?: string | null
+          source_tx_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -632,6 +635,13 @@ export type Database = {
             columns: ["envelope_id"]
             isOneToOne: false
             referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envelope_movements_source_tx_id_fkey"
+            columns: ["source_tx_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -953,6 +963,7 @@ export type Database = {
           payment_type: string
           principal: number
           rate_applied: number
+          transaction_id: string | null
           user_id: string
         }
         Insert: {
@@ -970,6 +981,7 @@ export type Database = {
           payment_type?: string
           principal?: number
           rate_applied?: number
+          transaction_id?: string | null
           user_id: string
         }
         Update: {
@@ -987,6 +999,7 @@ export type Database = {
           payment_type?: string
           principal?: number
           rate_applied?: number
+          transaction_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -995,6 +1008,13 @@ export type Database = {
             columns: ["loan_id"]
             isOneToOne: false
             referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loan_payments_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -2368,4 +2388,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
