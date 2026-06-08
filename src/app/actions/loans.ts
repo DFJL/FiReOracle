@@ -194,6 +194,67 @@ export async function createLoan(
   return { error: null, id: data.id }
 }
 
+export async function updateLoanPayment(
+  paymentId: string,
+  data: {
+    payment_date: string
+    payment_type: 'normal' | 'extra' | 'partial'
+    amount: number
+    balance_before: number
+    balance_after: number
+    rate_applied: number
+    notes?: string
+  },
+  newLoanBalance?: number,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const principal = data.balance_before - data.balance_after
+  const interest  = Math.max(0, data.amount - principal)
+
+  const { data: payment, error: fetchErr } = await admin
+    .from('loan_payments')
+    .select('loan_id')
+    .eq('id', paymentId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (fetchErr || !payment) return { error: fetchErr?.message ?? 'Pago no encontrado' }
+
+  const { error: updErr } = await admin
+    .from('loan_payments')
+    .update({
+      payment_date: data.payment_date,
+      payment_type: data.payment_type,
+      amount: data.amount,
+      principal,
+      interest,
+      balance_before: data.balance_before,
+      balance_after: data.balance_after,
+      rate_applied: data.rate_applied,
+      notes: data.notes ?? null,
+    })
+    .eq('id', paymentId)
+    .eq('user_id', user.id)
+
+  if (updErr) return { error: updErr.message }
+
+  if (newLoanBalance !== undefined) {
+    await admin
+      .from('loans')
+      .update({ current_balance: newLoanBalance })
+      .eq('id', payment.loan_id as string)
+      .eq('user_id', user.id)
+  }
+
+  revalidatePath('/prestamos')
+  revalidatePath('/patrimonio')
+  return { error: null }
+}
+
 export async function updateLoanSortOrder(
   loanId: string,
   sortOrder: number,

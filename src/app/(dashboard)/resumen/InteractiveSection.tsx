@@ -63,13 +63,13 @@ function fmtDate(d: string) {
 function periodCutoff(p: PeriodKey): string | null {
   const now = new Date()
   if (p === 'mtd') return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-  if (p === '1m')  { const d = new Date(now); d.setMonth(d.getMonth() - 1);       return d.toISOString().slice(0, 10) }
-  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);       return d.toISOString().slice(0, 10) }
-  if (p === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);       return d.toISOString().slice(0, 10) }
+  if (p === '1m')  { const d = new Date(now.getFullYear(), now.getMonth() - 1,  1); return d.toISOString().slice(0, 10) }
+  if (p === '3m')  { const d = new Date(now.getFullYear(), now.getMonth() - 3,  1); return d.toISOString().slice(0, 10) }
+  if (p === '6m')  { const d = new Date(now.getFullYear(), now.getMonth() - 6,  1); return d.toISOString().slice(0, 10) }
   if (p === 'ytd') return `${now.getFullYear()}-01-01`
-  if (p === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10) }
-  if (p === '2y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 2); return d.toISOString().slice(0, 10) }
-  if (p === '5y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 5); return d.toISOString().slice(0, 10) }
+  if (p === '1y')  { const d = new Date(now.getFullYear(), now.getMonth() - 12, 1); return d.toISOString().slice(0, 10) }
+  if (p === '2y')  { const d = new Date(now.getFullYear(), now.getMonth() - 24, 1); return d.toISOString().slice(0, 10) }
+  if (p === '5y')  { const d = new Date(now.getFullYear(), now.getMonth() - 60, 1); return d.toISOString().slice(0, 10) }
   return null
 }
 
