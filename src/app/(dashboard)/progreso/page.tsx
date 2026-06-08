@@ -259,16 +259,9 @@ export default async function ProgresoPage() {
     })
   }
 
-  // Top categories — aggregate at ROOT level with IQR-based outlier removal
-  // Build monthly totals per root across all 24 months
-  const rootMonthly: Record<string, Record<string, number>> = {}
-  for (const tx of lifestyleTxs) {
-    const root  = getRootCode(tx.category_code ?? '__na__')
-    const month = tx.date?.slice(0, 7)
-    if (!month) continue
-    if (!rootMonthly[root]) rootMonthly[root] = {}
-    rootMonthly[root][month] = (rootMonthly[root][month] ?? 0) + Number(tx.amount ?? 0)
-  }
+  // Top categories — two-pass outlier removal for fair YoY comparison:
+  // Pass 1 (tx-level): remove single large one-off purchases per category (el sofá)
+  // Pass 2 (monthly): remove atypical months from cleaned totals (el viaje)
 
   const toYM = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   const allYMs = Array.from({ length: 24 }, (_, i) =>
@@ -283,23 +276,50 @@ export default async function ProgresoPage() {
     const s  = [...nonZero].sort((a, b) => a - b)
     const q1 = s[Math.floor(s.length * 0.25)]
     const q3 = s[Math.floor(s.length * 0.75)]
-    // Use the higher of standard IQR fence vs 2.5×Q3 to avoid over-flagging tight distributions
     return Math.max(q3 + 1.5 * (q3 - q1), q3 * 2.5)
   }
 
+  // Pass 1: compute per-root transaction fence across all 24m
+  const rootTxAmounts: Record<string, number[]> = {}
+  for (const tx of lifestyleTxs) {
+    const root = getRootCode(tx.category_code ?? '__na__')
+    if (!rootTxAmounts[root]) rootTxAmounts[root] = []
+    rootTxAmounts[root].push(Number(tx.amount ?? 0))
+  }
+  const rootTxFences = Object.fromEntries(
+    Object.entries(rootTxAmounts).map(([root, amounts]) => [root, outlierFence(amounts)])
+  )
+  const rootTxExcluded: Record<string, number> = {}
+
+  // Pass 2: build monthly totals skipping transaction-level outliers
+  const rootMonthly: Record<string, Record<string, number>> = {}
+  for (const tx of lifestyleTxs) {
+    const root   = getRootCode(tx.category_code ?? '__na__')
+    const month  = tx.date?.slice(0, 7)
+    const amount = Number(tx.amount ?? 0)
+    if (!month) continue
+    if (amount > (rootTxFences[root] ?? Infinity)) {
+      rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
+      continue
+    }
+    if (!rootMonthly[root]) rootMonthly[root] = {}
+    rootMonthly[root][month] = (rootMonthly[root][month] ?? 0) + amount
+  }
+
+  // Pass 3: monthly IQR on cleaned totals
   const liTopCats = Object.entries(rootMonthly)
     .filter(([, monthly]) => curYMs.some(m => (monthly[m] ?? 0) > 0))
     .map(([code, monthly]) => {
-      const fence      = outlierFence(allYMs.map(m => monthly[m] ?? 0))
-      const outlierSet = new Set(allYMs.filter(m => (monthly[m] ?? 0) > fence))
-      const curSum     = curYMs.filter(m => !outlierSet.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
-      const prvSum     = prvYMs.filter(m => !outlierSet.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
+      const fence         = outlierFence(allYMs.map(m => monthly[m] ?? 0))
+      const monthOutliers = new Set(allYMs.filter(m => (monthly[m] ?? 0) > fence))
+      const curSum        = curYMs.filter(m => !monthOutliers.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
+      const prvSum        = prvYMs.filter(m => !monthOutliers.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
       return {
         code,
         name:         catNameMap.get(code) ?? code,
         curAvg:       curSum / 12,
         yoyPct:       prvSum > 0 ? (curSum - prvSum) / prvSum : null,
-        outlierCount: outlierSet.size,
+        outlierCount: (rootTxExcluded[code] ?? 0) + monthOutliers.size,
       }
     })
     .filter(c => c.curAvg > 0)
