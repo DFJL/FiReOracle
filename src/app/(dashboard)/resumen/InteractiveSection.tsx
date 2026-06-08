@@ -195,12 +195,8 @@ const isInflow = isLiquidIncome
 function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false
-  // If a specific (non-generic) category code is present, it must be SAVINGS_*
-  // This excludes RENTAL_EXPENSE, MISC_EXPENSE non-valuation items, etc.
-  if (tx.category_code && !GENERIC_CODES.has(tx.category_code) && !tx.category_code.startsWith('SAVINGS_')) return false
-  // Exclude valuation/accounting entries (pérdida/aumento valor) — not real cash savings
-  if ((!tx.category_code || GENERIC_CODES.has(tx.category_code)) && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
+  // Only explicit SAVINGS_* codes count — matches progreso page logic
+  if (!(tx.category_code ?? '').startsWith('SAVINGS_')) return false
   return true
 }
 
@@ -550,7 +546,7 @@ function EditTransactionModal({ tx, categories, onClose }: {
         setLoanBalAfter(String(link.balanceAfter))
       }
       setLoansReady(true)
-    })
+    }).catch(() => setLoansReady(true))
   }, [tx.id, isLoanPaymentTx])
 
   useEffect(() => {
@@ -728,7 +724,7 @@ function EditTransactionModal({ tx, categories, onClose }: {
           )}
 
           {/* Loan linkage — only for LOAN_PAYMENT transactions */}
-          {isLoanPaymentTx && loansReady && loans.length > 0 && (
+          {isLoanPaymentTx && loansReady && (
             <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
                 Vincular a préstamo
@@ -740,7 +736,10 @@ function EditTransactionModal({ tx, categories, onClose }: {
               ) : (
                 <p className="text-[9px] text-zinc-600">Sin vínculo al módulo de préstamos</p>
               )}
-              {!initialLoanLink && (
+              {!initialLoanLink && loans.length === 0 && (
+                <p className="text-[9px] text-zinc-600">No hay préstamos activos registrados</p>
+              )}
+              {!initialLoanLink && loans.length > 0 && (
                 <>
                   <select value={selectedLoanId} onChange={e => setSelectedLoanId(e.target.value)} className={inputCls}>
                     <option value="">— No vincular —</option>
@@ -1168,8 +1167,9 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       else if (isSavings(tx))       invested += amt
     }
     const net = income - expenses
-    // Tasa de ahorro FIRE: lo que realmente fue a ahorros/inversión vs ingresos activos
-    const savingsRate    = income > 0 ? (invested / income) * 100 : 0
+    // Tasa de ahorro FIRE: ahorros/inversión vs ingresos activos (excl. pasivos) — igual que progreso
+    const activeIncome   = income - passiveIncome
+    const savingsRate    = activeIncome > 0 ? (invested / activeIncome) * 100 : 0
     // Margen neto: lo que sobra después de gastos (puede ser negativo)
     const netMargin      = income > 0 ? (net / income) * 100 : 0
     const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
