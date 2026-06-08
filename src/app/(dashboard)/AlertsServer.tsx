@@ -13,25 +13,24 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   if (!config) return null
 
-  // Liquid balance from checking + cash accounts
-  const { data: accounts } = await admin
-    .from('financial_accounts')
-    .select('id')
+  // Liquid balance from leaf envelope movements (same source as FIRE progreso page)
+  const { data: envelopes } = await admin
+    .from('savings_envelopes')
+    .select('id, parent_envelope_id')
     .eq('user_id', userId)
     .eq('is_active', true)
-    .in('account_type', ['checking', 'cash'])
 
-  let liquidBalance = 0
-  for (const acc of accounts ?? []) {
-    const { data: snap } = await admin
-      .from('account_balance_snapshots')
-      .select('real_balance')
-      .eq('account_id', acc.id)
-      .order('snapshot_date', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (snap?.real_balance) liquidBalance += Number(snap.real_balance)
-  }
+  const { data: allMovements } = await admin
+    .from('envelope_movements')
+    .select('amount, movement_type, envelope_id')
+    .eq('user_id', userId)
+
+  const parentEnvelopeIds = new Set(
+    (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
+  )
+  const liquidBalance = (allMovements ?? [])
+    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
+    .reduce((s, m) => s + Number(m.amount), 0)
 
   // Last 3 months average expense (exclude current month)
   const now = new Date()
