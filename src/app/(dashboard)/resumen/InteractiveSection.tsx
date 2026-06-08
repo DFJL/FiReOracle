@@ -10,6 +10,10 @@ import {
   updateTransaction, deleteTransaction, type UpdateTransactionInput,
   getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
 } from '@/app/actions/transactions'
+import {
+  getActiveLoans, getLoanPaymentForTransaction, linkTransactionToLoan,
+  type ActiveLoan,
+} from '@/app/actions/loans'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -527,6 +531,28 @@ function EditTransactionModal({ tx, categories, onClose }: {
     })
   }, [tx.id])
 
+  // Loan linkage (for LOAN_PAYMENT transactions)
+  const [loans, setLoans]                       = useState<ActiveLoan[]>([])
+  const [selectedLoanId, setSelectedLoanId]     = useState('')
+  const [initialLoanLink, setInitialLoanLink]   = useState<{ loanPaymentId: string; loanName: string; balanceAfter: number } | null>(null)
+  const [loanBalAfter, setLoanBalAfter]         = useState('')
+  const [loansReady, setLoansReady]             = useState(false)
+
+  const isLoanPaymentTx = isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+
+  useEffect(() => {
+    if (!isLoanPaymentTx) return
+    Promise.all([getActiveLoans(), getLoanPaymentForTransaction(tx.id)]).then(([ls, link]) => {
+      setLoans(ls)
+      if (link) {
+        setSelectedLoanId(link.loanId)
+        setInitialLoanLink(link)
+        setLoanBalAfter(String(link.balanceAfter))
+      }
+      setLoansReady(true)
+    })
+  }, [tx.id, isLoanPaymentTx])
+
   useEffect(() => {
     if (!categoryCode) return
     const cat = categories.find(c => c.code === categoryCode)
@@ -564,6 +590,23 @@ function EditTransactionModal({ tx, categories, onClose }: {
         )
         if (envResult?.error) { setError(envResult.error); return }
         setInitialEnvelopeId(envelopeId)
+      }
+
+      // Link to loan payment if selected and not already linked to this loan
+      if (isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId) {
+        const balAfterNum = parseFloat(loanBalAfter)
+        if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
+        const loan = loans.find(l => l.id === selectedLoanId)
+        const loanRes = await linkTransactionToLoan(tx.id, selectedLoanId, {
+          payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
+          payment_type:   'normal',
+          amount:         amt,
+          balance_before: loan?.currentBalance ?? balAfterNum,
+          balance_after:  balAfterNum,
+          rate_applied:   loan?.interestRate ?? 0,
+          notes:          notes.trim() || undefined,
+        })
+        if (loanRes.error) { setError(loanRes.error); return }
       }
 
       onClose()
@@ -680,6 +723,43 @@ function EditTransactionModal({ tx, categories, onClose }: {
                 <p className="text-[9px] text-cyan-400/80 mt-1">
                   ↔ Cambia de &quot;{initialEnv.name}&quot; a &quot;{currentEnv.name}&quot;
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* Loan linkage — only for LOAN_PAYMENT transactions */}
+          {isLoanPaymentTx && loansReady && loans.length > 0 && (
+            <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
+              <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
+                Vincular a préstamo
+              </p>
+              {initialLoanLink ? (
+                <p className="text-[9px] text-amber-400/80">
+                  ⚡ Vinculado a &quot;{initialLoanLink.loanName}&quot; — saldo después: {initialLoanLink.balanceAfter.toLocaleString('es-CR')}
+                </p>
+              ) : (
+                <p className="text-[9px] text-zinc-600">Sin vínculo al módulo de préstamos</p>
+              )}
+              {!initialLoanLink && (
+                <>
+                  <select value={selectedLoanId} onChange={e => setSelectedLoanId(e.target.value)} className={inputCls}>
+                    <option value="">— No vincular —</option>
+                    {loans.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} ({l.lender}) — {l.currencyCode === 'USD' ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `₡${Math.round(l.currentBalance).toLocaleString('es-CR')}`}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedLoanId && (
+                    <div>
+                      <label className={lbl}>Saldo del préstamo después de este pago</label>
+                      <input type="number" min="0" step="any" value={loanBalAfter}
+                        onChange={e => setLoanBalAfter(e.target.value)}
+                        placeholder="Saldo según estado de cuenta"
+                        className={inputCls} />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -231,6 +231,9 @@ export async function createTransaction(input: CreateTransactionInput) {
       const sideErr = await applySideEffects(admin, user.id, { ...input, source_tx_id: txId })
       if (sideErr) return { error: sideErr }
     }
+    revalidatePath('/resumen')
+    revalidatePath('/flujo')
+    return { error: null, id: txId }
   }
 
   else if (input.type === 'ingreso') {

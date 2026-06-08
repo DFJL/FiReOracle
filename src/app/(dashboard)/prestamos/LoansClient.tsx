@@ -9,6 +9,7 @@ import {
   type ScheduleRow,
 } from './amortization'
 import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment } from '@/app/actions/loans'
+import { createTransaction } from '@/app/actions/transactions'
 
 type Payment = {
   id: string
@@ -214,7 +215,7 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
       )}
 
       {/* ── Selected loan detail ── */}
-      {selectedLoan && <LoanCard loan={selectedLoan} />}
+      {selectedLoan && <LoanCard key={selectedLoan.id} loan={selectedLoan} />}
     </div>
   )
 }
@@ -421,12 +422,17 @@ function RecordPaymentForm({
   const [amountStr, setAmountStr]    = useState('')
   const [balAfterStr, setBalAfterStr] = useState('')
   const [notes, setNotes]            = useState('')
+  const [createLedgerTx, setCreateLedgerTx] = useState(true)
+  const [txConcept, setTxConcept]    = useState(`Pago ${type === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`)
+
+  // keep concept in sync with type
+  const conceptDefault = `Pago ${type === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl      = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
 
-  const amount   = parseFloat(amountStr)
-  const balAfter = parseFloat(balAfterStr)
+  const amount    = parseFloat(amountStr)
+  const balAfter  = parseFloat(balAfterStr)
   const balBefore = loan.currentBalance
   const principal = !isNaN(balAfter) ? Math.max(0, balBefore - balAfter) : null
 
@@ -437,6 +443,24 @@ function RecordPaymentForm({
     if (balAfter > balBefore) { setError(`Saldo después no puede ser mayor al saldo actual (${fmt(balBefore)})`); return }
     setError(null)
     startTransition(async () => {
+      // Optionally create the ledger transaction first to get its ID
+      let txId: string | undefined
+      if (createLedgerTx) {
+        const txRes = await createTransaction({
+          type: 'gasto',
+          date,
+          amount,
+          vendor: loan.lender,
+          concept: txConcept.trim() || conceptDefault,
+          expense_group: 'necesario',
+          category_code: 'LOAN_PAYMENT',
+          currency_code: 'CRC',
+          notes: notes.trim() || undefined,
+        })
+        if (txRes.error) { setError(txRes.error); return }
+        txId = txRes.id
+      }
+
       const res = await recordLoanPayment(loan.id, {
         payment_date:   date,
         payment_type:   type,
@@ -445,10 +469,12 @@ function RecordPaymentForm({
         balance_after:  balAfter,
         rate_applied:   loan.interestRate,
         notes:          notes.trim() || undefined,
+        transaction_id: txId,
       })
       if (res.error) { setError(res.error); return }
+
       const p: Payment = {
-        id:             crypto.randomUUID(),
+        id:             res.id ?? crypto.randomUUID(),
         payment_date:   date,
         payment_type:   type,
         amount,
@@ -475,7 +501,10 @@ function RecordPaymentForm({
         </div>
         <div>
           <label className={lbl}>Tipo</label>
-          <select value={type} onChange={e => setType(e.target.value as 'normal' | 'extra')} className={inputCls}>
+          <select value={type} onChange={e => {
+            setType(e.target.value as 'normal' | 'extra')
+            setTxConcept(`Pago ${e.target.value === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`)
+          }} className={inputCls}>
             <option value="normal">Normal</option>
             <option value="extra">Abono extra</option>
           </select>
@@ -503,6 +532,24 @@ function RecordPaymentForm({
         <label className={lbl}>Saldo actual en sistema</label>
         <p className="text-sm font-black text-zinc-300">{fmt(balBefore)}</p>
         <p className="text-[9px] text-zinc-600">Ingresá el saldo real del estado de cuenta como "saldo después"</p>
+      </div>
+
+      {/* Ledger transaction toggle */}
+      <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <input type="checkbox" checked={createLedgerTx} onChange={e => setCreateLedgerTx(e.target.checked)}
+            className="accent-[#a3e635] w-3.5 h-3.5" />
+          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-wider">
+            Registrar también en ledger de transacciones
+          </span>
+        </label>
+        {createLedgerTx && (
+          <div>
+            <label className={lbl}>Concepto en ledger</label>
+            <input type="text" value={txConcept} onChange={e => setTxConcept(e.target.value)}
+              placeholder={conceptDefault} className={inputCls} />
+          </div>
+        )}
       </div>
 
       <div>
