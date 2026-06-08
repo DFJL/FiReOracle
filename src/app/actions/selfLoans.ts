@@ -152,9 +152,10 @@ export async function recordSelfLoanPayment(
   })
   if (payErr) return { error: payErr.message }
 
+  // balance_remaining is a GENERATED column — only update amount_repaid and status
   const { error: updErr } = await admin
     .from('self_loans')
-    .update({ amount_repaid: newRepaid, balance_remaining: newBalance, status: newStatus })
+    .update({ amount_repaid: newRepaid, status: newStatus })
     .eq('id', loanId)
   if (updErr) return { error: updErr.message }
 
@@ -172,7 +173,7 @@ export async function recordSelfLoanPayment(
           : Math.round((entry.amount / totalOriginalSplit) * payment.amount)
         credited += portion
         if (portion === 0) continue
-        const { error: movErr } = await supabase.from('envelope_movements').insert({
+        const { error: movErr } = await admin.from('envelope_movements').insert({
           user_id: user.id,
           envelope_id: entry.envelope_id,
           date: payment.date,
@@ -184,7 +185,7 @@ export async function recordSelfLoanPayment(
       }
     }
   } else if (loan.source_envelope_id) {
-    const { error: movErr } = await supabase.from('envelope_movements').insert({
+    const { error: movErr } = await admin.from('envelope_movements').insert({
       user_id: user.id,
       envelope_id: loan.source_envelope_id,
       date: payment.date,
