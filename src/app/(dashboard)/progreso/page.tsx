@@ -303,17 +303,24 @@ export default async function ProgresoPage() {
   )
   const rootTxExcluded: Record<string, number> = {}
 
-  // Pass 2: build monthly totals skipping transaction-level outliers
+  // cleanedLifestyleTxs: same as lifestyleTxs but with tx-level outliers removed.
+  // Used for both monthly aggregation AND driver drill-down so the drivers stay
+  // consistent with the category averages (no outlier tx showing as top driver).
+  const cleanedLifestyleTxs = lifestyleTxs.filter(tx => {
+    const root   = getRootCode(tx.category_code ?? '__na__')
+    const amount = Number(tx.amount ?? 0)
+    const isOutlier = amount > (rootTxFences[root] ?? Infinity)
+    if (isOutlier) rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
+    return !isOutlier
+  })
+
+  // Pass 2: build monthly totals from cleaned transactions
   const rootMonthly: Record<string, Record<string, number>> = {}
-  for (const tx of lifestyleTxs) {
+  for (const tx of cleanedLifestyleTxs) {
     const root   = getRootCode(tx.category_code ?? '__na__')
     const month  = tx.date?.slice(0, 7)
     const amount = Number(tx.amount ?? 0)
     if (!month) continue
-    if (amount > (rootTxFences[root] ?? Infinity)) {
-      rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
-      continue
-    }
     if (!rootMonthly[root]) rootMonthly[root] = {}
     rootMonthly[root][month] = (rootMonthly[root][month] ?? 0) + amount
   }
@@ -338,9 +345,9 @@ export default async function ProgresoPage() {
     .sort((a, b) => b.curAvg - a.curAvg)
     .slice(0, 8)
 
-  // Driver breakdown: group by concept (what the user typed), fall back to subcategory name
+  // Driver breakdown: group by concept using cleaned transactions (outliers excluded)
   const liTopCatsWithDrivers = liTopCats.map(cat => {
-    const catTxs = lifestyleTxs.filter(tx =>
+    const catTxs = cleanedLifestyleTxs.filter(tx =>
       getRootCode(tx.category_code ?? '__na__') === cat.code
     )
     const subSums: Record<string, { cur: number; prv: number }> = {}
