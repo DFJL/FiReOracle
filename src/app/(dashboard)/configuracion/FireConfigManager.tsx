@@ -3,8 +3,9 @@
 import { useState, useTransition } from 'react'
 import { upsertFinancialConfig, type FinancialConfigData } from '@/app/actions/financialConfig'
 
-type ExistingConfig = Omit<FinancialConfigData, 'preferred_currency'> & {
+type ExistingConfig = Omit<FinancialConfigData, 'preferred_currency' | 'lifestyle_exclude_categories'> & {
   preferred_currency?: string | null
+  lifestyle_exclude_categories?: string[] | null
 }
 
 type Props = {
@@ -15,17 +16,17 @@ function pct(val: number) { return (val * 100).toFixed(1) }
 function rate(val: number) { return (val * 100).toFixed(2) }
 
 export function FireConfigManager({ existing }: Props) {
-  const defaults: FinancialConfigData = {
-    fire_withdrawal_rate:   existing?.fire_withdrawal_rate   ?? 0.04,
+  const defaults = {
+    fire_withdrawal_rate:    existing?.fire_withdrawal_rate    ?? 0.04,
     fire_target_monthly_exp: existing?.fire_target_monthly_exp ?? null,
-    fire_expected_return:   existing?.fire_expected_return   ?? 0.07,
-    fire_inflation_rate:    existing?.fire_inflation_rate    ?? 0.04,
-    runway_green_months:    existing?.runway_green_months    ?? 6,
-    runway_yellow_months:   existing?.runway_yellow_months   ?? 3,
-    savings_rate_green:     existing?.savings_rate_green     ?? 0.30,
-    savings_rate_yellow:    existing?.savings_rate_yellow    ?? 0.15,
-    fcf_target_ratio:       existing?.fcf_target_ratio       ?? 0.20,
-    preferred_currency:     (existing?.preferred_currency as 'CRC' | 'USD' | undefined) ?? 'USD',
+    fire_expected_return:    existing?.fire_expected_return    ?? 0.07,
+    fire_inflation_rate:     existing?.fire_inflation_rate     ?? 0.04,
+    runway_green_months:     existing?.runway_green_months     ?? 6,
+    runway_yellow_months:    existing?.runway_yellow_months    ?? 3,
+    savings_rate_green:      existing?.savings_rate_green      ?? 0.30,
+    savings_rate_yellow:     existing?.savings_rate_yellow     ?? 0.15,
+    fcf_target_ratio:        existing?.fcf_target_ratio        ?? 0.20,
+    preferred_currency:      (existing?.preferred_currency as 'CRC' | 'USD' | undefined) ?? 'USD',
   }
 
   const [withdrawal, setWithdrawal]         = useState(pct(defaults.fire_withdrawal_rate))
@@ -37,9 +38,9 @@ export function FireConfigManager({ existing }: Props) {
   const [srGreen, setSrGreen]               = useState(pct(defaults.savings_rate_green))
   const [srYellow, setSrYellow]             = useState(pct(defaults.savings_rate_yellow))
   const [fcfTarget, setFcfTarget]           = useState(pct(defaults.fcf_target_ratio))
-  const [currency, setCurrency]             = useState<'CRC' | 'USD'>(defaults.preferred_currency ?? 'USD')
-  const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [currency, setCurrency]             = useState<'CRC' | 'USD'>(defaults.preferred_currency)
+  const [error, setError]   = useState<string | null>(null)
+  const [saved, setSaved]   = useState(false)
   const [isPending, startTransition] = useTransition()
 
   function submit(e: React.FormEvent) {

@@ -6,7 +6,15 @@ import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, i
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
-import { updateTransaction, deleteTransaction, type UpdateTransactionInput } from '@/app/actions/transactions'
+import {
+  updateTransaction, deleteTransaction, type UpdateTransactionInput,
+  getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
+  updateTransactionWithLinks,
+} from '@/app/actions/transactions'
+import {
+  getActiveLoans, getLoanPaymentForTransaction, linkTransactionToLoan,
+  type ActiveLoan,
+} from '@/app/actions/loans'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -56,13 +64,13 @@ function fmtDate(d: string) {
 function periodCutoff(p: PeriodKey): string | null {
   const now = new Date()
   if (p === 'mtd') return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-  if (p === '1m')  { const d = new Date(now); d.setMonth(d.getMonth() - 1);       return d.toISOString().slice(0, 10) }
-  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth() - 3);       return d.toISOString().slice(0, 10) }
-  if (p === '6m')  { const d = new Date(now); d.setMonth(d.getMonth() - 6);       return d.toISOString().slice(0, 10) }
+  if (p === '1m')  { const d = new Date(now.getFullYear(), now.getMonth() - 1,  1); return d.toISOString().slice(0, 10) }
+  if (p === '3m')  { const d = new Date(now.getFullYear(), now.getMonth() - 3,  1); return d.toISOString().slice(0, 10) }
+  if (p === '6m')  { const d = new Date(now.getFullYear(), now.getMonth() - 6,  1); return d.toISOString().slice(0, 10) }
   if (p === 'ytd') return `${now.getFullYear()}-01-01`
-  if (p === '1y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10) }
-  if (p === '2y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 2); return d.toISOString().slice(0, 10) }
-  if (p === '5y')  { const d = new Date(now); d.setFullYear(d.getFullYear() - 5); return d.toISOString().slice(0, 10) }
+  if (p === '1y')  { const d = new Date(now.getFullYear(), now.getMonth() - 12, 1); return d.toISOString().slice(0, 10) }
+  if (p === '2y')  { const d = new Date(now.getFullYear(), now.getMonth() - 24, 1); return d.toISOString().slice(0, 10) }
+  if (p === '5y')  { const d = new Date(now.getFullYear(), now.getMonth() - 60, 1); return d.toISOString().slice(0, 10) }
   return null
 }
 
@@ -188,10 +196,8 @@ const isInflow = isLiquidIncome
 function isSavings(tx: TxClient) {
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false
-  // Exclude valuation/accounting entries (pérdida/aumento valor) — not real cash savings
-  // Check covers both null category_code and generic codes (MISC, etc.) that reach inferCategory
-  if ((!tx.category_code || GENERIC_CODES.has(tx.category_code)) && /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
+  // Only explicit SAVINGS_* codes count — matches progreso page logic
+  if (!(tx.category_code ?? '').startsWith('SAVINGS_')) return false
   return true
 }
 
@@ -489,8 +495,9 @@ function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
 
 // ── edit modal ────────────────────────────────────────────────────────────────
 
-function EditTransactionModal({ tx, categories, onClose }: {
+function EditTransactionModal({ tx, categories, onClose, onSaved }: {
   tx: TxClient; categories: Category[]; onClose: () => void
+  onSaved?: (updated: TxClient) => void
 }) {
   const [date, setDate]               = useState(tx.date ?? '')
   const [amount, setAmount]           = useState(String(tx.amount ?? ''))
@@ -504,6 +511,45 @@ function EditTransactionModal({ tx, categories, onClose }: {
   const [isSurvival, setIsSurvival]   = useState(tx.is_survival_expense ?? false)
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
+
+  // Envelope linkage
+  type Envelope = { id: string; name: string; custodio: string | null }
+  const [envelopes, setEnvelopes]           = useState<Envelope[]>([])
+  const [envelopeId, setEnvelopeId]         = useState('')
+  const [initialEnvelopeId, setInitialEnvelopeId] = useState('')
+  const [envelopesReady, setEnvelopesReady] = useState(false)
+
+  useEffect(() => {
+    Promise.all([getLeafEnvelopes(), getTransactionEnvelopeLink(tx.id)]).then(([envs, link]) => {
+      setEnvelopes(envs)
+      const cur = link?.envelope_id ?? ''
+      setEnvelopeId(cur)
+      setInitialEnvelopeId(cur)
+      setEnvelopesReady(true)
+    })
+  }, [tx.id])
+
+  // Loan linkage (for LOAN_PAYMENT transactions)
+  const [loans, setLoans]                       = useState<ActiveLoan[]>([])
+  const [selectedLoanId, setSelectedLoanId]     = useState('')
+  const [initialLoanLink, setInitialLoanLink]   = useState<{ loanPaymentId: string; loanId: string; loanName: string; balanceAfter: number } | null>(null)
+  const [loanBalAfter, setLoanBalAfter]         = useState('')
+  const [loansReady, setLoansReady]             = useState(false)
+
+  const isLoanPaymentTx = isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+
+  useEffect(() => {
+    if (!isLoanPaymentTx) return
+    Promise.all([getActiveLoans(), getLoanPaymentForTransaction(tx.id)]).then(([ls, link]) => {
+      setLoans(ls)
+      if (link) {
+        setSelectedLoanId(link.loanId)
+        setInitialLoanLink(link)
+        setLoanBalAfter(String(link.balanceAfter))
+      }
+      setLoansReady(true)
+    }).catch(() => setLoansReady(true))
+  }, [tx.id, isLoanPaymentTx])
 
   useEffect(() => {
     if (!categoryCode) return
@@ -519,30 +565,86 @@ function EditTransactionModal({ tx, categories, onClose }: {
     e.preventDefault()
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
+
+    const envelopeChanged = envelopeId !== initialEnvelopeId
+    const loanChanged = isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId
+
+    let balAfterNum: number | undefined
+    let loan: ActiveLoan | undefined
+    if (loanChanged) {
+      loan = loans.find(l => l.id === selectedLoanId)
+      balAfterNum = loanBalAfter.trim()
+        ? parseFloat(loanBalAfter)
+        : Math.max(0, (loan?.currentBalance ?? 0) - amt)
+      if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
+    }
+
     startTransition(async () => {
-      const result = await updateTransaction(tx.id, {
-        date: date || undefined,
-        amount: amt,
-        vendor: vendor.trim() || null,
-        concept: concept.trim() || null,
-        category_code: categoryCode || null,
-        expense_group: expenseGroup,
-        notes: notes.trim() || null,
-        is_passive_income: isPassive,
-        is_settlement: isSettlement,
-        is_survival_expense: isSurvival,
-      } satisfies UpdateTransactionInput)
+      const result = await updateTransactionWithLinks(
+        tx.id,
+        {
+          date: date || undefined,
+          amount: amt,
+          vendor: vendor.trim() || null,
+          concept: concept.trim() || null,
+          category_code: categoryCode || null,
+          expense_group: expenseGroup,
+          notes: notes.trim() || null,
+          is_passive_income: isPassive,
+          is_settlement: isSettlement,
+          is_survival_expense: isSurvival,
+        } satisfies UpdateTransactionInput,
+        loanChanged && selectedLoanId && balAfterNum !== undefined ? {
+          loanId:         selectedLoanId,
+          payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
+          payment_type:   'normal',
+          amount:         amt,
+          balance_before: loan?.currentBalance ?? balAfterNum,
+          balance_after:  balAfterNum,
+          rate_applied:   loan?.interestRate ?? 0,
+          notes:          notes.trim() || undefined,
+        } : undefined,
+        envelopeChanged ? {
+          envelopeId: envelopeId || null,
+          txDate:     date,
+          txAmount:   amt,
+          txConcept:  concept.trim() || null,
+          txVendor:   vendor.trim() || null,
+        } : undefined,
+      )
       if (result?.error) { setError(result.error); return }
+      if (envelopeChanged) setInitialEnvelopeId(envelopeId)
+      onSaved?.({
+        ...tx,
+        date:                date || tx.date,
+        amount:              amt,
+        vendor:              vendor.trim() || null,
+        concept:             concept.trim() || null,
+        category_code:       categoryCode || null,
+        expense_group:       expenseGroup,
+        notes:               notes.trim() || null,
+        is_passive_income:   isPassive,
+        is_settlement:       isSettlement,
+        is_survival_expense: isSurvival,
+      })
       onClose()
     })
   }
 
+  const isExpense = tx.movement_type !== 'income'
   const typeFilter = tx.movement_type === 'income' ? 'income' : 'expense'
   const parents  = categories.filter(c => !c.parent_code && c.category_type === typeFilter)
   const children = categories.filter(c =>  c.parent_code && c.category_type === typeFilter)
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  const envChanged  = envelopeId !== initialEnvelopeId
+  const envAdded    = envChanged && !!envelopeId && !initialEnvelopeId
+  const envRemoved  = envChanged && !envelopeId && !!initialEnvelopeId
+  const envSwapped  = envChanged && !!envelopeId && !!initialEnvelopeId
+  const currentEnv  = envelopes.find(e => e.id === envelopeId)
+  const initialEnv  = envelopes.find(e => e.id === initialEnvelopeId)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -600,6 +702,97 @@ function EditTransactionModal({ tx, categories, onClose }: {
               </select>
             </div>
           )}
+
+          {/* Envelope section — expenses only */}
+          {isExpense && envelopesReady && envelopes.length > 0 && (
+            <div>
+              <label className={lbl}>
+                Débito de sobre
+                <span className="text-zinc-700 normal-case tracking-normal ml-1">(opcional)</span>
+              </label>
+              <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inputCls}>
+                <option value="">Sin afectación de sobre</option>
+                {envelopes.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.custodio ? `${e.custodio} › ${e.name}` : e.name}
+                  </option>
+                ))}
+              </select>
+              {/* Status indicators */}
+              {!envChanged && initialEnvelopeId && initialEnv && (
+                <p className="text-[9px] text-amber-400/80 mt-1">
+                  ⚡ Actualmente debita &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                </p>
+              )}
+              {!envChanged && !initialEnvelopeId && (
+                <p className="text-[9px] text-zinc-600 mt-1">Sin afectación de sobre</p>
+              )}
+              {envAdded && currentEnv && (
+                <p className="text-[9px] text-[#a3e635]/80 mt-1">
+                  + Agrega retiro de &quot;{currentEnv.custodio ? `${currentEnv.custodio} › ` : ''}{currentEnv.name}&quot;
+                </p>
+              )}
+              {envRemoved && initialEnv && (
+                <p className="text-[9px] text-rose-400/80 mt-1">
+                  − Elimina retiro de &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                </p>
+              )}
+              {envSwapped && currentEnv && initialEnv && (
+                <p className="text-[9px] text-cyan-400/80 mt-1">
+                  ↔ Cambia de &quot;{initialEnv.name}&quot; a &quot;{currentEnv.name}&quot;
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Loan linkage — only for LOAN_PAYMENT transactions */}
+          {isLoanPaymentTx && (
+            <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
+              <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
+                Vincular a préstamo
+              </p>
+              {!loansReady ? (
+                <p className="text-[9px] text-zinc-600 flex items-center gap-1.5">
+                  <Loader2 size={10} className="animate-spin" /> Cargando préstamos…
+                </p>
+              ) : (
+                <>
+                  {initialLoanLink ? (
+                    <p className="text-[9px] text-amber-400/80">
+                      ⚡ Vinculado a &quot;{initialLoanLink.loanName}&quot; — saldo después: {initialLoanLink.balanceAfter.toLocaleString('es-CR')}
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-zinc-600">Sin vínculo al módulo de préstamos</p>
+                  )}
+                  {!initialLoanLink && loans.length === 0 && (
+                    <p className="text-[9px] text-zinc-600">No hay préstamos activos registrados</p>
+                  )}
+                  {!initialLoanLink && loans.length > 0 && (
+                    <>
+                      <select value={selectedLoanId} onChange={e => setSelectedLoanId(e.target.value)} className={inputCls}>
+                        <option value="">— No vincular —</option>
+                        {loans.map(l => (
+                          <option key={l.id} value={l.id}>
+                            {l.name} ({l.lender}) — {l.currencyCode === 'USD' ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `₡${Math.round(l.currentBalance).toLocaleString('es-CR')}`}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedLoanId && (
+                        <div>
+                          <label className={lbl}>Saldo del préstamo después de este pago</label>
+                          <input type="number" min="0" step="any" value={loanBalAfter}
+                            onChange={e => setLoanBalAfter(e.target.value)}
+                            placeholder="Dejar vacío para estimar automáticamente"
+                            className={inputCls} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <div>
             <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Nota libre…" className={inputCls} />
@@ -625,9 +818,11 @@ function EditTransactionModal({ tx, categories, onClose }: {
 
 type TxSortKey = 'date' | 'amount' | 'vendor' | 'category' | 'created_at'
 
-function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
+function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, onTxUpdated, onTxDeleted }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
   currency: 'CRC' | 'USD'; tcSell: number; categories: Category[]
+  onTxUpdated?: (updated: TxClient) => void
+  onTxDeleted?: (id: string) => void
 }) {
   const [search, setSearch]         = useState('')
   const [sortKey, setSortKey]       = useState<TxSortKey>('date')
@@ -644,6 +839,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
     startDelTrans(async () => {
       await deleteTransaction(id)
       setConfirmDel(null)
+      onTxDeleted?.(id)
     })
   }
 
@@ -680,7 +876,12 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories }: {
   return (
     <>
     {editingTx && (
-      <EditTransactionModal tx={editingTx} categories={categories} onClose={() => setEditingTx(null)} />
+      <EditTransactionModal
+        tx={editingTx}
+        categories={categories}
+        onClose={() => setEditingTx(null)}
+        onSaved={(updated) => { onTxUpdated?.(updated); setEditingTx(null) }}
+      />
     )}
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between gap-3 flex-wrap">
@@ -820,6 +1021,16 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   exchangeRate?: ExchangeRate
   defaultCurrency?: 'CRC' | 'USD'
 }) {
+  // Local copy so edits/deletes are reflected instantly without a page re-render
+  const [txList, setTxList] = useState<TxClient[]>(transactions)
+
+  function handleTxUpdated(updated: TxClient) {
+    setTxList(prev => prev.map(t => t.id === updated.id ? updated : t))
+  }
+  function handleTxDeleted(id: string) {
+    setTxList(prev => prev.filter(t => t.id !== id))
+  }
+
   const [period, setPeriod]         = useState<PeriodKey>('all')
   const [tab, setTab]               = useState<TabKey>('gastos')
   const [incomeSubtab, setIncomeSub]     = useState<IncomeSubtab>('activo')
@@ -856,8 +1067,8 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   const [aiCodes, setAiCodes] = useState<Record<string, string>>({})
 
   // Build learning maps from ALL transactions (full history, not period-filtered)
-  const vMap = useMemo(() => buildVendorCatMap(transactions), [transactions])
-  const cMap = useMemo(() => buildConceptCatMap(transactions), [transactions])
+  const vMap = useMemo(() => buildVendorCatMap(txList), [txList])
+  const cMap = useMemo(() => buildConceptCatMap(txList), [txList])
   const getCat = (tx: TxClient) => {
     const code = resolveCategory(tx, vMap, cMap)
     if (code === 'MISC' && aiCodes[tx.id]) return aiCodes[tx.id]
@@ -866,7 +1077,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
 
   // Classify MISC transactions with Claude Haiku on mount
   useEffect(() => {
-    const miscTxs = transactions.filter(tx => resolveCategory(tx, vMap, cMap) === 'MISC')
+    const miscTxs = txList.filter(tx => resolveCategory(tx, vMap, cMap) === 'MISC')
     if (!miscTxs.length) return
     classifyTransactions(miscTxs.map(tx => ({
       id: tx.id,
@@ -878,13 +1089,13 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       if (Object.keys(result).length) setAiCodes(prev => ({ ...prev, ...result }))
     }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions])
+  }, [txList])
 
   // Period filter — client-side, no page reload
   const cutoff = useMemo(() => periodCutoff(period), [period])
   const periodTxs = useMemo(() =>
-    cutoff ? transactions.filter(tx => tx.date && tx.date >= cutoff) : transactions,
-  [transactions, cutoff])
+    cutoff ? txList.filter(tx => tx.date && tx.date >= cutoff) : txList,
+  [txList, cutoff])
 
   // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
   const tabTxs = useMemo(() => {
@@ -992,9 +1203,16 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   const tableTitle = selSub || selCat || (tab === 'gastos' ? egresosSubtabLabel[egresosSubtab] : 'Ingresos')
 
   // KPIs for current period
+  // For multi-month periods, exclude the current partial month to match progreso's
+  // "last 12 complete months" logic (avoids denominator inflation from partial-month income).
   const kpis = useMemo(() => {
+    const kpiEnd = period !== 'mtd'
+      ? (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })()
+      : null
+    const kpiTxs = kpiEnd ? periodTxs.filter(tx => tx.date && tx.date < kpiEnd) : periodTxs
+
     let income = 0, passiveIncome = 0, rendimientos = 0, expenses = 0, invested = 0
-    for (const tx of periodTxs) {
+    for (const tx of kpiTxs) {
       const amt = Number(tx.amount ?? 0)
       if (isLiquidIncome(tx)) {
         income += amt
@@ -1004,13 +1222,14 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
       else if (isSavings(tx))       invested += amt
     }
     const net = income - expenses
-    // Tasa de ahorro FIRE: lo que realmente fue a ahorros/inversión vs ingresos activos
-    const savingsRate    = income > 0 ? (invested / income) * 100 : 0
+    // Tasa de ahorro FIRE: ahorros/inversión vs ingresos activos (excl. pasivos) — igual que progreso
+    const activeIncome   = income - passiveIncome
+    const savingsRate    = activeIncome > 0 ? (invested / activeIncome) * 100 : 0
     // Margen neto: lo que sobra después de gastos (puede ser negativo)
     const netMargin      = income > 0 ? (net / income) * 100 : 0
     const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
     return { income, passiveIncome, rendimientos, expenses, invested, net, savingsRate, netMargin, coverage }
-  }, [periodTxs])
+  }, [periodTxs, period])
 
   const now = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
@@ -1227,7 +1446,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
         )}
 
         {/* L3 — full width */}
-        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} />
+        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} onTxUpdated={handleTxUpdated} onTxDeleted={handleTxDeleted} />
       </>)}
     </div>
   )

@@ -5,41 +5,89 @@ import Anthropic from '@anthropic-ai/sdk'
 const anthropic = new Anthropic()
 
 const GMAIL_QUERY =
-  'newer_than:90d (from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:scotiabankcr.com OR from:bcr.fi.cr OR "SINPE Móvil" OR "SINPE movil" OR subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR subject:"Notificacion" OR subject:"Notificación")'
+  'newer_than:90d (' +
+  'from:baccredomatic.com OR from:bancobcr.com OR from:bncr.fi.cr OR from:banconal.fi.cr OR ' +
+  'from:scotiabankcr.com OR from:bcr.fi.cr OR from:popular.fi.cr OR from:bpdc.fi.cr OR ' +
+  'from:davivienda.com OR from:promerica.fi.cr OR from:cathay.fi.cr OR ' +
+  '"SINPE Móvil" OR "SINPE movil" OR ' +
+  'subject:"Aviso de transaccion" OR subject:"Aviso de transacción" OR ' +
+  'subject:"Notificacion" OR subject:"Notificación" OR ' +
+  'subject:"Comprobante de Transacción" OR subject:"Comprobante de transaccion" OR ' +
+  'subject:"Pago de cuota" OR subject:"Débito automático" OR subject:"Debito automatico"' +
+  ')'
 
 const EXTRACTION_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
-Bancos soportados: BAC Costa Rica, Banco Nacional (BNCR), BCR, Scotiabank, SINPE Móvil.
+Bancos soportados: BAC Credomatic, Banco Nacional (BNCR/BN), BCR, Scotiabank, Banco Popular, Davivienda, Promerica, Banco Cathay, SINPE Móvil.
 HOY: __TODAY__
 REGLAS:
 - Montos en CRC salvo que el correo diga explícitamente USD
 - Fechas en YYYY-MM-DD; si no hay fecha en el correo, usá la fecha del correo o hoy
 - vendor = nombre del comercio, persona o banco
-- concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios")
-- movement_type: "expense" para débitos/compras, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
+- concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios", "Comprobante BNCR")
+- movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
+CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
+Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
+devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comprobante transacción") con amount=0 y confidence="low".
+NO uses skip:true para comprobantes bancarios aunque falte el monto.
+Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
 {"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
-Si no podés extraer datos de transacción: {"skip":true,"reason":"No es notificación de transacción"}`
+Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 type GmailPart = {
   mimeType: string
-  body?: { data?: string }
+  filename?: string
+  body?: { data?: string; attachmentId?: string }
   parts?: GmailPart[]
+}
+
+function findPdfPart(part: GmailPart): GmailPart | null {
+  const isPdf = part.mimeType === 'application/pdf' ||
+    part.filename?.toLowerCase().endsWith('.pdf')
+  if (isPdf && part.body?.attachmentId) return part
+  if (part.parts) {
+    for (const p of part.parts) {
+      const found = findPdfPart(p)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+async function fetchPdfAttachment(msgId: string, attachmentId: string, accessToken: string): Promise<string | null> {
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${attachmentId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+  if (!res.ok) return null
+  const data = await res.json() as { data?: string }
+  if (!data.data) return null
+  // base64url → standard base64
+  return data.data.replace(/-/g, '+').replace(/_/g, '/')
+}
+
+function stripHtml(text: string): string {
+  return text
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ').trim()
 }
 
 function decodeEmailBody(part: GmailPart): string {
   if (part.body?.data) {
-    return Buffer.from(part.body.data, 'base64url').toString('utf-8')
+    const raw = Buffer.from(part.body.data, 'base64url').toString('utf-8')
+    return part.mimeType === 'text/html' ? stripHtml(raw) : raw
   }
   if (part.parts) {
     const textPart = part.parts.find(p => p.mimeType === 'text/plain')
     if (textPart) return decodeEmailBody(textPart)
     const htmlPart = part.parts.find(p => p.mimeType === 'text/html')
-    if (htmlPart) {
-      const html = decodeEmailBody(htmlPart)
-      return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    }
+    if (htmlPart) return decodeEmailBody(htmlPart)
     for (const p of part.parts) {
       const body = decodeEmailBody(p)
       if (body) return body
@@ -67,29 +115,40 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 async function syncAccount(
   accessToken: string,
   userId: string,
+  accountId: string,
   admin: ReturnType<typeof import('@/lib/supabase/admin').createAdminClient>,
   today: string,
 ): Promise<{ found: number; inserted: number }> {
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=${encodeURIComponent(GMAIL_QUERY)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  )
-  if (!listRes.ok) return { found: 0, inserted: 0 }
+  // Paginate through all matching messages (max 200 per page)
+  const allIds: string[] = []
+  let pageToken: string | undefined
+  do {
+    const url =
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=200&q=${encodeURIComponent(GMAIL_QUERY)}` +
+      (pageToken ? `&pageToken=${pageToken}` : '')
+    const listRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (!listRes.ok) break
+    const listData = await listRes.json() as { messages?: { id: string }[]; nextPageToken?: string }
+    allIds.push(...(listData.messages ?? []).map(m => m.id))
+    pageToken = listData.nextPageToken
+  } while (pageToken)
 
-  const listData = await listRes.json() as { messages?: { id: string }[] }
-  const messageIds = (listData.messages ?? []).map(m => m.id)
-  if (messageIds.length === 0) return { found: 0, inserted: 0 }
+  await admin.from('connected_email_accounts')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('id', accountId)
+
+  if (allIds.length === 0) return { found: 0, inserted: 0 }
 
   const { data: existing } = await admin
     .from('transaction_inbox')
     .select('email_id')
     .eq('user_id', userId)
-    .in('email_id', messageIds)
+    .in('email_id', allIds)
 
   const existingIds = new Set((existing ?? []).map(r => r.email_id))
-  const newIds = messageIds.filter(id => !existingIds.has(id))
+  const newIds = allIds.filter(id => !existingIds.has(id))
 
-  if (newIds.length === 0) return { found: messageIds.length, inserted: 0 }
+  if (newIds.length === 0) return { found: allIds.length, inserted: 0 }
 
   const system = EXTRACTION_SYSTEM.replace('__TODAY__', today)
   let inserted = 0
@@ -116,19 +175,40 @@ async function syncAccount(
         ? new Date(parseInt(msg.internalDate)).toISOString()
         : new Date().toISOString()
 
-      const content = [
+      // Fetch PDF only if the body has no monetary amount (data is in the attachment)
+      const bodyHasAmount = /(₡|\$|colones?|CRC|USD|monto)\s*[\d,.]+/i.test(body)
+      let pdfBase64: string | null = null
+      if (msg.payload && !bodyHasAmount) {
+        const pdfPart = findPdfPart(msg.payload)
+        if (pdfPart?.body?.attachmentId) {
+          pdfBase64 = await fetchPdfAttachment(msgId, pdfPart.body.attachmentId, accessToken)
+        }
+      }
+
+      const textContent = [
         subject ? `Asunto: ${subject}` : '',
         from    ? `De: ${from}` : '',
         body    ? `Cuerpo:\n${body.slice(0, 2000)}` : '',
       ].filter(Boolean).join('\n\n')
 
-      if (!content.trim()) continue
+      if (!textContent.trim() && !pdfBase64) continue
+
+      type ContentBlock =
+        | { type: 'text'; text: string }
+        | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+
+      const userContent: string | ContentBlock[] = pdfBase64
+        ? [
+            { type: 'text', text: textContent || '(ver PDF adjunto)' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+          ]
+        : textContent
 
       const aiRes = await anthropic.messages.create({
-        model:      'claude-haiku-4-5-20251001',
+        model:      pdfBase64 ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
         max_tokens: 256,
         system,
-        messages:   [{ role: 'user', content }],
+        messages:   [{ role: 'user', content: userContent as never }],
       })
 
       const raw = aiRes.content[0]?.type === 'text' ? aiRes.content[0].text.trim() : ''
@@ -137,16 +217,18 @@ async function syncAccount(
         const match = raw.match(/\{[\s\S]*\}/)
         if (match) {
           const parsed = JSON.parse(match[0]) as Record<string, unknown>
-          if (!parsed.skip) extracted = parsed
+          if (parsed.skip) continue  // Not a transaction — don't insert
+          extracted = parsed
         }
       } catch { /* skip */ }
 
       await admin.from('transaction_inbox').insert({
         user_id:     userId,
+        account_id:  accountId,
         email_id:    msgId,
         email_date:  emailDate,
         raw_subject: subject.slice(0, 500),
-        raw_snippet: body.slice(0, 500),
+        raw_snippet: (pdfBase64 && !body.trim() ? '[datos extraídos del PDF adjunto]' : body.slice(0, 500)),
         extracted:   extracted as never,
         status:      'pending',
       })
@@ -156,7 +238,7 @@ async function syncAccount(
     }
   }
 
-  return { found: messageIds.length, inserted }
+  return { found: allIds.length, inserted }
 }
 
 export async function POST() {
@@ -186,7 +268,7 @@ export async function POST() {
       results.push({ email: account.email, found: 0, inserted: 0, error: 'Token inválido' })
       continue
     }
-    const { found, inserted } = await syncAccount(accessToken, user.id, admin, today)
+    const { found, inserted } = await syncAccount(accessToken, user.id, account.id, admin, today)
     totalFound    += found
     totalInserted += inserted
     results.push({ email: account.email, found, inserted })

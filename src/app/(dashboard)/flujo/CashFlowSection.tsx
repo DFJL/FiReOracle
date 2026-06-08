@@ -131,7 +131,7 @@ export function CashFlowSection({ transactions }: { transactions: TxRow[] }) {
             Fire Oracle · {monthLabel}
           </p>
           <p className="text-3xl font-black text-white tracking-tight leading-none">Flujo de Caja</p>
-          <p className="text-xs text-zinc-500 mt-1">Ingresos, egresos y tasa de ahorro mensual</p>
+          <p className="text-xs text-zinc-500 mt-1">Ingresos, egresos y margen neto mensual</p>
         </div>
         {/* Period selector */}
         <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">

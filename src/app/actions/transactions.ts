@@ -132,7 +132,7 @@ async function getEnvelopeBalance(
 async function applySideEffects(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
-  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string },
+  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string; source_tx_id?: string },
 ): Promise<string | null> {
   if (input.debit_envelope_id) {
     const balance = await getEnvelopeBalance(admin, userId, input.debit_envelope_id)
@@ -148,7 +148,8 @@ async function applySideEffects(
       amount: -Math.abs(input.amount),
       date: input.date,
       notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
-    })
+      ...(input.source_tx_id ? { source_tx_id: input.source_tx_id } : {}),
+    } as never)
     if (error) return error.message
     revalidatePath('/liquidez')
   }
@@ -204,7 +205,9 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   if (input.type === 'gasto') {
     const isUSD = input.currency_code === 'USD'
+    const txId = crypto.randomUUID()
     const { error } = await admin.from('transactions').insert({
+      id: txId,
       user_id: user.id,
       date: input.date,
       amount: input.amount,
@@ -225,9 +228,12 @@ export async function createTransaction(input: CreateTransactionInput) {
     })
     if (error) return { error: error.message }
     if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
-      const sideErr = await applySideEffects(admin, user.id, input)
+      const sideErr = await applySideEffects(admin, user.id, { ...input, source_tx_id: txId })
       if (sideErr) return { error: sideErr }
     }
+    revalidatePath('/resumen')
+    revalidatePath('/flujo')
+    return { error: null, id: txId }
   }
 
   else if (input.type === 'ingreso') {
@@ -342,6 +348,134 @@ export type UpdateTransactionInput = {
   investment_bucket_id?: string | null
 }
 
+export type LoanLinkInput = {
+  loanId: string
+  payment_date: string
+  payment_type: 'normal' | 'extra' | 'partial'
+  amount: number
+  balance_before: number
+  balance_after: number
+  rate_applied: number
+  notes?: string
+}
+
+export type EnvelopeLinkInput = {
+  envelopeId: string | null
+  txDate: string
+  txAmount: number
+  txConcept: string | null
+  txVendor: string | null
+}
+
+/**
+ * Updates a transaction and optionally links it to a loan + envelope in a
+ * single server round-trip. Secondary operations run in parallel after the
+ * transaction update succeeds.
+ */
+export async function updateTransactionWithLinks(
+  id: string,
+  input: UpdateTransactionInput,
+  loanLink?: LoanLinkInput,
+  envelopeLink?: EnvelopeLinkInput,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  // 1. Update the transaction first
+  const { error: txErr } = await admin
+    .from('transactions')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', user.id)
+  if (txErr) return { error: txErr.message }
+
+  // 2. Run secondary operations in parallel
+  const secondaryOps: Promise<string | null>[] = []
+
+  if (loanLink) {
+    const { loanId, ...paymentData } = loanLink
+    const principal = paymentData.balance_before - paymentData.balance_after
+    const interest  = Math.max(0, paymentData.amount - principal)
+    secondaryOps.push(
+      Promise.all([
+        admin.from('loan_payments').insert({
+          loan_id:        loanId,
+          user_id:        user.id,
+          payment_date:   paymentData.payment_date,
+          payment_type:   paymentData.payment_type,
+          amount:         paymentData.amount,
+          principal,
+          interest,
+          insurance:      0,
+          balance_before: paymentData.balance_before,
+          balance_after:  paymentData.balance_after,
+          rate_applied:   paymentData.rate_applied,
+          notes:          paymentData.notes ?? null,
+          transaction_id: id,
+        }),
+        admin.from('loans')
+          .update({ current_balance: paymentData.balance_after })
+          .eq('id', loanId)
+          .eq('user_id', user.id),
+      ]).then(([insertRes, updateRes]) =>
+        insertRes.error?.message ?? updateRes.error?.message ?? null
+      )
+    )
+  }
+
+  if (envelopeLink) {
+    const { envelopeId, txDate, txAmount, txConcept, txVendor } = envelopeLink
+    secondaryOps.push(
+      (async () => {
+        const { error: delErr } = await admin
+          .from('envelope_movements')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('source_tx_id' as never, id)
+        if (delErr) return delErr.message
+
+        if (envelopeId) {
+          const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
+          const debit   = Math.abs(txAmount)
+          if (balance < debit) {
+            const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+            return `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})`
+          }
+          const { error: insErr } = await admin.from('envelope_movements').insert({
+            user_id:       user.id,
+            envelope_id:   envelopeId,
+            movement_type: 'retiro',
+            amount:        -Math.abs(txAmount),
+            date:          txDate,
+            notes:         `Tx: ${txConcept || txVendor || ''}`.trim(),
+            source_tx_id:  id,
+          } as never)
+          if (insErr) return insErr.message
+        }
+        return null
+      })()
+    )
+  }
+
+  if (secondaryOps.length > 0) {
+    const results = await Promise.all(secondaryOps)
+    const firstErr = results.find(r => r !== null)
+    if (firstErr) return { error: firstErr }
+  }
+
+  // Skip /resumen revalidation — the client updates its local state via onSaved callback
+  revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
+  if (envelopeLink) revalidatePath('/liquidez')
+  if (loanLink) revalidatePath('/prestamos')
+  return { error: null }
+}
+
 export async function updateTransaction(id: string, input: UpdateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -376,10 +510,95 @@ export async function deleteTransaction(id: string) {
     .eq('user_id', user.id)
   if (error) return { error: error.message }
 
-  revalidatePath('/resumen')
+  // Skip /resumen revalidation — the client removes the tx via onTxDeleted callback
   revalidatePath('/flujo')
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
   revalidatePath('/patrimonio')
+  return { error: null }
+}
+
+// ── Envelope linkage for transactions ────────────────────────────────────────
+
+export async function getLeafEnvelopes(): Promise<{ id: string; name: string; custodio: string | null }[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('savings_envelopes')
+    .select('id, name, custodio, parent_envelope_id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .order('sort_order')
+
+  if (!data) return []
+  const parentIds = new Set(data.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
+  return data
+    .filter(e => !parentIds.has(e.id))
+    .map(e => ({ id: e.id, name: e.name, custodio: (e as { custodio?: string | null }).custodio ?? null }))
+}
+
+export async function getTransactionEnvelopeLink(txId: string): Promise<{ envelope_id: string; movement_id: string } | null> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('envelope_movements')
+    .select('id, envelope_id')
+    .eq('user_id', user.id)
+    .eq('source_tx_id' as never, txId)
+    .maybeSingle()
+
+  if (!data) return null
+  return { envelope_id: (data as { id: string; envelope_id: string }).envelope_id, movement_id: data.id }
+}
+
+export async function updateTransactionEnvelopeLink(
+  txId: string,
+  envelopeId: string | null,
+  txDate: string,
+  txAmount: number,
+  txConcept: string | null,
+  txVendor: string | null,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  const { error: delErr } = await admin
+    .from('envelope_movements')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('source_tx_id' as never, txId)
+
+  if (delErr) return { error: delErr.message }
+
+  if (envelopeId) {
+    const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
+    const debit   = Math.abs(txAmount)
+    if (balance < debit) {
+      const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+      return { error: `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})` }
+    }
+    const { error: insErr } = await admin.from('envelope_movements').insert({
+      user_id:       user.id,
+      envelope_id:   envelopeId,
+      movement_type: 'retiro',
+      amount:        -Math.abs(txAmount),
+      date:          txDate,
+      notes:         `Tx: ${txConcept || txVendor || ''}`.trim(),
+      source_tx_id:  txId,
+    } as never)
+    if (insErr) return { error: insErr.message }
+  }
+
+  revalidatePath('/liquidez')
+  revalidatePath('/resumen')
   return { error: null }
 }

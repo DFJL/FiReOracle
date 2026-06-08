@@ -1,9 +1,17 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { confirmInboxItem, discardInboxItem, insertManualInboxItem } from '@/app/actions/inbox'
+import { useRouter } from 'next/navigation'
+import {
+  confirmInboxItem, discardInboxItem, insertManualInboxItem,
+  reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
+} from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
-import { CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox, ClipboardPaste, Loader2, RefreshCw, Plus, Trash2 } from 'lucide-react'
+import {
+  CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox,
+  ClipboardPaste, Loader2, RefreshCw, Plus, Trash2,
+  Sparkles, RotateCcw,
+} from 'lucide-react'
 
 type Category = {
   code: string
@@ -18,19 +26,36 @@ type ConnectedAccount = {
   email: string
   provider: string
   connected_at: string | null
+  last_synced_at: string | null
+}
+
+type Envelope = {
+  id: string
+  name: string
+  color: string | null
+}
+
+type Loan = {
+  id: string
+  name: string
+  lender: string | null
+  currency_code: string | null
+  current_balance: number | null
 }
 
 type Props = {
   items: InboxItem[]
   categories: Category[]
   connectedAccounts: ConnectedAccount[]
+  envelopes: Envelope[]
+  loans: Loan[]
   gmailStatus: string | null
 }
 
 const MOVEMENT_LABELS: Record<string, string> = {
-  expense:          'Gasto',
-  income:           'Ingreso',
-  cash_withdrawal:  'Retiro',
+  expense:         'Gasto',
+  income:          'Ingreso',
+  cash_withdrawal: 'Retiro',
 }
 
 const CONFIDENCE_COLOR: Record<string, string> = {
@@ -44,41 +69,93 @@ function fmtAmt(amount: number, currency: string) {
   return `${sym}${Math.round(amount).toLocaleString('es-CR')}`
 }
 
+function relativeTime(iso: string | null): string {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 2) return 'hace un momento'
+  if (mins < 60) return `hace ${mins}m`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `hace ${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `hace ${days}d`
+}
+
+// ── ItemCard ─────────────────────────────────────────────────────────────────
+
 function ItemCard({
   item,
   categories,
+  envelopes,
+  loans,
 }: {
   item: InboxItem
   categories: Category[]
+  envelopes: Envelope[]
+  loans: Loan[]
 }) {
+  const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [expanded, setExpanded] = useState(item.status === 'pending')
   const [err, setErr] = useState<string | null>(null)
+  const [dupeForce, setDupeForce] = useState(false)
+  const [envelopeId, setEnvelopeId] = useState<string>('')
+  const [loanId, setLoanId] = useState<string>('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState<string | null>(null)
+  const [reExtracting, setReExtracting] = useState(false)
 
   const ext = item.extracted
   const [fields, setFields] = useState<ExtractedFields>(
     ext ?? {
-      amount: 0,
-      currency: 'CRC',
-      vendor: '',
-      concept: '',
-      date: new Date().toISOString().slice(0, 10),
+      amount:        0,
+      currency:      'CRC',
+      vendor:        '',
+      concept:       '',
+      date:          new Date().toISOString().slice(0, 10),
       movement_type: 'expense',
-      confidence: 'low',
+      confidence:    'low',
     },
   )
 
+  const isOld = item.email_date
+    ? Date.now() - new Date(item.email_date).getTime() > 30 * 86400000
+    : false
+
   function handleCategoryChange(code: string) {
     const cat = categories.find(c => c.code === code)
+    setSuggestion(null)
     setFields(f => ({
       ...f,
-      category_code:   code || undefined,
-      expense_group:   cat?.group_gasto && cat.group_gasto !== 'na' ? cat.group_gasto : f.expense_group,
+      category_code:     code || undefined,
+      expense_group:     cat?.group_gasto && cat.group_gasto !== 'na' ? cat.group_gasto : f.expense_group,
       is_passive_income: cat?.is_passive_income ?? f.is_passive_income,
     }))
   }
 
-  function handleConfirm() {
+  async function handleSuggestCategory() {
+    if (!fields.vendor) return
+    setSuggesting(true)
+    const code = await suggestCategory(fields.vendor)
+    setSuggesting(false)
+    if (code) {
+      setSuggestion(code)
+      handleCategoryChange(code)
+    } else {
+      setSuggestion('')
+    }
+  }
+
+  async function handleReExtract() {
+    setReExtracting(true)
+    setErr(null)
+    const res = await reExtractInboxItem(item.id)
+    setReExtracting(false)
+    if (res.error) setErr(res.error)
+    else router.refresh()
+  }
+
+  function handleConfirm(force = false) {
     setErr(null)
     startTransition(async () => {
       const res = await confirmInboxItem(item.id, {
@@ -91,8 +168,13 @@ function ItemCard({
         category_code:     fields.category_code,
         expense_group:     fields.expense_group,
         is_passive_income: fields.is_passive_income,
-      })
-      if (res.error) setErr(res.error)
+        envelope_id:       envelopeId || undefined,
+        loan_id:           loanId || undefined,
+      }, { force })
+      if (res.error) {
+        if (res.error.startsWith('Posible duplicado')) setDupeForce(true)
+        setErr(res.error)
+      }
     })
   }
 
@@ -105,16 +187,13 @@ function ItemCard({
   }
 
   const isProcessed = item.status !== 'pending'
-
-  const incomeCategories  = categories.filter(c => c.category_type === 'income')
-  const expenseCategories = categories.filter(c => c.category_type === 'expense')
-  const relevantCats = fields.movement_type === 'income' ? incomeCategories : expenseCategories
+  const relevantCats = categories.filter(c =>
+    c.category_type === (fields.movement_type === 'income' ? 'income' : 'expense')
+  )
 
   return (
     <div className={`bg-white/[0.03] rounded-xl border transition-colors ${
-      isProcessed
-        ? 'border-white/[0.04] opacity-60'
-        : 'border-white/[0.08]'
+      isProcessed ? 'border-white/[0.04] opacity-60' : 'border-white/[0.08]'
     }`}>
       {/* Header row */}
       <button
@@ -132,6 +211,9 @@ function ItemCard({
             )}
             {item.status === 'discarded' && (
               <span className="text-[9px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">descartado</span>
+            )}
+            {isOld && item.status === 'pending' && (
+              <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">Antiguo +30d</span>
             )}
           </div>
           {ext && item.status === 'pending' && (
@@ -165,7 +247,6 @@ function ItemCard({
           {/* Editable fields */}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 grid grid-cols-3 gap-3">
-              {/* Movement type */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Tipo</label>
                 <select
@@ -180,7 +261,6 @@ function ItemCard({
                 </select>
               </div>
 
-              {/* Currency */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Moneda</label>
                 <select
@@ -194,7 +274,6 @@ function ItemCard({
                 </select>
               </div>
 
-              {/* Amount */}
               <div>
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Monto</label>
                 <input
@@ -207,7 +286,6 @@ function ItemCard({
               </div>
             </div>
 
-            {/* Date */}
             <div>
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Fecha</label>
               <input
@@ -219,7 +297,6 @@ function ItemCard({
               />
             </div>
 
-            {/* Vendor */}
             <div>
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Comercio / Pagador</label>
               <input
@@ -232,7 +309,6 @@ function ItemCard({
               />
             </div>
 
-            {/* Concept */}
             <div className="col-span-2">
               <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Concepto</label>
               <input
@@ -245,32 +321,104 @@ function ItemCard({
               />
             </div>
 
-            {/* Category */}
+            {/* Category + auto-suggest */}
             <div className="col-span-2">
-              <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Categoría</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Categoría</label>
+                {!isProcessed && fields.vendor && (
+                  <button
+                    onClick={handleSuggestCategory}
+                    disabled={suggesting}
+                    className="flex items-center gap-1 text-[9px] text-zinc-500 hover:text-[#a3e635] transition-colors disabled:opacity-40"
+                  >
+                    {suggesting ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+                    Sugerir
+                  </button>
+                )}
+              </div>
               <select
                 value={fields.category_code ?? ''}
                 onChange={e => handleCategoryChange(e.target.value)}
                 disabled={isProcessed}
-                className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
               >
                 <option value="" className="bg-[#111]">(sin categoría)</option>
                 {relevantCats.map(c => (
                   <option key={c.code} value={c.code} className="bg-[#111]">{c.name}</option>
                 ))}
               </select>
+              {suggestion === '' && (
+                <p className="text-[9px] text-zinc-600 mt-0.5">Sin historial para este comercio</p>
+              )}
             </div>
+
+            {/* Envelope */}
+            {envelopes.length > 0 && (
+              <div className="col-span-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Sobre / Bolsillo</label>
+                <select
+                  value={envelopeId}
+                  onChange={e => setEnvelopeId(e.target.value)}
+                  disabled={isProcessed}
+                  className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#111]">(ninguno)</option>
+                  {envelopes.map(env => (
+                    <option key={env.id} value={env.id} className="bg-[#111]">{env.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Loan selector — only for expenses */}
+            {loans.length > 0 && fields.movement_type === 'expense' && (
+              <div className="col-span-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
+                  Préstamo <span className="text-zinc-700 normal-case tracking-normal font-normal">(opcional)</span>
+                </label>
+                <select
+                  value={loanId}
+                  onChange={e => setLoanId(e.target.value)}
+                  disabled={isProcessed}
+                  className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#111]">— ninguno —</option>
+                  {loans.map(l => {
+                    const sym = l.currency_code === 'USD' ? '$' : '₡'
+                    const bal = l.current_balance != null
+                      ? `${sym}${Number(l.current_balance).toLocaleString('es-CR', { maximumFractionDigits: 0 })}`
+                      : ''
+                    return (
+                      <option key={l.id} value={l.id} className="bg-[#111]">
+                        {l.name}{l.lender ? ` · ${l.lender}` : ''}{bal ? ` · ${bal}` : ''}
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
+            )}
           </div>
 
           {err && (
-            <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{err}</p>
+            <div className="rounded-lg px-3 py-2 bg-rose-500/10 space-y-2">
+              <p className="text-xs text-rose-400">{err}</p>
+              {dupeForce && (
+                <button
+                  onClick={() => handleConfirm(true)}
+                  disabled={pending}
+                  className="text-[11px] font-black text-amber-400 underline underline-offset-2 hover:text-amber-300 transition-colors disabled:opacity-40"
+                >
+                  Guardar de todas formas
+                </button>
+              )}
+            </div>
           )}
 
           {/* Actions */}
           {!isProcessed && (
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-2 pt-1 flex-wrap">
               <button
-                onClick={handleConfirm}
+                onClick={() => handleConfirm(false)}
                 disabled={pending || !fields.vendor || !fields.amount}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -285,6 +433,15 @@ function ItemCard({
                 <XCircle size={13} />
                 Descartar
               </button>
+              <button
+                onClick={handleReExtract}
+                disabled={reExtracting || pending}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.04] text-zinc-500 text-xs font-semibold hover:bg-white/[0.08] hover:text-zinc-300 transition-colors disabled:opacity-40 ml-auto"
+                title="Re-analizar con IA"
+              >
+                {reExtracting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                Re-extraer
+              </button>
             </div>
           )}
         </div>
@@ -293,22 +450,23 @@ function ItemCard({
   )
 }
 
+// ── EmailAccountsPanel ────────────────────────────────────────────────────────
+
 function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: ConnectedAccount[] }) {
+  const router = useRouter()
   const [accounts,  setAccounts]  = useState<ConnectedAccount[]>(initialAccounts)
-  const [syncing,   setSyncing]   = useState<string | null>(null)  // account id being synced
+  const [syncing,   setSyncing]   = useState<string | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
   const [removing,  setRemoving]  = useState<string | null>(null)
   const [msgs,      setMsgs]      = useState<Record<string, { ok: boolean; text: string }>>({})
 
-  async function handleSync(acc: ConnectedAccount) {
+  async function doSync(acc: ConnectedAccount): Promise<boolean> {
     setSyncing(acc.id)
     setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
     try {
       const endpoint = acc.provider === 'yahoo' ? '/api/yahoo/sync' : '/api/gmail/sync'
-      const body     = acc.provider === 'yahoo'
-        ? JSON.stringify({ accountId: acc.id })
-        : undefined
-
-      const res  = await fetch(endpoint, {
+      const body     = acc.provider === 'yahoo' ? JSON.stringify({ accountId: acc.id }) : undefined
+      const res      = await fetch(endpoint, {
         method:  'POST',
         headers: acc.provider === 'yahoo' ? { 'Content-Type': 'application/json' } : {},
         body,
@@ -316,25 +474,46 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
       const data = await res.json() as { found?: number; inserted?: number; error?: string }
 
       if (!res.ok || data.error) {
-        setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' } }))
-      } else {
-        const { found = 0, inserted = 0 } = data
-        setMsgs(m => ({
-          ...m,
-          [acc.id]: {
-            ok:   true,
-            text: inserted > 0
-              ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
-              : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
-          },
-        }))
-        if (inserted > 0) window.location.reload()
+        const isToken = data.error?.toLowerCase().includes('token') || res.status === 401
+        setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' + (isToken ? ' — reconectá la cuenta' : '') } }))
+        return false
       }
+
+      const { found = 0, inserted = 0 } = data
+      setMsgs(m => ({
+        ...m,
+        [acc.id]: {
+          ok:   true,
+          text: inserted > 0
+            ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
+            : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
+        },
+      }))
+      // Update last_synced_at locally
+      setAccounts(a => a.map(a2 => a2.id === acc.id ? { ...a2, last_synced_at: new Date().toISOString() } : a2))
+      return inserted > 0
     } catch (e) {
       setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: String(e) } }))
+      return false
     } finally {
       setSyncing(null)
     }
+  }
+
+  async function handleSync(acc: ConnectedAccount) {
+    const hadNew = await doSync(acc)
+    if (hadNew) router.refresh()
+  }
+
+  async function handleSyncAll() {
+    setSyncingAll(true)
+    let anyNew = false
+    for (const acc of accounts) {
+      const hadNew = await doSync(acc)
+      if (hadNew) anyNew = true
+    }
+    setSyncingAll(false)
+    if (anyNew) router.refresh()
   }
 
   async function handleRemove(id: string) {
@@ -353,10 +532,19 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
 
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3 space-y-2">
-      {/* Header + connect buttons */}
       <div className="flex items-center gap-2 flex-wrap">
         <Mail size={13} className="text-zinc-500 shrink-0" />
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] flex-1">Cuentas conectadas</p>
+        {accounts.length > 1 && (
+          <button
+            onClick={handleSyncAll}
+            disabled={syncingAll || !!syncing}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.06] text-zinc-300 text-[10px] font-bold hover:bg-white/[0.10] transition-colors disabled:opacity-40"
+          >
+            {syncingAll ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+            Sync todas
+          </button>
+        )}
         <a
           href="/api/auth/gmail"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#a3e635] text-black text-[10px] font-black hover:bg-[#b4f040] transition-colors"
@@ -373,7 +561,6 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
         </a>
       </div>
 
-      {/* Connected accounts list */}
       {accounts.length === 0 ? (
         <p className="text-[10px] text-zinc-600 px-1">
           Sin cuentas conectadas — conectá Gmail o Yahoo para importar correos bancarios.
@@ -389,15 +576,17 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-zinc-300 truncate">{acc.email}</p>
-                {msgs[acc.id] && (
+                {msgs[acc.id] ? (
                   <p className={`text-[9px] ${msgs[acc.id].ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>
                     {msgs[acc.id].text}
                   </p>
-                )}
+                ) : acc.last_synced_at ? (
+                  <p className="text-[9px] text-zinc-600">{relativeTime(acc.last_synced_at)}</p>
+                ) : null}
               </div>
               <button
                 onClick={() => handleSync(acc)}
-                disabled={syncing === acc.id}
+                disabled={syncing === acc.id || syncingAll}
                 className="p-1 rounded hover:bg-white/[0.06] text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-40"
                 title="Sync"
               >
@@ -423,7 +612,10 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
   )
 }
 
+// ── PastePanel ────────────────────────────────────────────────────────────────
+
 function PastePanel() {
+  const router = useRouter()
   const [open, setOpen]         = useState(false)
   const [text, setText]         = useState('')
   const [loading, setLoading]   = useState(false)
@@ -436,7 +628,6 @@ function PastePanel() {
     setMsg(null)
 
     try {
-      // Extract via Claude
       const res = await fetch('/api/inbox/extract', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -451,14 +642,14 @@ function PastePanel() {
       }
 
       const extracted: ExtractedFields = {
-        amount:       Number(data.amount ?? 0),
-        currency:     (data.currency ?? 'CRC') as 'CRC' | 'USD',
-        vendor:       String(data.vendor ?? ''),
-        concept:      String(data.concept ?? ''),
-        date:         String(data.date ?? new Date().toISOString().slice(0, 10)),
+        amount:        Number(data.amount ?? 0),
+        currency:      (data.currency ?? 'CRC') as 'CRC' | 'USD',
+        vendor:        String(data.vendor ?? ''),
+        concept:       String(data.concept ?? ''),
+        date:          String(data.date ?? new Date().toISOString().slice(0, 10)),
         movement_type: (data.movement_type ?? 'expense') as ExtractedFields['movement_type'],
         category_code: data.category_code,
-        confidence:   (data.confidence ?? 'medium') as ExtractedFields['confidence'],
+        confidence:    (data.confidence ?? 'medium') as ExtractedFields['confidence'],
       }
 
       startTransition(async () => {
@@ -469,6 +660,7 @@ function PastePanel() {
           setMsg({ ok: true, text: `Transacción extraída: ${extracted.vendor} · ${extracted.amount} ${extracted.currency}` })
           setText('')
           setOpen(false)
+          router.refresh()
         }
         setLoading(false)
       })
@@ -518,13 +710,38 @@ function PastePanel() {
   )
 }
 
-export function InboxClient({ items, categories, connectedAccounts, gmailStatus }: Props) {
+// ── InboxClient (main) ────────────────────────────────────────────────────────
+
+export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, gmailStatus }: Props) {
+  const router = useRouter()
   const [tab, setTab] = useState<'pending' | 'processed'>('pending')
+  const [batchPending, setBatchPending] = useState(false)
+  const [batchMsg, setBatchMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const pending   = items.filter(i => i.status === 'pending')
   const processed = items.filter(i => i.status !== 'pending')
+  const shown     = tab === 'pending' ? pending : processed
 
-  const shown = tab === 'pending' ? pending : processed
+  const highConfidenceCount = pending.filter(i => {
+    const ext = i.extracted
+    return ext?.confidence === 'high' && ext.amount > 0 && ext.vendor
+  }).length
+
+  async function handleBatchConfirm() {
+    setBatchPending(true)
+    setBatchMsg(null)
+    const res = await batchConfirmHighConfidence()
+    setBatchPending(false)
+    if (res.error) {
+      setBatchMsg({ ok: false, text: res.error })
+    } else {
+      setBatchMsg({
+        ok:   true,
+        text: `${res.confirmed} confirmado${res.confirmed !== 1 ? 's' : ''}${res.skipped > 0 ? `, ${res.skipped} omitido${res.skipped !== 1 ? 's' : ''}` : ''}`,
+      })
+      if (res.confirmed > 0) router.refresh()
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -535,14 +752,14 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
       </div>
 
       {/* OAuth result banners */}
-      {(gmailStatus === 'connected') && (
+      {gmailStatus === 'connected' && (
         <p className="text-xs text-[#a3e635] bg-[#a3e635]/10 rounded-lg px-3 py-2">
           Cuenta conectada. Hacé clic en el ícono <RefreshCw size={10} className="inline" /> para sincronizar.
         </p>
       )}
-      {(gmailStatus === 'error') && (
+      {gmailStatus === 'error' && (
         <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">
-          No se pudo conectar la cuenta. Intentá de nuevo.
+          No se pudo conectar la cuenta. Verificá que las credenciales de la app estén configuradas.
         </p>
       )}
 
@@ -572,8 +789,25 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
       {/* Email accounts panel */}
       <EmailAccountsPanel accounts={connectedAccounts} />
 
-      {/* Paste panel — always visible */}
+      {/* Paste panel */}
       <PastePanel />
+
+      {/* Batch confirm button */}
+      {tab === 'pending' && highConfidenceCount > 0 && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleBatchConfirm}
+            disabled={batchPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-xs font-bold hover:bg-[#a3e635]/20 transition-colors disabled:opacity-40"
+          >
+            {batchPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+            Confirmar todos los de alta confianza ({highConfidenceCount})
+          </button>
+          {batchMsg && (
+            <p className={`text-xs ${batchMsg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>{batchMsg.text}</p>
+          )}
+        </div>
+      )}
 
       {/* Empty state */}
       {shown.length === 0 && (
@@ -597,7 +831,7 @@ export function InboxClient({ items, categories, connectedAccounts, gmailStatus 
       {/* Items */}
       <div className="space-y-3">
         {shown.map(item => (
-          <ItemCard key={item.id} item={item} categories={categories} />
+          <ItemCard key={item.id} item={item} categories={categories} envelopes={envelopes} loans={loans} />
         ))}
       </div>
     </div>

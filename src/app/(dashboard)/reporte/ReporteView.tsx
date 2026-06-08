@@ -21,9 +21,9 @@ function fmtPct(n: number, decimals = 1) {
 
 type Props = {
   month: string
-  cur: { income: number; expenses: number; net: number; savingsRate: number }
-  prev: { income: number; expenses: number; net: number; savingsRate: number }
-  yearAgo: { income: number; expenses: number; net: number; savingsRate: number }
+  cur: { income: number; expenses: number; net: number; netMargin: number }
+  prev: { income: number; expenses: number; net: number; netMargin: number }
+  yearAgo: { income: number; expenses: number; net: number; netMargin: number }
   topCategories: Array<{ code: string; name: string; amount: number; pct: number }>
   expenseByGroup: Record<string, number>
   nwStart: number | null
@@ -88,9 +88,9 @@ export function ReporteView({
 
   // Insights
   const insights: string[] = []
-  if (cur.savingsRate > 40) insights.push('Mes de alto ahorro 🌟')
-  else if (cur.savingsRate > 30) insights.push('Tasa de ahorro saludable')
-  else if (cur.savingsRate < 0) insights.push('Mes con déficit de flujo')
+  if (cur.netMargin > 40) insights.push('Excelente margen neto este mes 🌟')
+  else if (cur.netMargin > 30) insights.push('Margen neto saludable')
+  else if (cur.netMargin < 0) insights.push('Mes con déficit de flujo')
 
   if (prev.expenses > 0 && cur.expenses > prev.expenses * 1.1)
     insights.push('Tus gastos subieron más de 10% vs el mes pasado')
@@ -183,10 +183,10 @@ export function ReporteView({
           </div>
           <div>
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] mb-2">
-              Tasa de ahorro
+              Margen
             </p>
             <p className="text-4xl font-black text-[#a3e635] tabular-nums">
-              {cur.savingsRate.toFixed(1)}%
+              {cur.netMargin.toFixed(1)}%
             </p>
           </div>
         </div>
@@ -314,12 +314,12 @@ export function ReporteView({
               )}
             </div>
             <div className="pt-1 border-t border-white/[0.04]">
-              <p className="text-[9px] text-zinc-600 mb-1">Ahorro</p>
+              <p className="text-[9px] text-zinc-600 mb-1">Margen</p>
               {yearAgo.income > 0 ? (
                 <p className="text-xs text-zinc-400 tabular-nums">
-                  <span className="text-white font-bold">{cur.savingsRate.toFixed(1)}%</span>
+                  <span className="text-white font-bold">{cur.netMargin.toFixed(1)}%</span>
                   {' '}→ hace 1a:{' '}
-                  <span className="text-zinc-500">{yearAgo.savingsRate.toFixed(1)}%</span>
+                  <span className="text-zinc-500">{yearAgo.netMargin.toFixed(1)}%</span>
                 </p>
               ) : (
                 <p className="text-xs text-zinc-600">— Sin datos</p>

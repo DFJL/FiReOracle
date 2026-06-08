@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { Info } from 'lucide-react'
 import Link from 'next/link'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
@@ -68,9 +69,6 @@ export function ProgresoView({
   const passiveMonthlyAvg = passiveIncome12m / 12
   const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
   const fsRatio = avgMonthlySurvivalExpenses > 0 ? passiveMonthlyAvg / avgMonthlySurvivalExpenses : 0
-  const passiveCoverage = avgMonthlyExpenses > 0
-    ? (passiveIncome12m / (avgMonthlyExpenses * 12)) * 100
-    : 0
 
   const runwayColor =
     runway >= runwayGreen  ? '#a3e635' :
@@ -232,6 +230,7 @@ export function ProgresoView({
           unit="meses"
           sub={`${fmt(avgMonthlyExpenses)}/mes`}
           color={runwayColor}
+          tooltip="Cuántos meses podés vivir con tu liquidez actual sin ningún ingreso. Se calcula como: saldo líquido ÷ gasto mensual promedio."
         />
 
         <KpiCard
@@ -248,6 +247,7 @@ export function ProgresoView({
             realizedReturnRate >= fireConfig.expReturn ? '#a3e635' :
             realizedReturnRate >= fireConfig.inflation ? '#f59e0b' : '#f43f5e'
           }
+          tooltip="Retorno anualizado efectivo de tu portafolio patrimonial. Verde = supera tu meta, amarillo = supera inflación, rojo = bajo inflación."
         />
 
         <KpiCard
@@ -256,6 +256,7 @@ export function ProgresoView({
           unit="últimos 12m"
           sub={`${fmt(monthlySavings)}/mes aportado`}
           color="#60a5fa"
+          tooltip="Porcentaje de tus ingresos activos que fue a ahorros e inversiones (categorías SAVINGS_*) en los últimos 12 meses. Incluye compras de bienes raíces, fondos, crypto y pensión. Fórmula: aportado ÷ ingresos activos. Meta FIRE: ≥30%."
         />
 
         <KpiCard
@@ -264,6 +265,7 @@ export function ProgresoView({
           unit="/mes promedio"
           sub={`${fmt(passiveIncome12m)}/año`}
           color="#84cc16"
+          tooltip="Promedio mensual de ingresos que no requieren tu tiempo activo: alquiler, dividendos, rendimientos de inversión, etc."
         />
 
         <KpiCard
@@ -272,6 +274,7 @@ export function ProgresoView({
           unit="pasivo / gastos totales"
           sub={avgMonthlyExpenses > 0 ? `meta: ${fmt(avgMonthlyExpenses)}/mes` : 'sin datos'}
           color={fiRatio >= 1 ? '#a3e635' : fiRatio >= 0.5 ? '#f59e0b' : '#71717a'}
+          tooltip="Financial Independence: % de tus gastos totales cubiertos por ingresos pasivos. Al llegar al 100% sos financieramente independiente — no necesitás trabajar."
         />
 
         <KpiCard
@@ -280,28 +283,8 @@ export function ProgresoView({
           unit="pasivo / gastos básicos"
           sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'marcá gastos básicos'}
           color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
+          tooltip="Financial Security: % de tus gastos básicos de sobrevivencia (vivienda, comida, salud) cubiertos por ingresos pasivos. Al 100% tenés seguridad financiera total."
         />
-
-        {/* Cobertura pasiva */}
-        <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-4">
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-2">Cobertura pasiva</p>
-          <p className={`text-3xl font-black leading-none tabular-nums ${
-            passiveCoverage >= 100 ? 'text-[#a3e635]'
-            : passiveCoverage >= 50 ? 'text-cyan-400'
-            : passiveCoverage >= 25 ? 'text-amber-400'
-            : 'text-zinc-400'
-          }`}>{passiveCoverage.toFixed(1)}%</p>
-          <p className="text-[9px] text-zinc-600 mt-1">de gastos cubierto por ingresos pasivos</p>
-          {passiveCoverage >= 100 && (
-            <p className="text-[9px] text-[#a3e635] mt-1 font-black">Independencia financiera alcanzada</p>
-          )}
-          <div className="mt-2 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${passiveCoverage >= 100 ? 'bg-[#a3e635]/60' : 'bg-cyan-400/50'}`}
-              style={{ width: `${Math.min(passiveCoverage, 100).toFixed(1)}%` }}
-            />
-          </div>
-        </div>
       </div>
 
       {/* Combined historical + forecast chart */}
@@ -348,12 +331,33 @@ export function ProgresoView({
   )
 }
 
-function KpiCard({ label, value, unit, sub, color }: {
-  label: string; value: string; unit: string; sub: string; color: string
+function KpiCard({ label, value, unit, sub, color, tooltip }: {
+  label: string; value: string; unit: string; sub: string; color: string; tooltip?: string
 }) {
+  const [show, setShow] = useState(false)
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4">
-      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-2">{label}</p>
+      <div className="flex items-center gap-1 mb-2">
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">{label}</p>
+        {tooltip && (
+          <div className="relative">
+            <button
+              className="text-zinc-600 hover:text-zinc-400 transition-colors"
+              onMouseEnter={() => setShow(true)}
+              onMouseLeave={() => setShow(false)}
+              onClick={() => setShow(v => !v)}
+            >
+              <Info size={10} />
+            </button>
+            {show && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-52 bg-zinc-900 border border-white/10 rounded-lg p-2.5 shadow-xl pointer-events-none">
+                <p className="text-[10px] text-zinc-300 leading-relaxed">{tooltip}</p>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       <p className="text-2xl font-black leading-none" style={{ color }}>{value}</p>
       <p className="text-[10px] text-zinc-500 mt-1">{unit}</p>
       <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>

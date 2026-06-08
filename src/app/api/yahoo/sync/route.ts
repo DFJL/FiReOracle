@@ -7,28 +7,63 @@ const anthropic = new Anthropic()
 
 const EXTRACTION_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
-Bancos soportados: BAC Costa Rica, Banco Nacional (BNCR), BCR, Scotiabank, SINPE Móvil.
+Bancos soportados: BAC Credomatic, Banco Nacional (BNCR/BN), BCR, Scotiabank, Banco Popular, Davivienda, Promerica, Banco Cathay, SINPE Móvil.
 HOY: __TODAY__
 REGLAS:
 - Montos en CRC salvo que el correo diga explícitamente USD
 - Fechas en YYYY-MM-DD; si no hay fecha en el correo, usá la fecha del correo o hoy
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta
-- movement_type: "expense" para débitos/compras, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
+- movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
 - confidence: "high", "medium", o "low"
+CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
+Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
+devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comprobante transacción") con amount=0 y confidence="low".
+NO uses skip:true para comprobantes bancarios aunque falte el monto.
+Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
 {"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
-Si no podés extraer datos de transacción: {"skip":true,"reason":"No es notificación de transacción"}`
+Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 // Bank sender patterns to filter in Yahoo Mail
 const BANK_FROM_PATTERNS = [
+  // BAC Credomatic
   'baccredomatic',
+  // BCR
   'bancobcr',
-  'bncr.fi.cr',
-  'scotiabank',
   'bcr.fi.cr',
+  // BNCR / Banco Nacional
+  'bncr.fi.cr',
+  'banconal.fi.cr',
+  'bncontacto',
+  // Scotiabank
+  'scotiabank',
+  // Banco Popular
+  'popular.fi.cr',
+  'bpdc.fi.cr',
+  'bancopopular',
+  // Davivienda
+  'davivienda',
+  // Promerica
+  'promerica',
+  // Banco Cathay
+  'cathay.fi.cr',
+  // SINPE
   'sinpe',
 ]
+
+function extractPdfFromMime(raw: string): string | null {
+  // Every PDF starts with %PDF- which encodes to JVBERi0 in base64
+  const idx = raw.indexOf('JVBERi0')
+  if (idx === -1) return null
+
+  const slice = raw.slice(idx)
+  // Base64 data ends at the next MIME boundary (line starting with --)
+  const endIdx = slice.search(/\r?\n--/)
+  const b64 = (endIdx === -1 ? slice : slice.slice(0, endIdx)).replace(/[\r\n\s]/g, '')
+
+  return b64.length > 200 ? b64 : null
+}
 
 async function refreshYahooToken(refreshToken: string): Promise<string | null> {
   const credentials = Buffer.from(
@@ -58,13 +93,19 @@ function isBankEmail(from: string, subject: string): boolean {
   const subjectLC = subject.toLowerCase()
   return (
     subjectLC.includes('transacci') ||
+    subjectLC.includes('comprobante') ||
     subjectLC.includes('aviso') ||
     subjectLC.includes('débito') ||
+    subjectLC.includes('debito') ||
     subjectLC.includes('crédito') ||
+    subjectLC.includes('credito') ||
     subjectLC.includes('sinpe') ||
     subjectLC.includes('compra') ||
     subjectLC.includes('retiro') ||
-    subjectLC.includes('depósito')
+    subjectLC.includes('depósito') ||
+    subjectLC.includes('deposito') ||
+    subjectLC.includes('pago cuota') ||
+    subjectLC.includes('pago de cuota')
   )
 }
 
@@ -146,36 +187,60 @@ export async function POST(req: Request) {
 
         if (existing) continue
 
-        // Get plain text body
+        // Get plain text body and optional PDF attachment
         let body = ''
+        let pdfBase64: string | null = null
         if (msg.source) {
           const raw = msg.source.toString('utf-8')
           // Extract text/plain from raw email
           const plainMatch = raw.match(/Content-Type: text\/plain[^\n]*\n(?:[^\n]*\n)*\n([\s\S]*?)(?=\n--|\z)/)
           if (plainMatch) {
             body = plainMatch[1]
-              .replace(/=\r?\n/g, '')  // quoted-printable line continuations
+              .replace(/=\r?\n/g, '')
               .replace(/=[0-9A-F]{2}/gi, c => String.fromCharCode(parseInt(c.slice(1), 16)))
               .slice(0, 2000)
           } else {
-            // Fallback: strip all headers and use rest
-            body = raw.replace(/^[\s\S]*?\n\n/, '').replace(/<[^>]+>/g, ' ').slice(0, 2000)
+            // Fallback: strip headers and HTML tags
+            body = raw
+              .replace(/^[\s\S]*?\n\n/, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+              .replace(/\s+/g, ' ').trim()
+              .slice(0, 2000)
+          }
+          // Read PDF only if the body has no monetary amount (data is in the attachment)
+          const bodyHasAmount = /(₡|\$|colones?|CRC|USD|monto)\s*[\d,.]+/i.test(body)
+          if (!bodyHasAmount) {
+            pdfBase64 = extractPdfFromMime(raw)
           }
         }
 
-        const content = [
+        type ContentBlock =
+          | { type: 'text'; text: string }
+          | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+
+        const textContent = [
           subject ? `Asunto: ${subject}` : '',
           from    ? `De: ${from}` : '',
           body    ? `Cuerpo:\n${body}` : '',
         ].filter(Boolean).join('\n\n')
 
-        if (!content.trim()) continue
+        if (!textContent.trim() && !pdfBase64) continue
+
+        const userContent: string | ContentBlock[] = pdfBase64
+          ? [
+              { type: 'text', text: textContent || '(ver PDF adjunto)' },
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+            ]
+          : textContent
 
         const aiRes = await anthropic.messages.create({
-          model:      'claude-haiku-4-5-20251001',
+          model:      pdfBase64 ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
           max_tokens: 256,
           system,
-          messages:   [{ role: 'user', content }],
+          messages:   [{ role: 'user', content: userContent as never }],
         })
 
         const raw_ai = aiRes.content[0]?.type === 'text' ? aiRes.content[0].text.trim() : ''
@@ -184,16 +249,18 @@ export async function POST(req: Request) {
           const match = raw_ai.match(/\{[\s\S]*\}/)
           if (match) {
             const parsed = JSON.parse(match[0]) as Record<string, unknown>
-            if (!parsed.skip) extracted = parsed
+            if (parsed.skip) continue  // Not a transaction — don't insert
+            extracted = parsed
           }
         } catch { /* skip */ }
 
         await admin.from('transaction_inbox').insert({
           user_id:     user.id,
+          account_id:  accountId,
           email_id:    msgId,
           email_date:  emailDate,
           raw_subject: subject.slice(0, 500),
-          raw_snippet: body.slice(0, 500),
+          raw_snippet: (pdfBase64 && !body.trim() ? '[datos extraídos del PDF adjunto]' : body.slice(0, 500)),
           extracted:   extracted as never,
           status:      'pending',
         })
@@ -204,6 +271,9 @@ export async function POST(req: Request) {
     }
 
     await client.logout()
+    await admin.from('connected_email_accounts')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', accountId)
   } catch (err) {
     console.error('Yahoo IMAP error:', err)
     return Response.json({ error: 'Error conectando a Yahoo Mail — verificá los permisos de la app' }, { status: 502 })

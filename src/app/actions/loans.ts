@@ -14,8 +14,9 @@ export async function recordLoanPayment(
     balance_after: number
     rate_applied: number
     notes?: string
+    transaction_id?: string
   },
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; id?: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado' }
@@ -24,7 +25,7 @@ export async function recordLoanPayment(
   const principal = data.balance_before - data.balance_after
   const interest = Math.max(0, data.amount - principal)
 
-  const { error: insertErr } = await admin.from('loan_payments').insert({
+  const { data: inserted, error: insertErr } = await admin.from('loan_payments').insert({
     loan_id: loanId,
     user_id: user.id,
     payment_date: data.payment_date,
@@ -37,7 +38,8 @@ export async function recordLoanPayment(
     balance_after: data.balance_after,
     rate_applied: data.rate_applied,
     notes: data.notes ?? null,
-  })
+    transaction_id: data.transaction_id ?? null,
+  }).select('id').single()
 
   if (insertErr) return { error: insertErr.message }
 
@@ -51,7 +53,73 @@ export async function recordLoanPayment(
 
   revalidatePath('/prestamos')
   revalidatePath('/patrimonio')
-  return { error: null }
+  return { error: null, id: inserted.id }
+}
+
+export type ActiveLoan = {
+  id: string
+  name: string
+  lender: string
+  currencyCode: string
+  currentBalance: number
+  interestRate: number
+}
+
+export async function getActiveLoans(): Promise<ActiveLoan[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data } = await createAdminClient()
+    .from('loans')
+    .select('id, name, lender, currency_code, current_balance, interest_rate')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+  return (data ?? []).map(l => ({
+    id:             l.id as string,
+    name:           l.name as string,
+    lender:         l.lender as string,
+    currencyCode:   (l.currency_code ?? 'CRC') as string,
+    currentBalance: Number(l.current_balance),
+    interestRate:   Number(l.interest_rate),
+  }))
+}
+
+export async function getLoanPaymentForTransaction(
+  txId: string,
+): Promise<{ loanPaymentId: string; loanId: string; loanName: string; balanceAfter: number } | null> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await createAdminClient()
+    .from('loan_payments')
+    .select('id, loan_id, balance_after, loans(name)')
+    .eq('user_id', user.id)
+    .eq('transaction_id', txId)
+    .maybeSingle()
+  if (!data) return null
+  return {
+    loanPaymentId: data.id as string,
+    loanId:        data.loan_id as string,
+    loanName:      (data.loans as { name: string } | null)?.name ?? '',
+    balanceAfter:  Number(data.balance_after),
+  }
+}
+
+export async function linkTransactionToLoan(
+  txId: string,
+  loanId: string,
+  data: {
+    payment_date: string
+    payment_type: 'normal' | 'extra' | 'partial'
+    amount: number
+    balance_before: number
+    balance_after: number
+    rate_applied: number
+    notes?: string
+  },
+): Promise<{ error: string | null }> {
+  return recordLoanPayment(loanId, { ...data, transaction_id: txId })
 }
 
 export async function updateLoanBalance(
@@ -124,6 +192,67 @@ export async function createLoan(
 
   revalidatePath('/prestamos')
   return { error: null, id: data.id }
+}
+
+export async function updateLoanPayment(
+  paymentId: string,
+  data: {
+    payment_date: string
+    payment_type: 'normal' | 'extra' | 'partial'
+    amount: number
+    balance_before: number
+    balance_after: number
+    rate_applied: number
+    notes?: string
+  },
+  newLoanBalance?: number,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const principal = data.balance_before - data.balance_after
+  const interest  = Math.max(0, data.amount - principal)
+
+  const { data: payment, error: fetchErr } = await admin
+    .from('loan_payments')
+    .select('loan_id')
+    .eq('id', paymentId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (fetchErr || !payment) return { error: fetchErr?.message ?? 'Pago no encontrado' }
+
+  const { error: updErr } = await admin
+    .from('loan_payments')
+    .update({
+      payment_date: data.payment_date,
+      payment_type: data.payment_type,
+      amount: data.amount,
+      principal,
+      interest,
+      balance_before: data.balance_before,
+      balance_after: data.balance_after,
+      rate_applied: data.rate_applied,
+      notes: data.notes ?? null,
+    })
+    .eq('id', paymentId)
+    .eq('user_id', user.id)
+
+  if (updErr) return { error: updErr.message }
+
+  if (newLoanBalance !== undefined) {
+    await admin
+      .from('loans')
+      .update({ current_balance: newLoanBalance })
+      .eq('id', payment.loan_id as string)
+      .eq('user_id', user.id)
+  }
+
+  revalidatePath('/prestamos')
+  revalidatePath('/patrimonio')
+  return { error: null }
 }
 
 export async function updateLoanSortOrder(

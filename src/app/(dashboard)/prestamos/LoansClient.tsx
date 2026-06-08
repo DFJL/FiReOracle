@@ -1,14 +1,15 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { ChevronUp, ChevronDown, Plus, X, Loader2 } from 'lucide-react'
+import { ChevronUp, ChevronDown, Plus, X, Loader2, Pencil } from 'lucide-react'
 import {
   computeSchedule,
   simulateCombined,
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
-import { createLoan, updateLoanSortOrder, updateLoanBalance } from '@/app/actions/loans'
+import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment, updateLoanPayment } from '@/app/actions/loans'
+import { createTransaction } from '@/app/actions/transactions'
 
 type Payment = {
   id: string
@@ -214,7 +215,7 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
       )}
 
       {/* ── Selected loan detail ── */}
-      {selectedLoan && <LoanCard loan={selectedLoan} />}
+      {selectedLoan && <LoanCard key={selectedLoan.id} loan={selectedLoan} />}
     </div>
   )
 }
@@ -399,15 +400,192 @@ function CreateLoanForm({
   )
 }
 
+// ── Record payment form ──────────────────────────────────────────────────────
+
+function RecordPaymentForm({
+  loan,
+  onSaved,
+  onCancel,
+}: {
+  loan: LoanData
+  onSaved: (payment: Payment, newBalance: number) => void
+  onCancel: () => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const isUSD = loan.currencyCode === 'USD'
+  const fmt   = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
+
+  const [isPending, startTransition] = useTransition()
+  const [error, setError]            = useState<string | null>(null)
+  const [date, setDate]              = useState(today)
+  const [type, setType]              = useState<'normal' | 'extra'>('normal')
+  const [amountStr, setAmountStr]    = useState('')
+  const [balAfterStr, setBalAfterStr] = useState('')
+  const [notes, setNotes]            = useState('')
+  const [createLedgerTx, setCreateLedgerTx] = useState(true)
+  const [txConcept, setTxConcept]    = useState(`Pago ${type === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`)
+
+  // keep concept in sync with type
+  const conceptDefault = `Pago ${type === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`
+
+  const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+  const lbl      = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  const amount    = parseFloat(amountStr)
+  const balAfter  = parseFloat(balAfterStr)
+  const balBefore = loan.currentBalance
+  const principal = !isNaN(balAfter) ? Math.max(0, balBefore - balAfter) : null
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (isNaN(amount) || amount <= 0) { setError('Monto inválido'); return }
+    if (isNaN(balAfter) || balAfter < 0) { setError('Saldo después inválido'); return }
+    if (balAfter > balBefore) { setError(`Saldo después no puede ser mayor al saldo actual (${fmt(balBefore)})`); return }
+    setError(null)
+    startTransition(async () => {
+      // Optionally create the ledger transaction first to get its ID
+      let txId: string | undefined
+      if (createLedgerTx) {
+        const txRes = await createTransaction({
+          type: 'gasto',
+          date,
+          amount,
+          vendor: loan.lender,
+          concept: txConcept.trim() || conceptDefault,
+          expense_group: 'necesario',
+          category_code: 'LOAN_PAYMENT',
+          currency_code: 'CRC',
+          notes: notes.trim() || undefined,
+        })
+        if (txRes.error) { setError(txRes.error); return }
+        txId = txRes.id
+      }
+
+      const res = await recordLoanPayment(loan.id, {
+        payment_date:   date,
+        payment_type:   type,
+        amount,
+        balance_before: balBefore,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes.trim() || undefined,
+        transaction_id: txId,
+      })
+      if (res.error) { setError(res.error); return }
+
+      const p: Payment = {
+        id:             res.id ?? crypto.randomUUID(),
+        payment_date:   date,
+        payment_type:   type,
+        amount,
+        principal:      Math.max(0, balBefore - balAfter),
+        interest:       Math.max(0, amount - Math.max(0, balBefore - balAfter)),
+        insurance:      0,
+        balance_before: balBefore,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes.trim() || null,
+      }
+      onSaved(p, balAfter)
+    })
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-2xl bg-white/[0.03] border border-[#a3e635]/[0.12] p-4 space-y-4">
+      <p className="text-[9px] font-black text-[#a3e635]/70 uppercase tracking-[0.14em]">Registrar pago</p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={lbl}>Fecha</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Tipo</label>
+          <select value={type} onChange={e => {
+            setType(e.target.value as 'normal' | 'extra')
+            setTxConcept(`Pago ${e.target.value === 'extra' ? 'extra ' : ''}préstamo ${loan.name}`)
+          }} className={inputCls}>
+            <option value="normal">Normal</option>
+            <option value="extra">Abono extra</option>
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Monto pagado ({isUSD ? 'USD' : 'CRC'})</label>
+          <input type="number" min="0" step="any" value={amountStr}
+            onChange={e => setAmountStr(e.target.value)}
+            placeholder={isUSD ? '838.50' : '593 000'}
+            className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Saldo después del pago</label>
+          <input type="number" min="0" step="any" value={balAfterStr}
+            onChange={e => setBalAfterStr(e.target.value)}
+            placeholder={fmt(balBefore)}
+            className={inputCls} required />
+          {principal !== null && (
+            <p className="text-[9px] text-zinc-600 mt-1">Capital: {fmt(principal)}</p>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <label className={lbl}>Saldo actual en sistema</label>
+        <p className="text-sm font-black text-zinc-300">{fmt(balBefore)}</p>
+        <p className="text-[9px] text-zinc-600">Ingresá el saldo real del estado de cuenta como "saldo después"</p>
+      </div>
+
+      {/* Ledger transaction toggle */}
+      <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <input type="checkbox" checked={createLedgerTx} onChange={e => setCreateLedgerTx(e.target.checked)}
+            className="accent-[#a3e635] w-3.5 h-3.5" />
+          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-wider">
+            Registrar también en ledger de transacciones
+          </span>
+        </label>
+        {createLedgerTx && (
+          <div>
+            <label className={lbl}>Concepto en ledger</label>
+            <input type="text" value={txConcept} onChange={e => setTxConcept(e.target.value)}
+              placeholder={conceptDefault} className={inputCls} />
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+        <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Pago junio 2026…" className={inputCls} />
+      </div>
+
+      {error && <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="flex gap-2 justify-end">
+        <button type="button" onClick={onCancel}
+          className="px-4 py-2 rounded-xl border border-white/[0.08] text-zinc-400 text-xs font-black hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+        <button type="submit" disabled={isPending}
+          className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+          {isPending ? <><Loader2 size={12} className="animate-spin" /> Guardando…</> : 'Registrar'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 // ── Per-loan card ────────────────────────────────────────────────────────────
 
-function LoanCard({ loan }: { loan: LoanData }) {
+function LoanCard({ loan: initialLoan }: { loan: LoanData }) {
+  const [loan, setLoan]         = useState<LoanData>(initialLoan)
   const [tab, setTab]           = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
   const [showAll, setShowAll]   = useState(false)
   const [editingBal, setEditingBal] = useState(false)
   const [newBalStr, setNewBalStr]   = useState('')
   const [balErr, setBalErr]         = useState<string | null>(null)
   const [isPendingBal, startBal]    = useTransition()
+  const [showPayForm, setShowPayForm] = useState(false)
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
 
   const schedule = computeSchedule(
     loan.currentBalance,
@@ -604,6 +782,35 @@ function LoanCard({ loan }: { loan: LoanData }) {
 
       {/* Historial tab */}
       {tab === 'historial' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
+              {loan.payments.length} pago{loan.payments.length !== 1 ? 's' : ''} registrado{loan.payments.length !== 1 ? 's' : ''}
+            </p>
+            <button
+              onClick={() => setShowPayForm(v => !v)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-colors"
+            >
+              <Plus size={11} strokeWidth={3} />
+              Registrar pago
+            </button>
+          </div>
+
+          {showPayForm && (
+            <RecordPaymentForm
+              loan={loan}
+              onSaved={(payment, newBalance) => {
+                setLoan(prev => ({
+                  ...prev,
+                  currentBalance: newBalance,
+                  payments: [payment, ...prev.payments],
+                }))
+                setShowPayForm(false)
+              }}
+              onCancel={() => setShowPayForm(false)}
+            />
+          )}
+
         <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
           {loan.payments.length === 0 ? (
             <p className="text-xs text-zinc-600 text-center py-8">Sin pagos registrados.</p>
@@ -612,9 +819,9 @@ function LoanCard({ loan }: { loan: LoanData }) {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-white/[0.06]">
-                    {['Fecha', 'Tipo', 'Saldo antes', 'Cancelado', 'Capital', 'Saldo después', 'Tasa'].map(h => (
+                    {['Fecha', 'Tipo', 'Saldo antes', 'Cancelado', 'Capital', 'Saldo después', 'Tasa', ''].map(h => (
                       <th key={h} className={`px-3 py-2.5 text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap ${
-                        h === 'Fecha' || h === 'Tipo' ? 'text-left' : 'text-right'
+                        h === 'Fecha' || h === 'Tipo' || h === '' ? 'text-left' : 'text-right'
                       }`}>{h}</th>
                     ))}
                   </tr>
@@ -622,7 +829,27 @@ function LoanCard({ loan }: { loan: LoanData }) {
                 <tbody>
                   {loan.payments.map((p, i) => {
                     const col = PAYMENT_COLOR[p.payment_type] ?? '#818cf8'
-                    return (
+                    const isEditing = editingPaymentId === p.id
+                    return isEditing ? (
+                      <tr key={p.id + '-edit'} className="border-b border-[#a3e635]/10">
+                        <td colSpan={8} className="px-2 py-2">
+                          <EditPaymentForm
+                            payment={p}
+                            loan={loan}
+                            isFirst={i === 0}
+                            onSaved={(updated, newLoanBalance) => {
+                              setLoan(prev => ({
+                                ...prev,
+                                currentBalance: newLoanBalance ?? prev.currentBalance,
+                                payments: prev.payments.map(x => x.id === updated.id ? updated : x),
+                              }))
+                              setEditingPaymentId(null)
+                            }}
+                            onCancel={() => setEditingPaymentId(null)}
+                          />
+                        </td>
+                      </tr>
+                    ) : (
                       <tr key={p.id}
                         className={`border-b border-white/[0.03] transition-colors hover:bg-white/[0.02] ${i % 2 !== 0 ? 'bg-white/[0.01]' : ''}`}>
                         <td className="px-3 py-2 text-[10px] text-zinc-400 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
@@ -637,6 +864,15 @@ function LoanCard({ loan }: { loan: LoanData }) {
                         <td className="px-3 py-2 text-[10px] text-right text-[#a3e635]/70 tabular-nums">{fmt(p.balance_before - p.balance_after)}</td>
                         <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_after)}</td>
                         <td className="px-3 py-2 text-[10px] text-right text-zinc-600 tabular-nums">{p.rate_applied.toFixed(2)}%</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => setEditingPaymentId(p.id)}
+                            className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+                            title="Editar pago"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        </td>
                       </tr>
                     )
                   })}
@@ -645,11 +881,158 @@ function LoanCard({ loan }: { loan: LoanData }) {
             </div>
           )}
         </div>
+        </div>
       )}
 
       {/* Simulador tab */}
       {tab === 'simulador' && <SimuladorTab loan={loan} schedule={schedule} />}
     </div>
+  )
+}
+
+// ── Edit payment inline form ─────────────────────────────────────────────────
+
+function EditPaymentForm({
+  payment,
+  loan,
+  isFirst,
+  onSaved,
+  onCancel,
+}: {
+  payment: Payment
+  loan: LoanData
+  isFirst: boolean
+  onSaved: (updated: Payment, newLoanBalance?: number) => void
+  onCancel: () => void
+}) {
+  const isUSD = loan.currencyCode === 'USD'
+  const fmt   = isUSD ? fmtUSD : (v: number) => fmtCRC(v)
+
+  const [isPending, startTransition] = useTransition()
+  const [error, setError]            = useState<string | null>(null)
+  const [date,     setDate]          = useState(payment.payment_date.slice(0, 10))
+  const [type,     setType]          = useState<'normal' | 'extra' | 'partial'>(
+    payment.payment_type as 'normal' | 'extra' | 'partial',
+  )
+  const [amountStr,   setAmountStr]   = useState(String(payment.amount))
+  const [balBefStr,   setBalBefStr]   = useState(String(payment.balance_before))
+  const [balAftStr,   setBalAftStr]   = useState(String(payment.balance_after))
+  const [rateStr,     setRateStr]     = useState(String(payment.rate_applied))
+  const [notes,       setNotes]       = useState(payment.notes ?? '')
+
+  const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+  const lbl      = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.12em] mb-1'
+
+  const amount   = parseFloat(amountStr)
+  const balBef   = parseFloat(balBefStr)
+  const balAft   = parseFloat(balAftStr)
+  const rate     = parseFloat(rateStr)
+  const principal = !isNaN(balBef) && !isNaN(balAft) ? Math.max(0, balBef - balAft) : null
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (isNaN(amount) || amount <= 0)    { setError('Monto inválido'); return }
+    if (isNaN(balBef) || balBef < 0)     { setError('Saldo antes inválido'); return }
+    if (isNaN(balAft) || balAft < 0)     { setError('Saldo después inválido'); return }
+    if (isNaN(rate)   || rate <= 0)      { setError('Tasa inválida'); return }
+    setError(null)
+
+    startTransition(async () => {
+      const res = await updateLoanPayment(
+        payment.id,
+        {
+          payment_date: date,
+          payment_type: type,
+          amount,
+          balance_before: balBef,
+          balance_after:  balAft,
+          rate_applied:   rate,
+          notes: notes.trim() || undefined,
+        },
+        isFirst ? balAft : undefined,
+      )
+      if (res.error) { setError(res.error); return }
+
+      const updated: Payment = {
+        ...payment,
+        payment_date:   date,
+        payment_type:   type,
+        amount,
+        principal:      Math.max(0, balBef - balAft),
+        interest:       Math.max(0, amount - Math.max(0, balBef - balAft)),
+        balance_before: balBef,
+        balance_after:  balAft,
+        rate_applied:   rate,
+        notes:          notes.trim() || null,
+      }
+      onSaved(updated, isFirst ? balAft : undefined)
+    })
+  }
+
+  return (
+    <form onSubmit={submit} className="rounded-xl bg-[#a3e635]/[0.03] border border-[#a3e635]/10 p-3 space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div>
+          <label className={lbl}>Fecha</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Tipo</label>
+          <select value={type} onChange={e => setType(e.target.value as typeof type)} className={inputCls}>
+            <option value="normal">Normal</option>
+            <option value="extra">Abono extra</option>
+            <option value="partial">Parcial</option>
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Monto ({isUSD ? 'USD' : 'CRC'})</label>
+          <input type="number" min="0" step="any" value={amountStr}
+            onChange={e => setAmountStr(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Tasa anual (%)</label>
+          <input type="number" min="0" step="0.01" value={rateStr}
+            onChange={e => setRateStr(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Saldo antes</label>
+          <input type="number" min="0" step="any" value={balBefStr}
+            onChange={e => setBalBefStr(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Saldo después</label>
+          <input type="number" min="0" step="any" value={balAftStr}
+            onChange={e => setBalAftStr(e.target.value)} className={inputCls} required />
+          {principal !== null && (
+            <p className="text-[9px] text-zinc-600 mt-0.5">Capital: {fmt(principal)}</p>
+          )}
+        </div>
+        <div className="col-span-2">
+          <label className={lbl}>Notas</label>
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="(opcional)" className={inputCls} />
+        </div>
+      </div>
+
+      {isFirst && (
+        <p className="text-[9px] text-zinc-600">
+          Al guardar, el saldo actual del préstamo se actualizará al nuevo "saldo después".
+        </p>
+      )}
+
+      {error && <p className="text-[10px] text-rose-400 bg-rose-400/10 rounded px-2 py-1">{error}</p>}
+
+      <div className="flex gap-2 justify-end">
+        <button type="button" onClick={onCancel}
+          className="px-3 py-1.5 rounded-lg border border-white/[0.08] text-zinc-400 text-[10px] font-black hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+        <button type="submit" disabled={isPending}
+          className="flex items-center gap-1 px-4 py-1.5 rounded-lg bg-[#a3e635] text-black text-[10px] font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+          {isPending ? <><Loader2 size={10} className="animate-spin" /> Guardando…</> : 'Guardar cambios'}
+        </button>
+      </div>
+    </form>
   )
 }
 

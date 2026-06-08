@@ -93,8 +93,8 @@ export default async function ReportePage({
       else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') expenses += amt
     }
     const net = income - expenses
-    const savingsRate = income > 0 ? (net / income) * 100 : 0
-    return { income, expenses, net, savingsRate }
+    const netMargin = income > 0 ? (net / income) * 100 : 0
+    return { income, expenses, net, netMargin }
   }
 
   const cur = computePeriod(curTx)

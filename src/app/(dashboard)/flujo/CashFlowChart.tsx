@@ -362,7 +362,7 @@ export function SavingsHeatmap({ data }: { data: MonthData[] }) {
     <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-5">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="text-sm font-semibold text-zinc-200 tracking-tight">Tasa de ahorro mensual</p>
+          <p className="text-sm font-semibold text-zinc-200 tracking-tight">Margen neto mensual</p>
           {hp ? (
             <p className="text-xs text-zinc-400 mt-1">
               <span className="text-zinc-500 mr-2">{monthLabel(hp.month)}</span>

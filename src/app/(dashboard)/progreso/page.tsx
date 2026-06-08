@@ -153,10 +153,16 @@ export default async function ProgresoPage() {
     .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
-  // Actual investment deposits — used as monthly savings for forecast & savings rate
+  // Actual investment deposits — SAVINGS_* categories only (excl. losses, loan payments, rental expenses)
+  // No outlier removal: real estate and large one-off purchases ARE genuine investments and should count
   const avgMonthlyDeposits = recent
-    .filter(tx => tx.expense_group === 'objetivos_financieros' && !tx.is_settlement &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal'))
+    .filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      tx.expense_group === 'objetivos_financieros' &&
+      !tx.is_settlement &&
+      (tx.category_code ?? '').startsWith('SAVINGS_') &&
+      !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')
+    )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
   const passiveIncome12m = recent

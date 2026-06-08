@@ -3,7 +3,16 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-type MovType = 'deposito' | 'retiro' | 'interes' | 'traslado_in' | 'traslado_out'
+export type MovType = 'deposito' | 'retiro' | 'interes' | 'traslado_in' | 'traslado_out'
+
+export type EnvelopeMovement = {
+  id: string
+  date: string
+  amount: number
+  movement_type: MovType
+  notes: string | null
+  created_at: string | null
+}
 
 export async function addMovement(
   envelopeId: string,
@@ -117,4 +126,66 @@ export async function distributeInterest(
   if (error) return { error: error.message }
   revalidatePath('/liquidez')
   return { ok: true }
+}
+
+export async function getEnvelopeMovements(envelopeId: string): Promise<{ data: EnvelopeMovement[]; error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: [], error: 'No autorizado' }
+
+  const { data, error } = await supabase
+    .from('envelope_movements')
+    .select('id, date, amount, movement_type, notes, created_at')
+    .eq('user_id', user.id)
+    .eq('envelope_id', envelopeId)
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) return { data: [], error: error.message }
+  return {
+    data: (data ?? []).map(m => ({
+      ...m,
+      amount: Number(m.amount),
+      movement_type: m.movement_type as MovType,
+    })),
+    error: null,
+  }
+}
+
+export async function deleteEnvelopeMovement(movementId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const { error } = await supabase
+    .from('envelope_movements')
+    .delete()
+    .eq('id', movementId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/liquidez')
+  return { error: null }
+}
+
+export async function updateEnvelopeMovement(
+  movementId: string,
+  data: { date: string; amount: number; movement_type: MovType; notes: string | null },
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const isDebit = ['retiro', 'traslado_out'].includes(data.movement_type)
+  const signed  = isDebit ? -Math.abs(data.amount) : Math.abs(data.amount)
+
+  const { error } = await supabase
+    .from('envelope_movements')
+    .update({ date: data.date, amount: signed, movement_type: data.movement_type, notes: data.notes })
+    .eq('id', movementId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/liquidez')
+  return { error: null }
 }
