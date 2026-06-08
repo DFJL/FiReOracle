@@ -578,35 +578,45 @@ function EditTransactionModal({ tx, categories, onClose }: {
       } satisfies UpdateTransactionInput)
       if (result?.error) { setError(result.error); return }
 
-      // Update envelope linkage only if it changed
+      // Build parallel secondary operations
+      const secondaryOps: Promise<{ error?: string | null } | null>[] = []
+
       if (envelopeId !== initialEnvelopeId) {
-        const envResult = await updateTransactionEnvelopeLink(
-          tx.id, envelopeId || null, date, amt,
-          concept.trim() || null, vendor.trim() || null,
+        secondaryOps.push(
+          updateTransactionEnvelopeLink(
+            tx.id, envelopeId || null, date, amt,
+            concept.trim() || null, vendor.trim() || null,
+          )
         )
-        if (envResult?.error) { setError(envResult.error); return }
-        setInitialEnvelopeId(envelopeId)
+      } else {
+        secondaryOps.push(Promise.resolve(null))
       }
 
-      // Link to loan payment if selected and not already linked to this loan
       if (isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId) {
         const loan = loans.find(l => l.id === selectedLoanId)
-        // If balance not entered, estimate: currentBalance - payment amount (user can correct in historial)
         const balAfterNum = loanBalAfter.trim()
           ? parseFloat(loanBalAfter)
           : Math.max(0, (loan?.currentBalance ?? 0) - amt)
         if (isNaN(balAfterNum) || balAfterNum < 0) { setError('Saldo del préstamo después del pago inválido'); return }
-        const loanRes = await linkTransactionToLoan(tx.id, selectedLoanId, {
-          payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
-          payment_type:   'normal',
-          amount:         amt,
-          balance_before: loan?.currentBalance ?? balAfterNum,
-          balance_after:  balAfterNum,
-          rate_applied:   loan?.interestRate ?? 0,
-          notes:          notes.trim() || undefined,
-        })
-        if (loanRes.error) { setError(loanRes.error); return }
+        secondaryOps.push(
+          linkTransactionToLoan(tx.id, selectedLoanId, {
+            payment_date:   date || tx.date || new Date().toISOString().slice(0, 10),
+            payment_type:   'normal',
+            amount:         amt,
+            balance_before: loan?.currentBalance ?? balAfterNum,
+            balance_after:  balAfterNum,
+            rate_applied:   loan?.interestRate ?? 0,
+            notes:          notes.trim() || undefined,
+          })
+        )
+      } else {
+        secondaryOps.push(Promise.resolve(null))
       }
+
+      const [envResult, loanRes] = await Promise.all(secondaryOps)
+      if (envResult?.error) { setError(envResult.error); return }
+      if (envelopeId !== initialEnvelopeId && !envResult?.error) setInitialEnvelopeId(envelopeId)
+      if (loanRes?.error) { setError(loanRes.error); return }
 
       onClose()
     })
