@@ -132,7 +132,7 @@ async function getEnvelopeBalance(
 async function applySideEffects(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
-  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string },
+  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string; source_tx_id?: string },
 ): Promise<string | null> {
   if (input.debit_envelope_id) {
     const balance = await getEnvelopeBalance(admin, userId, input.debit_envelope_id)
@@ -148,7 +148,8 @@ async function applySideEffects(
       amount: -Math.abs(input.amount),
       date: input.date,
       notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
-    })
+      ...(input.source_tx_id ? { source_tx_id: input.source_tx_id } : {}),
+    } as never)
     if (error) return error.message
     revalidatePath('/liquidez')
   }
@@ -204,7 +205,9 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   if (input.type === 'gasto') {
     const isUSD = input.currency_code === 'USD'
+    const txId = crypto.randomUUID()
     const { error } = await admin.from('transactions').insert({
+      id: txId,
       user_id: user.id,
       date: input.date,
       amount: input.amount,
@@ -225,7 +228,7 @@ export async function createTransaction(input: CreateTransactionInput) {
     })
     if (error) return { error: error.message }
     if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
-      const sideErr = await applySideEffects(admin, user.id, input)
+      const sideErr = await applySideEffects(admin, user.id, { ...input, source_tx_id: txId })
       if (sideErr) return { error: sideErr }
     }
   }
@@ -381,5 +384,90 @@ export async function deleteTransaction(id: string) {
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
   revalidatePath('/patrimonio')
+  return { error: null }
+}
+
+// ── Envelope linkage for transactions ────────────────────────────────────────
+
+export async function getLeafEnvelopes(): Promise<{ id: string; name: string; custodio: string | null }[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('savings_envelopes')
+    .select('id, name, custodio, parent_envelope_id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .order('sort_order')
+
+  if (!data) return []
+  const parentIds = new Set(data.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
+  return data
+    .filter(e => !parentIds.has(e.id))
+    .map(e => ({ id: e.id, name: e.name, custodio: (e as { custodio?: string | null }).custodio ?? null }))
+}
+
+export async function getTransactionEnvelopeLink(txId: string): Promise<{ envelope_id: string; movement_id: string } | null> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('envelope_movements')
+    .select('id, envelope_id')
+    .eq('user_id', user.id)
+    .eq('source_tx_id' as never, txId)
+    .maybeSingle()
+
+  if (!data) return null
+  return { envelope_id: (data as { id: string; envelope_id: string }).envelope_id, movement_id: data.id }
+}
+
+export async function updateTransactionEnvelopeLink(
+  txId: string,
+  envelopeId: string | null,
+  txDate: string,
+  txAmount: number,
+  txConcept: string | null,
+  txVendor: string | null,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  const { error: delErr } = await admin
+    .from('envelope_movements')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('source_tx_id' as never, txId)
+
+  if (delErr) return { error: delErr.message }
+
+  if (envelopeId) {
+    const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
+    const debit   = Math.abs(txAmount)
+    if (balance < debit) {
+      const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+      return { error: `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})` }
+    }
+    const { error: insErr } = await admin.from('envelope_movements').insert({
+      user_id:       user.id,
+      envelope_id:   envelopeId,
+      movement_type: 'retiro',
+      amount:        -Math.abs(txAmount),
+      date:          txDate,
+      notes:         `Tx: ${txConcept || txVendor || ''}`.trim(),
+      source_tx_id:  txId,
+    } as never)
+    if (insErr) return { error: insErr.message }
+  }
+
+  revalidatePath('/liquidez')
+  revalidatePath('/resumen')
   return { error: null }
 }

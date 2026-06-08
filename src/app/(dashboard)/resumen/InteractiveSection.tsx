@@ -6,7 +6,10 @@ import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, i
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
-import { updateTransaction, deleteTransaction, type UpdateTransactionInput } from '@/app/actions/transactions'
+import {
+  updateTransaction, deleteTransaction, type UpdateTransactionInput,
+  getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
+} from '@/app/actions/transactions'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -505,6 +508,23 @@ function EditTransactionModal({ tx, categories, onClose }: {
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
 
+  // Envelope linkage
+  type Envelope = { id: string; name: string; custodio: string | null }
+  const [envelopes, setEnvelopes]           = useState<Envelope[]>([])
+  const [envelopeId, setEnvelopeId]         = useState('')
+  const [initialEnvelopeId, setInitialEnvelopeId] = useState('')
+  const [envelopesReady, setEnvelopesReady] = useState(false)
+
+  useEffect(() => {
+    Promise.all([getLeafEnvelopes(), getTransactionEnvelopeLink(tx.id)]).then(([envs, link]) => {
+      setEnvelopes(envs)
+      const cur = link?.envelope_id ?? ''
+      setEnvelopeId(cur)
+      setInitialEnvelopeId(cur)
+      setEnvelopesReady(true)
+    })
+  }, [tx.id])
+
   useEffect(() => {
     if (!categoryCode) return
     const cat = categories.find(c => c.code === categoryCode)
@@ -533,16 +553,35 @@ function EditTransactionModal({ tx, categories, onClose }: {
         is_survival_expense: isSurvival,
       } satisfies UpdateTransactionInput)
       if (result?.error) { setError(result.error); return }
+
+      // Update envelope linkage only if it changed
+      if (envelopeId !== initialEnvelopeId) {
+        const envResult = await updateTransactionEnvelopeLink(
+          tx.id, envelopeId || null, date, amt,
+          concept.trim() || null, vendor.trim() || null,
+        )
+        if (envResult?.error) { setError(envResult.error); return }
+        setInitialEnvelopeId(envelopeId)
+      }
+
       onClose()
     })
   }
 
+  const isExpense = tx.movement_type !== 'income'
   const typeFilter = tx.movement_type === 'income' ? 'income' : 'expense'
   const parents  = categories.filter(c => !c.parent_code && c.category_type === typeFilter)
   const children = categories.filter(c =>  c.parent_code && c.category_type === typeFilter)
 
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  const envChanged  = envelopeId !== initialEnvelopeId
+  const envAdded    = envChanged && !!envelopeId && !initialEnvelopeId
+  const envRemoved  = envChanged && !envelopeId && !!initialEnvelopeId
+  const envSwapped  = envChanged && !!envelopeId && !!initialEnvelopeId
+  const currentEnv  = envelopes.find(e => e.id === envelopeId)
+  const initialEnv  = envelopes.find(e => e.id === initialEnvelopeId)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -600,6 +639,49 @@ function EditTransactionModal({ tx, categories, onClose }: {
               </select>
             </div>
           )}
+
+          {/* Envelope section — expenses only */}
+          {isExpense && envelopesReady && envelopes.length > 0 && (
+            <div>
+              <label className={lbl}>
+                Débito de sobre
+                <span className="text-zinc-700 normal-case tracking-normal ml-1">(opcional)</span>
+              </label>
+              <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inputCls}>
+                <option value="">Sin afectación de sobre</option>
+                {envelopes.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.custodio ? `${e.custodio} › ${e.name}` : e.name}
+                  </option>
+                ))}
+              </select>
+              {/* Status indicators */}
+              {!envChanged && initialEnvelopeId && initialEnv && (
+                <p className="text-[9px] text-amber-400/80 mt-1">
+                  ⚡ Actualmente debita &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                </p>
+              )}
+              {!envChanged && !initialEnvelopeId && (
+                <p className="text-[9px] text-zinc-600 mt-1">Sin afectación de sobre</p>
+              )}
+              {envAdded && currentEnv && (
+                <p className="text-[9px] text-[#a3e635]/80 mt-1">
+                  + Agrega retiro de &quot;{currentEnv.custodio ? `${currentEnv.custodio} › ` : ''}{currentEnv.name}&quot;
+                </p>
+              )}
+              {envRemoved && initialEnv && (
+                <p className="text-[9px] text-rose-400/80 mt-1">
+                  − Elimina retiro de &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                </p>
+              )}
+              {envSwapped && currentEnv && initialEnv && (
+                <p className="text-[9px] text-cyan-400/80 mt-1">
+                  ↔ Cambia de &quot;{initialEnv.name}&quot; a &quot;{currentEnv.name}&quot;
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Nota libre…" className={inputCls} />
