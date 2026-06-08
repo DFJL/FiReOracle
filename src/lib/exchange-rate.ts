@@ -60,6 +60,24 @@ export async function persistRate(sell: number, buy: number, date: string, sourc
 
 // ── External sources ────────────────────────────────────────────────────────
 
+async function tryTipoDeCambio(): Promise<{ sell: number; buy: number; date: string } | null> {
+  try {
+    const res = await fetch('https://tipodecambio.paginasweb.cr/api', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const sell = Number(data.venta ?? data.sell ?? 0)
+    const buy  = Number(data.compra ?? data.buy ?? sell * 0.997)
+    const date = String(data.fecha ?? new Date().toISOString()).slice(0, 10)
+    if (sell < RATE_MIN || sell > RATE_MAX) return null
+    return { sell, buy: buy || +(sell * 0.997).toFixed(2), date }
+  } catch {
+    return null
+  }
+}
+
 async function tryHacienda(): Promise<{ sell: number; buy: number; date: string } | null> {
   try {
     const res = await fetch('https://api.hacienda.go.cr/indicadores/tc', {
@@ -116,6 +134,12 @@ async function tryFrankfurter(): Promise<{ sell: number; date: string } | null> 
 // ── Public API ─────────────────────────────────────────────────────────────
 
 async function fetchFromAPIs(): Promise<ExchangeRate | null> {
+  const tdc = await tryTipoDeCambio()
+  if (tdc) {
+    persistRate(tdc.sell, tdc.buy, tdc.date, 'tipodecambio.cr')
+    return { buy: tdc.buy, sell: tdc.sell, date: tdc.date, source: 'tipodecambio.cr' }
+  }
+
   const hacienda = await tryHacienda()
   if (hacienda) {
     persistRate(hacienda.sell, hacienda.buy, hacienda.date, 'Hacienda CR')

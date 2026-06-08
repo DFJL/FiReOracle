@@ -86,6 +86,16 @@ function isOutflow(tx: Tx) {
   return true
 }
 
+// Lifestyle expenses only — excludes savings, investments, loan payments and valuations.
+// Matches progreso's LifestyleTrendSection logic for YoY inflation comparison.
+function isLifestyleOutflow(tx: Tx) {
+  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+  if (isValuation(tx.concept)) return false
+  if (tx.expense_group === SAVINGS_EXPENSE_GROUP) return false  // no savings/investments
+  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false  // no cuotas/amortizaciones
+  return true
+}
+
 const sum = (arr: Tx[]) => arr.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
 export default async function OraclePage() {
@@ -192,11 +202,18 @@ export default async function OraclePage() {
   const c = kpis(cur12)
   const p = kpis(prev12)
 
-  const avgMonthlyExpenses = c.totalExpenses / 12
+  // Lifestyle expenses (no préstamos, no inversiones) — matches progreso inflation calc
+  const lifestyleCur  = sum(cur12.filter(isLifestyleOutflow))
+  const lifestylePrev = sum(prev12.filter(isLifestyleOutflow))
+  const loanPaymentsCur  = sum(cur12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
+  const loanPaymentsPrev = sum(prev12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
+
+  const avgMonthlyExpenses  = c.totalExpenses / 12
+  const avgLifestyleExpenses = lifestyleCur / 12
   // Savings rate denominator = active income only (matches progreso formula exactly)
   const savingsRate     = c.totalActiveIncome > 0 ? (c.totalSavings / c.totalActiveIncome) * 100 : 0
   const netMargin       = c.totalIncome > 0 ? ((c.totalIncome - c.totalExpenses) / c.totalIncome) * 100 : 0
-  const passiveCoverage = avgMonthlyExpenses > 0 ? ((c.totalPassiveIncome / 12) / avgMonthlyExpenses) * 100 : 0
+  const passiveCoverage = avgLifestyleExpenses > 0 ? ((c.totalPassiveIncome / 12) / avgLifestyleExpenses) * 100 : 0
 
   // ── Monthly breakdown (current 12m) ────────────────────────────────────────
   const months: string[] = []
@@ -258,9 +275,18 @@ export default async function OraclePage() {
   const activosInvertibles = liquid + invested
   const fireProgress  = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
   const runway        = avgMonthlyExpenses > 0 ? liquid / avgMonthlyExpenses : null
-  const yearsToFire   = fireNumber > activosInvertibles && avgMonthlyExpenses > 0
-    ? Math.ceil(Math.log(fireNumber / activosInvertibles) / Math.log(1 + expReturn))
-    : 0
+
+  // Monthly simulation — matches progreso's forecast formula exactly
+  const avgMonthlySavings = c.totalSavings / 12
+  const monthlyReturn     = Math.pow(1 + expReturn, 1 / 12) - 1
+  let yearsToFire = 0
+  if (fireNumber > activosInvertibles && avgMonthlySavings > 0) {
+    let fb = activosInvertibles
+    for (let y = 1; y <= 40; y++) {
+      for (let m = 0; m < 12; m++) fb = fb * (1 + monthlyReturn) + avgMonthlySavings
+      if (fb >= fireNumber) { yearsToFire = y; break }
+    }
+  }
 
   // ── Envelope / liquid breakdown ────────────────────────────────────────────
   const parentIds = new Set(
@@ -280,9 +306,10 @@ export default async function OraclePage() {
     .sort((a, b) => b.balance - a.balance)
 
   // ── YoY comparison ──────────────────────────────────────────────────────────
-  const yoyIncome  = p.totalIncome  > 0 ? ((c.totalIncome  - p.totalIncome)  / p.totalIncome  * 100).toFixed(1) : 'n/d'
-  const yoyExpense = p.totalExpenses > 0 ? ((c.totalExpenses - p.totalExpenses) / p.totalExpenses * 100).toFixed(1) : 'n/d'
-  const yoySavings = p.totalSavings > 0 ? ((c.totalSavings - p.totalSavings) / p.totalSavings * 100).toFixed(1) : 'n/d'
+  const yoyIncome       = p.totalIncome  > 0 ? ((c.totalIncome  - p.totalIncome)  / p.totalIncome  * 100).toFixed(1) : 'n/d'
+  const yoyLifestyle    = lifestylePrev  > 0 ? ((lifestyleCur   - lifestylePrev)  / lifestylePrev  * 100).toFixed(1) : 'n/d'
+  const yoyLoanPayments = loanPaymentsPrev > 0 ? ((loanPaymentsCur - loanPaymentsPrev) / loanPaymentsPrev * 100).toFixed(1) : 'n/d'
+  const yoySavings      = p.totalSavings > 0 ? ((c.totalSavings - p.totalSavings) / p.totalSavings * 100).toFixed(1) : 'n/d'
 
   // ── Recent transactions (60d) ──────────────────────────────────────────────
   const recentTxLines = recent
@@ -382,9 +409,10 @@ Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/
 ══════════════════════════════════════════════════════════
  AÑO CONTRA AÑO (12m actual vs 12m anterior)
 ══════════════════════════════════════════════════════════
-Ingresos:   ${fmtCRC(c.totalIncome)} vs ${fmtCRC(p.totalIncome)}  (${yoyIncome}%)
-Gastos:     ${fmtCRC(c.totalExpenses)} vs ${fmtCRC(p.totalExpenses)}  (${yoyExpense}%)
-Ahorro:     ${fmtCRC(c.totalSavings)} vs ${fmtCRC(p.totalSavings)}  (${yoySavings}%)
+Ingresos:              ${fmtCRC(c.totalIncome)} vs ${fmtCRC(p.totalIncome)}  (${yoyIncome}%)
+Gastos de vida:        ${fmtCRC(lifestyleCur)} vs ${fmtCRC(lifestylePrev)}  (${yoyLifestyle}%)  [sin préstamos ni inversiones — cifra relevante para inflación personal]
+Cuotas/préstamos:      ${fmtCRC(loanPaymentsCur)} vs ${fmtCRC(loanPaymentsPrev)}  (${yoyLoanPayments}%)  [NO son gasto de vida; cuotas + abonos extraordinarios]
+Ahorro/Inversión:      ${fmtCRC(c.totalSavings)} vs ${fmtCRC(p.totalSavings)}  (${yoySavings}%)
 
 ══════════════════════════════════════════════════════════
  DESGLOSE MENSUAL (últimos 12 meses completos)

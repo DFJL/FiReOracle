@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const EXCHANGE_RATE_URL = 'https://tipodecambio.paginasweb.cr/api'
-const FALLBACK_RATE = 520
+const FALLBACK_RATE = 515
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
