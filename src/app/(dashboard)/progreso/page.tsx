@@ -237,12 +237,7 @@ export default async function ProgresoPage() {
 
   const lifestyleTxs = (txs ?? []).filter(isLifestyleTx)
 
-  const liCurTotal = lifestyleTxs
-    .filter(tx => tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
-  const liPrvTotal = lifestyleTxs
-    .filter(tx => tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr)
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  // liCurTotal / liPrvTotal computed after outlier removal (see below)
 
   // Monthly trend — last 12 complete months
   type LiMonth = { label: string; necesario: number; personal: number }
@@ -312,6 +307,14 @@ export default async function ProgresoPage() {
     if (isOutlier) rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
     return !isOutlier
   })
+
+  // Headline totals use cleaned transactions for consistency with per-category YoY%
+  const liCurTotal = cleanedLifestyleTxs
+    .filter(tx => tx.date && tx.date >= liCurStartStr && tx.date < liCurEndStr)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  const liPrvTotal = cleanedLifestyleTxs
+    .filter(tx => tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
   // Pass 2: build monthly totals from cleaned transactions
   const rootMonthly: Record<string, Record<string, number>> = {}
