@@ -208,11 +208,14 @@ export default async function OraclePage() {
   const loanPaymentsCur  = sum(cur12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
   const loanPaymentsPrev = sum(prev12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
 
-  const avgMonthlyExpenses  = c.totalExpenses / 12
+  const avgMonthlyExpenses   = c.totalExpenses / 12
   const avgLifestyleExpenses = lifestyleCur / 12
+  // Survival split — lifestyle only (loan payments excluded, they're equity building)
+  const survivalLifestyle = sum(cur12.filter(tx => !!tx.is_survival_expense && isLifestyleOutflow(tx)))
   // Savings rate denominator = active income only (matches progreso formula exactly)
   const savingsRate     = c.totalActiveIncome > 0 ? (c.totalSavings / c.totalActiveIncome) * 100 : 0
-  const netMargin       = c.totalIncome > 0 ? ((c.totalIncome - c.totalExpenses) / c.totalIncome) * 100 : 0
+  // Net margin: income not consumed by lifestyle (loans build equity, not consumed)
+  const netMargin       = c.totalIncome > 0 ? ((c.totalIncome - lifestyleCur) / c.totalIncome) * 100 : 0
   const passiveCoverage = avgLifestyleExpenses > 0 ? ((c.totalPassiveIncome / 12) / avgLifestyleExpenses) * 100 : 0
 
   // ── Monthly breakdown (current 12m) ────────────────────────────────────────
@@ -223,15 +226,17 @@ export default async function OraclePage() {
   }
 
   const monthlyRows = months.map(m => {
-    const mTxs = cur12.filter(tx => tx.date?.startsWith(m))
-    const k = kpis(mTxs)
-    const net = k.totalIncome - k.totalExpenses
-    return { m, inc: k.totalIncome, exp: k.totalExpenses, sav: k.totalSavings, net }
+    const mTxs     = cur12.filter(tx => tx.date?.startsWith(m))
+    const k         = kpis(mTxs)
+    const lifestyle = sum(mTxs.filter(isLifestyleOutflow))
+    const loans     = sum(mTxs.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
+    return { m, inc: k.totalIncome, lifestyle, loans, sav: k.totalSavings, net: k.totalIncome - k.totalExpenses }
   })
 
-  // ── Top vendors by spend ───────────────────────────────────────────────────
+  // ── Top vendors by lifestyle spend (loans excluded — shown separately) ───────
+  const lifestyleTxs = cur12.filter(isLifestyleOutflow)
   const vendorSpend: Record<string, number> = {}
-  for (const tx of c.expenses) {
+  for (const tx of lifestyleTxs) {
     const v = (tx.vendor ?? tx.concept ?? 'Desconocido').trim()
     if (!v || v.toLowerCase() === 'na') continue
     vendorSpend[v] = (vendorSpend[v] ?? 0) + Number(tx.amount ?? 0)
@@ -240,9 +245,9 @@ export default async function OraclePage() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 25)
 
-  // ── Top categories ──────────────────────────────────────────────────────────
+  // ── Top categories (lifestyle only) ────────────────────────────────────────
   const catSpend: Record<string, number> = {}
-  for (const tx of c.expenses) {
+  for (const tx of lifestyleTxs) {
     const cat = resolveDisplayCat(tx, vMap, cMap)
     catSpend[cat] = (catSpend[cat] ?? 0) + Number(tx.amount ?? 0)
   }
@@ -274,7 +279,8 @@ export default async function OraclePage() {
   const invested   = latestSnap ? Number(latestSnap.invested_crc ?? 0) : 0
   const activosInvertibles = liquid + invested
   const fireProgress  = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
-  const runway        = avgMonthlyExpenses > 0 ? liquid / avgMonthlyExpenses : null
+  // Runway based on lifestyle only — how long liquid assets cover real living costs
+  const runway        = avgLifestyleExpenses > 0 ? liquid / avgLifestyleExpenses : null
 
   // Monthly simulation — matches progreso's forecast formula exactly
   const avgMonthlySavings = c.totalSavings / 12
@@ -363,9 +369,9 @@ export default async function OraclePage() {
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
   }
 
-  // Per top-category: monthly totals → average, median, max
+  // Per top-category: monthly totals → average, median, max (lifestyle only)
   const catMonthlyTotals: Record<string, number[]> = {}
-  for (const tx of c.expenses) {
+  for (const tx of lifestyleTxs) {
     const cat = resolveDisplayCat(tx, vMap, cMap)
     const m   = (tx.date ?? '').slice(0, 7)
     if (!m) continue
@@ -397,14 +403,15 @@ PERÍODO PRINCIPAL: Últimos 12 meses completos (${monthLabel})
 Ingresos activos:        ${fmtCRC(c.totalActiveIncome)} (${usd(c.totalActiveIncome)})  → ${fmtCRC(c.totalActiveIncome / 12)}/mes
 Ingresos pasivos:        ${fmtCRC(c.totalPassiveIncome)} (${usd(c.totalPassiveIncome)}) → ${fmtCRC(c.totalPassiveIncome / 12)}/mes
 Total ingresos:          ${fmtCRC(c.totalIncome)} → ${fmtCRC(c.totalIncome / 12)}/mes
-Gastos totales:          ${fmtCRC(c.totalExpenses)} → ${fmtCRC(avgMonthlyExpenses)}/mes
-  — Supervivencia:       ${fmtCRC(c.survivalExp)} (${c.totalExpenses > 0 ? ((c.survivalExp / c.totalExpenses) * 100).toFixed(0) : 0}%)
-  — Discrecional:        ${fmtCRC(c.totalExpenses - c.survivalExp)} (${c.totalExpenses > 0 ? (((c.totalExpenses - c.survivalExp) / c.totalExpenses) * 100).toFixed(0) : 0}%)
+Gastos de vida:          ${fmtCRC(lifestyleCur)} → ${fmtCRC(avgLifestyleExpenses)}/mes  [consumo real, excluye préstamos e inversiones]
+  — Supervivencia:       ${fmtCRC(survivalLifestyle)} (${lifestyleCur > 0 ? ((survivalLifestyle / lifestyleCur) * 100).toFixed(0) : 0}% del gasto de vida)
+  — Discrecional:        ${fmtCRC(lifestyleCur - survivalLifestyle)} (${lifestyleCur > 0 ? (((lifestyleCur - survivalLifestyle) / lifestyleCur) * 100).toFixed(0) : 0}% del gasto de vida)
+Cuotas / préstamos:      ${fmtCRC(loanPaymentsCur)} → ${fmtCRC(loanPaymentsCur / 12)}/mes  [amortización de capital — NO es gasto de consumo]
 Ahorro / Inversión:      ${fmtCRC(c.totalSavings)} → ${fmtCRC(c.totalSavings / 12)}/mes
 Tasa de ahorro:          ${savingsRate.toFixed(1)}%
-Margen neto:             ${netMargin.toFixed(1)}%
+Margen neto:             ${netMargin.toFixed(1)}%  [% del ingreso no destinado a gasto de vida]
 Cobertura pasiva:        ${passiveCoverage.toFixed(1)}%
-Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses` : 'n/d'}
+Runway líquido:          ${runway !== null ? `${runway.toFixed(1)} meses de gasto de vida` : 'n/d'}
 
 ══════════════════════════════════════════════════════════
  AÑO CONTRA AÑO (12m actual vs 12m anterior)
@@ -417,15 +424,16 @@ Ahorro/Inversión:      ${fmtCRC(c.totalSavings)} vs ${fmtCRC(p.totalSavings)}  
 ══════════════════════════════════════════════════════════
  DESGLOSE MENSUAL (últimos 12 meses completos)
 ══════════════════════════════════════════════════════════
-Mes        Ingreso          Gasto            Ahorro           Neto
+Nota: "Gasto vida" excluye préstamos e inversiones. "Cuotas" incluye amortizaciones ordinarias y extraordinarias.
+Mes        Ingreso        Gasto vida     Cuotas         Ahorro         Neto flujo
 ${monthlyRows.map(r =>
-  `${r.m}   ${fmtCRC(r.inc).padStart(14)}   ${fmtCRC(r.exp).padStart(14)}   ${fmtCRC(r.sav).padStart(14)}   ${fmtCRC(r.net).padStart(14)}`
+  `${r.m}   ${fmtCRC(r.inc).padStart(13)}   ${fmtCRC(r.lifestyle).padStart(13)}   ${fmtCRC(r.loans).padStart(13)}   ${fmtCRC(r.sav).padStart(13)}   ${fmtCRC(r.net).padStart(13)}`
 ).join('\n')}
 
 ══════════════════════════════════════════════════════════
- TOP CATEGORÍAS DE GASTO (12m)
+ TOP CATEGORÍAS DE GASTO DE VIDA (12m, excluye préstamos e inversiones)
 ══════════════════════════════════════════════════════════
-${topCats.map(([n, v]) => `${n.padEnd(28)} ${fmtCRC(v).padStart(14)}  (${c.totalExpenses > 0 ? ((v / c.totalExpenses) * 100).toFixed(0) : 0}%)`).join('\n')}
+${topCats.map(([n, v]) => `${n.padEnd(28)} ${fmtCRC(v).padStart(14)}  (${lifestyleCur > 0 ? ((v / lifestyleCur) * 100).toFixed(0) : 0}%)`).join('\n')}
 
 ══════════════════════════════════════════════════════════
  TOP 25 COMERCIOS / VENDEDORES POR GASTO (12m)
