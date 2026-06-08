@@ -237,23 +237,6 @@ export default async function ProgresoPage() {
 
   const lifestyleTxs = (txs ?? []).filter(isLifestyleTx)
 
-  // liCurTotal / liPrvTotal computed after outlier removal (see below)
-
-  // Monthly trend — last 12 complete months
-  type LiMonth = { label: string; necesario: number; personal: number }
-  const liMonthly: LiMonth[] = []
-  for (let i = 11; i >= 0; i--) {
-    const d   = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
-    const ym  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const lbl = `${MONTH_LABELS_LIFESTYLE[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`
-    const monthTxs = lifestyleTxs.filter(tx => tx.date?.slice(0, 7) === ym)
-    liMonthly.push({
-      label:     lbl,
-      necesario: monthTxs.filter(tx => tx.expense_group === 'necesario').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
-      personal:  monthTxs.filter(tx => tx.expense_group === 'personal').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
-    })
-  }
-
   // Top categories — two-pass outlier removal for fair YoY comparison:
   // Pass 1 (tx-level): remove single large one-off purchases per category (el sofá)
   // Pass 2 (monthly): remove atypical months from cleaned totals (el viaje)
@@ -315,6 +298,21 @@ export default async function ProgresoPage() {
   const liPrvTotal = cleanedLifestyleTxs
     .filter(tx => tx.date && tx.date >= liPrvStartStr && tx.date < liCurStartStr)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+  // Monthly trend — last 12 complete months (uses cleaned txs, outliers excluded)
+  type LiMonth = { label: string; necesario: number; personal: number }
+  const liMonthly: LiMonth[] = []
+  for (let i = 11; i >= 0; i--) {
+    const d   = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
+    const ym  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const lbl = `${MONTH_LABELS_LIFESTYLE[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`
+    const monthTxs = cleanedLifestyleTxs.filter(tx => tx.date?.slice(0, 7) === ym)
+    liMonthly.push({
+      label:     lbl,
+      necesario: monthTxs.filter(tx => tx.expense_group === 'necesario').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
+      personal:  monthTxs.filter(tx => tx.expense_group === 'personal').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
+    })
+  }
 
   // Pass 2: build monthly totals from cleaned transactions
   const rootMonthly: Record<string, Record<string, number>> = {}

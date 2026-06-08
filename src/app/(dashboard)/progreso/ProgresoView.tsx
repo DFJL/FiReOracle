@@ -1071,6 +1071,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const isWarn      = delta !== null && delta >= 0 && delta < 0.05
   const signalColor = isBad ? '#f43f5e' : isWarn ? '#f59e0b' : '#a3e635'
   const signalLabel = isBad ? 'Alerta' : isWarn ? 'Atención' : 'Óptimo'
+  const hasOutliers = topCats.some(c => c.outlierCount > 0)
   const maxBar      = Math.max(...monthly.map(m => m.necesario + m.personal), 1)
 
   return (
@@ -1092,13 +1093,17 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
 
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Crecimiento</p>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">
+            Crecimiento{hasOutliers ? ' ~' : ''}
+          </p>
           <p className={`text-2xl font-black leading-none ${
             totalPct === null ? 'text-zinc-500' : totalPct > inflationRate ? 'text-rose-400' : 'text-[#a3e635]'
           }`}>
             {totalPct !== null ? `${totalPct >= 0 ? '+' : ''}${(totalPct * 100).toFixed(1)}%` : '—'}
           </p>
-          <p className="text-[9px] text-zinc-600 mt-0.5">{fmtCRC(curTotal / 12)}/mes</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            {fmtCRC(curTotal / 12)}/mes{hasOutliers ? ' · excl. outliers' : ''}
+          </p>
         </div>
         <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Inflación ref.</p>
