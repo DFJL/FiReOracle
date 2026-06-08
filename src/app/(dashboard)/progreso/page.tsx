@@ -281,14 +281,13 @@ export default async function ProgresoPage() {
 
   function outlierFence(values: number[]): number {
     const nonZero = values.filter(v => v > 0)
-    // Not enough data for IQR → fall back to global P95
+    // Sparse category (e.g. one-off purchase) → use global P95 as reference
     if (nonZero.length < 4) return globalP95
     const s  = [...nonZero].sort((a, b) => a - b)
     const q1 = s[Math.floor(s.length * 0.25)]
     const q3 = s[Math.floor(s.length * 0.75)]
-    const catFence = Math.max(q3 + 1.5 * (q3 - q1), q3 * 2.5)
-    // Use the stricter fence so either global or category-level outliers get caught
-    return Math.min(catFence, globalP95)
+    // 4×Q3 floor avoids over-flagging dense categories (food, fuel) where Q3 is low
+    return Math.max(q3 + 1.5 * (q3 - q1), q3 * 4)
   }
 
   // Pass 1: compute per-root transaction fence across all 24m
