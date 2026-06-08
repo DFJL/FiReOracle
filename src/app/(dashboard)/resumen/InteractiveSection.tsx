@@ -724,39 +724,47 @@ function EditTransactionModal({ tx, categories, onClose }: {
           )}
 
           {/* Loan linkage — only for LOAN_PAYMENT transactions */}
-          {isLoanPaymentTx && loansReady && (
+          {isLoanPaymentTx && (
             <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
                 Vincular a préstamo
               </p>
-              {initialLoanLink ? (
-                <p className="text-[9px] text-amber-400/80">
-                  ⚡ Vinculado a &quot;{initialLoanLink.loanName}&quot; — saldo después: {initialLoanLink.balanceAfter.toLocaleString('es-CR')}
+              {!loansReady ? (
+                <p className="text-[9px] text-zinc-600 flex items-center gap-1.5">
+                  <Loader2 size={10} className="animate-spin" /> Cargando préstamos…
                 </p>
               ) : (
-                <p className="text-[9px] text-zinc-600">Sin vínculo al módulo de préstamos</p>
-              )}
-              {!initialLoanLink && loans.length === 0 && (
-                <p className="text-[9px] text-zinc-600">No hay préstamos activos registrados</p>
-              )}
-              {!initialLoanLink && loans.length > 0 && (
                 <>
-                  <select value={selectedLoanId} onChange={e => setSelectedLoanId(e.target.value)} className={inputCls}>
-                    <option value="">— No vincular —</option>
-                    {loans.map(l => (
-                      <option key={l.id} value={l.id}>
-                        {l.name} ({l.lender}) — {l.currencyCode === 'USD' ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `₡${Math.round(l.currentBalance).toLocaleString('es-CR')}`}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedLoanId && (
-                    <div>
-                      <label className={lbl}>Saldo del préstamo después de este pago</label>
-                      <input type="number" min="0" step="any" value={loanBalAfter}
-                        onChange={e => setLoanBalAfter(e.target.value)}
-                        placeholder="Saldo según estado de cuenta"
-                        className={inputCls} />
-                    </div>
+                  {initialLoanLink ? (
+                    <p className="text-[9px] text-amber-400/80">
+                      ⚡ Vinculado a &quot;{initialLoanLink.loanName}&quot; — saldo después: {initialLoanLink.balanceAfter.toLocaleString('es-CR')}
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-zinc-600">Sin vínculo al módulo de préstamos</p>
+                  )}
+                  {!initialLoanLink && loans.length === 0 && (
+                    <p className="text-[9px] text-zinc-600">No hay préstamos activos registrados</p>
+                  )}
+                  {!initialLoanLink && loans.length > 0 && (
+                    <>
+                      <select value={selectedLoanId} onChange={e => setSelectedLoanId(e.target.value)} className={inputCls}>
+                        <option value="">— No vincular —</option>
+                        {loans.map(l => (
+                          <option key={l.id} value={l.id}>
+                            {l.name} ({l.lender}) — {l.currencyCode === 'USD' ? `$${l.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : `₡${Math.round(l.currentBalance).toLocaleString('es-CR')}`}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedLoanId && (
+                        <div>
+                          <label className={lbl}>Saldo del préstamo después de este pago</label>
+                          <input type="number" min="0" step="any" value={loanBalAfter}
+                            onChange={e => setLoanBalAfter(e.target.value)}
+                            placeholder="Saldo según estado de cuenta"
+                            className={inputCls} />
+                        </div>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -1155,9 +1163,16 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
   const tableTitle = selSub || selCat || (tab === 'gastos' ? egresosSubtabLabel[egresosSubtab] : 'Ingresos')
 
   // KPIs for current period
+  // For multi-month periods, exclude the current partial month to match progreso's
+  // "last 12 complete months" logic (avoids denominator inflation from partial-month income).
   const kpis = useMemo(() => {
+    const kpiEnd = period !== 'mtd'
+      ? (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })()
+      : null
+    const kpiTxs = kpiEnd ? periodTxs.filter(tx => tx.date && tx.date < kpiEnd) : periodTxs
+
     let income = 0, passiveIncome = 0, rendimientos = 0, expenses = 0, invested = 0
-    for (const tx of periodTxs) {
+    for (const tx of kpiTxs) {
       const amt = Number(tx.amount ?? 0)
       if (isLiquidIncome(tx)) {
         income += amt
@@ -1174,7 +1189,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
     const netMargin      = income > 0 ? (net / income) * 100 : 0
     const coverage       = expenses > 0 ? (passiveIncome / expenses) * 100 : 0
     return { income, passiveIncome, rendimientos, expenses, invested, net, savingsRate, netMargin, coverage }
-  }, [periodTxs])
+  }, [periodTxs, period])
 
   const now = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
