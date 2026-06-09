@@ -145,12 +145,14 @@ export default async function ProgresoPage() {
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
+  // Survival expenses: trust the user's is_survival_expense tags directly.
+  // For FS ratio the mortgage IS a real monthly obligation — it stays in the denominator.
+  // Only exclude pure savings deposits (SAVINGS_* in objetivos_financieros that aren't loan payments).
   const avgMonthlySurvivalExpenses = recent
     .filter(tx =>
       tx.is_survival_expense &&
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      tx.expense_group !== 'objetivos_financieros' &&
-      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+      !(tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor, tx.concept, tx.category_code))
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
