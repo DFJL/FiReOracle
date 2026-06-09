@@ -41,7 +41,7 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   const { data: prevTx } = await admin
     .from('transactions')
-    .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income')
+    .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income, is_settlement')
     .eq('user_id', userId)
     .gte('date', twelveMonthsBackStr)
     .lt('date', thisMonthStart)
@@ -51,7 +51,7 @@ export async function AlertsServer({ userId }: { userId: string }) {
   let passiveTotal = 0
   for (const tx of prevTx ?? []) {
     if (!tx.date) continue
-    if (tx.movement_type === 'income' && tx.is_passive_income) {
+    if (tx.movement_type === 'income' && tx.is_passive_income && !tx.is_settlement) {
       passiveTotal += Number(tx.amount)
     } else if (
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
