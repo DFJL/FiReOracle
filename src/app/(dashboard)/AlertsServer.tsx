@@ -33,39 +33,37 @@ export async function AlertsServer({ userId }: { userId: string }) {
     .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
 
-  // Last 3 months average expense (exclude current month)
+  // 12-month window (excludes current partial month) — matches progreso's exact window
   const now = new Date()
   const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-  const threeMonthsBack = new Date(now.getFullYear(), now.getMonth() - 3, 1)
-  const threeMonthsBackStr = `${threeMonthsBack.getFullYear()}-${String(threeMonthsBack.getMonth() + 1).padStart(2, '0')}-01`
+  const twelveMonthsBack = new Date(now.getFullYear(), now.getMonth() - 12, 1)
+  const twelveMonthsBackStr = `${twelveMonthsBack.getFullYear()}-${String(twelveMonthsBack.getMonth() + 1).padStart(2, '0')}-01`
 
   const { data: prevTx } = await admin
     .from('transactions')
     .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income')
     .eq('user_id', userId)
-    .gte('date', threeMonthsBackStr)
+    .gte('date', twelveMonthsBackStr)
     .lt('date', thisMonthStart)
 
-  // Lifestyle expenses only — same filter as Oracle's isLifestyleOutflow and progreso's avgMonthlyExpenses
-  const monthlyTotals: Record<string, number> = {}
-  const monthlyPassive: Record<string, number> = {}
+  // Lifestyle expenses only — same filter as progreso's avgMonthlyExpenses
+  let lifestyleTotal = 0
+  let passiveTotal = 0
   for (const tx of prevTx ?? []) {
     if (!tx.date) continue
-    const ym = tx.date.slice(0, 7)
     if (tx.movement_type === 'income' && tx.is_passive_income) {
-      monthlyPassive[ym] = (monthlyPassive[ym] ?? 0) + Number(tx.amount)
+      passiveTotal += Number(tx.amount)
     } else if (
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
       tx.expense_group !== 'objetivos_financieros' &&
       !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
     ) {
-      monthlyTotals[ym] = (monthlyTotals[ym] ?? 0) + Number(tx.amount)
+      lifestyleTotal += Number(tx.amount)
     }
   }
-  const totalMonths = Object.keys(monthlyTotals).length || 1
-  const avgMonthlyExpense = Object.values(monthlyTotals).reduce((s, v) => s + v, 0) / totalMonths
-  // Net burn = lifestyle expenses minus recurring passive income (crypto, airdrops, dividends, rent)
-  const avgMonthlyPassive = Object.values(monthlyPassive).reduce((s, v) => s + v, 0) / totalMonths
+  // Always divide by 12 — same fixed denominator as progreso
+  const avgMonthlyExpense = lifestyleTotal / 12
+  const avgMonthlyPassive = passiveTotal / 12
   const avgNetBurn = Math.max(avgMonthlyExpense - avgMonthlyPassive, 0)
 
   // This month's spending by category_code (for budget alerts)
