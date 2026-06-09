@@ -243,7 +243,7 @@ export function ProgresoView({
             ? `quema neta ${fmt(Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 0))}/mes`
             : `${fmt(avgMonthlyExpenses)}/mes`}
           color={runwayColor}
-          tooltip={`Saldo líquido ÷ quema neta mensual. Quema neta = gasto de vida (${fmt(avgMonthlyExpenses)}/mes) menos ingresos pasivos recurrentes (${fmt(passiveMonthlyAvg)}/mes). Incluye crypto, dividendos, alquileres, airdrops.`}
+          tooltip={`Saldo líquido ÷ quema neta. Obligaciones = gasto de vida + cuotas de préstamos. Quema neta = obligaciones menos ingresos pasivos recurrentes (crypto, dividendos, alquileres, airdrops).`}
         />
 
         <KpiCard

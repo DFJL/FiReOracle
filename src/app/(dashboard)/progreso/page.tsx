@@ -188,19 +188,26 @@ export default async function ProgresoPage() {
 
   // FIRE metrics
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  // Fall back to actual 12m average if user hasn't configured a target
+  // targetExp stays lifestyle-only: in retirement the loans are paid off
   const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
-  // Net burn = lifestyle expenses minus monthly passive income (crypto, dividends, rent, airdrops)
-  // Runway denominator uses net burn so recurring passive income is properly credited
+  // Runway uses total monthly obligations: lifestyle + loan payments
+  // Loans are real cash requirements regardless of equity-building nature
+  const avgMonthlyLoanPayments = recent
+    .filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+  const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments
   const avgMonthlyPassiveIncome = passiveIncome12m / 12
-  const avgNetBurn = Math.max(avgMonthlyExpenses - avgMonthlyPassiveIncome, 0)
+  const avgNetBurn = Math.max(avgMonthlyObligations - avgMonthlyPassiveIncome, 0)
   const runway = avgNetBurn > 0
     ? liquidBalance / avgNetBurn
-    : avgMonthlyExpenses > 0 ? liquidBalance / avgMonthlyExpenses : 0
+    : avgMonthlyObligations > 0 ? liquidBalance / avgMonthlyObligations : 0
 
   const leanFireNumber = avgMonthlySurvivalExpenses > 0
     ? (avgMonthlySurvivalExpenses * 12) / swr

@@ -48,21 +48,22 @@ export async function AlertsServer({ userId }: { userId: string }) {
 
   // Lifestyle expenses only — same filter as progreso's avgMonthlyExpenses
   let lifestyleTotal = 0
+  let loanTotal = 0
   let passiveTotal = 0
   for (const tx of prevTx ?? []) {
     if (!tx.date) continue
     if (tx.movement_type === 'income' && tx.is_passive_income && !tx.is_settlement) {
       passiveTotal += Number(tx.amount)
-    } else if (
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      tx.expense_group !== 'objetivos_financieros' &&
-      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-    ) {
-      lifestyleTotal += Number(tx.amount)
+    } else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') {
+      if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) {
+        loanTotal += Number(tx.amount)
+      } else if (tx.expense_group !== 'objetivos_financieros') {
+        lifestyleTotal += Number(tx.amount)
+      }
     }
   }
-  // Always divide by 12 — same fixed denominator as progreso
-  const avgMonthlyExpense = lifestyleTotal / 12
+  // Obligations = lifestyle + loans (both are real monthly cash requirements)
+  const avgMonthlyExpense = (lifestyleTotal + loanTotal) / 12
   const avgMonthlyPassive = passiveTotal / 12
   const avgNetBurn = Math.max(avgMonthlyExpense - avgMonthlyPassive, 0)
 
