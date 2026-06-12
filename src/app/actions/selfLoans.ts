@@ -122,7 +122,7 @@ export async function createSelfLoan(data: SelfLoanFormData) {
 
 export async function recordSelfLoanPayment(
   loanId: string,
-  payment: { amount: number; date: string; notes?: string },
+  payment: { amount: number; date: string; notes?: string; from_envelope_id?: string },
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -194,6 +194,19 @@ export async function recordSelfLoanPayment(
       notes: `Abono autopréstamo${payment.notes ? ` · ${payment.notes}` : ''}`,
     })
     if (movErr) return { error: movErr.message }
+  }
+
+  // Debit the payment source envelope (the money has to come from somewhere)
+  if (payment.from_envelope_id) {
+    const { error: debitErr } = await admin.from('envelope_movements').insert({
+      user_id: user.id,
+      envelope_id: payment.from_envelope_id,
+      date: payment.date,
+      amount: -Math.abs(payment.amount),
+      movement_type: 'traslado_out',
+      notes: `Abono autopréstamo${payment.notes ? ` · ${payment.notes}` : ''}`,
+    })
+    if (debitErr) return { error: debitErr.message }
   }
 
   revalidatePath('/liquidez')

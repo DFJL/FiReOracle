@@ -264,10 +264,13 @@ function EditSourcesPanel({
   )
 }
 
-function PaymentPanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void }) {
-  const [amount, setAmount] = useState('')
-  const [date, setDate]     = useState(new Date().toISOString().slice(0, 10))
-  const [notes, setNotes]   = useState('')
+function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes: Envelope[]; onClose: () => void }) {
+  const [amount, setAmount]           = useState('')
+  const [date, setDate]               = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes]             = useState('')
+  const [fromEnvelopeId, setFromEnvelopeId] = useState(
+    loan.source_envelope_id ?? (loan.envelope_split?.[0]?.envelope_id ?? '')
+  )
   const [error, setError]   = useState('')
   const [isPending, start]  = useTransition()
 
@@ -301,7 +304,12 @@ function PaymentPanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void }
     if (amt > remaining + 0.01) { setError(`Máximo ₡${Math.round(remaining).toLocaleString('es-CR')}`); return }
     setError('')
     start(async () => {
-      const res = await recordSelfLoanPayment(loan.id, { amount: amt, date, notes })
+      const res = await recordSelfLoanPayment(loan.id, {
+        amount: amt,
+        date,
+        notes,
+        from_envelope_id: fromEnvelopeId || undefined,
+      })
       if (res?.error) { setError(res.error); return }
       onClose()
     })
@@ -324,6 +332,20 @@ function PaymentPanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void }
           ))}
         </div>
       )}
+
+      <div>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Sobre a debitar</p>
+        <select
+          value={fromEnvelopeId}
+          onChange={e => setFromEnvelopeId(e.target.value)}
+          className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
+        >
+          <option value="">— sin debitar sobre —</option>
+          {envelopes.map(e => (
+            <option key={e.id} value={e.id}>{e.name}</option>
+          ))}
+        </select>
+      </div>
 
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -487,7 +509,7 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                         Editar fuentes
                       </button>
                     </div>
-                    <PaymentPanel loan={loan} onClose={closePanel} />
+                    <PaymentPanel loan={loan} envelopes={envelopes} onClose={closePanel} />
                   </div>
                 )}
 

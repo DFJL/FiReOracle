@@ -30,7 +30,7 @@ export default async function MovimientosPage({
       .order('connected_at'),
     admin
       .from('savings_envelopes')
-      .select('id, name, color')
+      .select('id, name, color, parent_envelope_id')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
