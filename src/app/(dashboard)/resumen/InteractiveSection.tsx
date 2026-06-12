@@ -521,13 +521,15 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
   const [envelopesReady, setEnvelopesReady] = useState(false)
 
   useEffect(() => {
-    Promise.all([getLeafEnvelopes(), getTransactionEnvelopeLink(tx.id)]).then(([envs, link]) => {
-      setEnvelopes(envs)
-      const cur = link?.envelope_id ?? ''
-      setEnvelopeId(cur)
-      setInitialEnvelopeId(cur)
-      setEnvelopesReady(true)
-    })
+    Promise.all([getLeafEnvelopes(), getTransactionEnvelopeLink(tx.id)])
+      .then(([envs, link]) => {
+        setEnvelopes(envs)
+        const cur = link?.envelope_id ?? ''
+        setEnvelopeId(cur)
+        setInitialEnvelopeId(cur)
+      })
+      .catch(() => {})
+      .finally(() => setEnvelopesReady(true))
   }, [tx.id])
 
   // Loan linkage (for LOAN_PAYMENT transactions)
@@ -705,8 +707,13 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
             </div>
           )}
 
-          {/* Envelope section — all transaction types */}
-          {envelopesReady && envelopes.length > 0 && (
+          {/* Envelope section — all transaction types; always rendered once ready */}
+          {!envelopesReady ? (
+            <div>
+              <label className={lbl}>Sobre <span className="text-zinc-700 normal-case tracking-normal">(cargando…)</span></label>
+              <div className={`${inputCls} opacity-40`}>…</div>
+            </div>
+          ) : envelopes.length > 0 && (
             <div>
               <label className={lbl}>
                 {tx.movement_type === 'income' ? 'Crédito a sobre' : 'Débito de sobre'}
