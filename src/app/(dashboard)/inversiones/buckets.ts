@@ -12,3 +12,14 @@ export interface BucketData {
   balance: number
   valorizationNet: number
 }
+
+export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida'
+
+export interface BucketTx {
+  id: string
+  date: string
+  amount: number
+  concept: string | null
+  vendor: string | null
+  tx_type: BucketTxType
+}

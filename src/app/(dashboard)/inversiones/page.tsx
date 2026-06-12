@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import type { BucketData } from './buckets'
+import type { BucketData, BucketTx, BucketTxType } from './buckets'
 import { PortfolioView } from './PortfolioView'
 import { PortfolioHistory } from './PortfolioHistory'
 import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
@@ -40,7 +40,7 @@ export default async function InversionesPage() {
       .order('sort_order'),
     admin
       .from('transactions')
-      .select('vendor, concept, category_code, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
+      .select('id, vendor, concept, category_code, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
       .eq('user_id', user.id)
       .not('amount', 'is', null),
     admin
@@ -190,6 +190,56 @@ export default async function InversionesPage() {
   const totalInvested = buckets.reduce((s, b) => s + b.balance, 0)
   const totalPatrimony = totalInvested + liquidBalance
 
+  // ── Per-bucket transaction history ──────────────────────────────────────────
+  const bucketTransactions: Record<string, BucketTx[]> = {}
+  for (const def of bucketRows ?? []) {
+    if (def.bucket_type !== 'snapshot_based') bucketTransactions[def.id] = []
+  }
+  for (const tx of txs ?? []) {
+    if (!tx.date) continue
+    const amt = Number(tx.amount ?? 0)
+    for (const def of (bucketRows ?? []).filter(b => b.bucket_type !== 'snapshot_based')) {
+      let txType: BucketTxType | null = null
+      if (def.bucket_type === 'concept_based' && def.concept_map) {
+        const cm = def.concept_map as unknown as ConceptMap
+        const c = (tx.concept ?? '').toLowerCase()
+        const ci = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
+        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
+          if (tx.movement_type === 'income' && tx.is_settlement)                 txType = 'liquidacion'
+          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) txType = 'deposit'
+          else if (tx.is_passive_income && tx.movement_type === 'income')        txType = 'rendimiento'
+          else if (tx.is_passive_income)                                         txType = 'valorizacion'
+        } else if (ci(cm.depositConcepts))       txType = 'deposit'
+        else if (ci(cm.rendimientosConcepts))    txType = 'rendimiento'
+        else if (ci(cm.valorizacionConcepts))    txType = 'valorizacion'
+        else if (ci(cm.liquidacionConcepts))     txType = 'liquidacion'
+      } else if (def.bucket_type === 'vendor_based') {
+        const v = (tx.vendor ?? '').toLowerCase().trim()
+        const vs = (def.vendors ?? []).map((s: string) => s.toLowerCase())
+        if (vs.includes(v)) {
+          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement)  txType = 'deposit'
+          else if (tx.is_settlement)                                               txType = 'liquidacion'
+          else if (tx.is_passive_income && tx.movement_type === 'income')         txType = 'rendimiento'
+          else if (tx.is_passive_income)                                           txType = 'valorizacion'
+          else if (tx.movement_type === 'expense' && !tx.is_passive_income)       txType = 'perdida'
+        }
+      }
+      if (txType) {
+        bucketTransactions[def.id].push({
+          id: tx.id,
+          date: tx.date,
+          amount: amt,
+          concept: tx.concept ?? null,
+          vendor: tx.vendor ?? null,
+          tx_type: txType,
+        })
+      }
+    }
+  }
+  for (const id of Object.keys(bucketTransactions)) {
+    bucketTransactions[id].sort((a, b) => b.date.localeCompare(a.date))
+  }
+
   // ── Historical monthly computation ──────────────────────────────────────────
 
   // Step 1: per-bucket monthly deltas (vendor/concept only; snapshot has no history)
@@ -297,6 +347,7 @@ export default async function InversionesPage() {
         totalPatrimony={totalPatrimony}
         exchangeRate={exchangeRate}
         liquidBreakdown={liquidBreakdown}
+        bucketTransactions={bucketTransactions}
       />
       <PortfolioHistory
         points={historyPoints}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { BucketData } from './buckets'
+import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
 function fmtCRC(n: number) {
@@ -91,16 +91,26 @@ function CurrencyToggle({ currency, onChange }: { currency: 'CRC' | 'USD'; onCha
 type EnvEntry = { id: string; name: string; color: string | null; balance: number }
 type CustodioGroup = { name: string; total: number; envelopes: EnvEntry[] }
 
-export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown }: {
+const TX_META: Record<string, { label: string; color: string; sign: 1 | -1 }> = {
+  deposit:      { label: 'Depósito',    color: '#60a5fa', sign:  1 },
+  liquidacion:  { label: 'Liquidación', color: '#f87171', sign: -1 },
+  rendimiento:  { label: 'Rendimiento', color: '#a3e635', sign:  1 },
+  valorizacion: { label: 'Valoriz.',    color: '#86efac', sign:  1 },
+  perdida:      { label: 'Pérdida',     color: '#fb923c', sign: -1 },
+}
+
+export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions }: {
   buckets: BucketData[]
   liquidBalance: number
   totalInvested: number
   totalPatrimony: number
   exchangeRate: ExchangeRate
   liquidBreakdown: CustodioGroup[]
+  bucketTransactions: Record<string, BucketTx[]>
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
+  const [showAllTx, setShowAllTx] = useState(false)
 
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate
@@ -120,7 +130,10 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
 
   const allItems = [...buckets, liquidItem]
 
-  function toggle(key: string) { setSelected(prev => prev === key ? null : key) }
+  function toggle(key: string) {
+    setSelected(prev => prev === key ? null : key)
+    setShowAllTx(false)
+  }
 
   const donutSlices = allItems.map(b => ({
     pct:   totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0,
@@ -304,6 +317,46 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                   <span className="text-[9px] text-zinc-700">(balance − neto desplegado) / neto desplegado</span>
                 </div>
               )}
+
+              {/* Transaction history */}
+              {(() => {
+                const txList = bucketTransactions[sel.key] ?? []
+                if (txList.length === 0) return null
+                const visible = showAllTx ? txList : txList.slice(0, 15)
+                return (
+                  <div className="space-y-1 pt-1">
+                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] px-1 pb-1">
+                      Historial · {txList.length} movimientos
+                    </p>
+                    {visible.map(tx => {
+                      const meta = TX_META[tx.tx_type]
+                      const label = tx.concept || tx.vendor || '—'
+                      return (
+                        <div key={tx.id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors">
+                          <span className="text-[9px] tabular-nums text-zinc-600 w-14 shrink-0">
+                            {tx.date.slice(0, 7).replace('-', '/')}
+                          </span>
+                          <span className="flex-1 text-[10px] text-zinc-300 truncate min-w-0">{label}</span>
+                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full shrink-0"
+                            style={{ background: `${meta.color}22`, color: meta.color }}>
+                            {meta.label}
+                          </span>
+                          <span className="text-[10px] font-black tabular-nums shrink-0"
+                            style={{ color: meta.sign === -1 ? '#f87171' : '#d4d4d8' }}>
+                            {meta.sign === -1 ? '-' : '+'}{fmt(tx.amount)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                    {txList.length > 15 && !showAllTx && (
+                      <button onClick={() => setShowAllTx(true)}
+                        className="text-[9px] text-zinc-600 hover:text-zinc-400 px-3 py-1 transition-colors w-full text-left">
+                        Ver {txList.length - 15} más...
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
             </>
           )}
         </div>
