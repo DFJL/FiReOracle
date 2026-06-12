@@ -10,6 +10,7 @@ export type RecentIncome = {
   concept: string | null
   vendor: string | null
   is_settlement: boolean
+  is_passive_income: boolean
 }
 
 export type CustodioInfo = {
@@ -20,6 +21,7 @@ export type CustodioInfo = {
 
 export type FlowData = {
   incomeRegular: number
+  incomePassive: number
   incomeSettlement: number
   expenseTotal: number
   cashWithdrawals: number
@@ -49,10 +51,10 @@ export default async function AuditoriaPage() {
       .select('envelope_id, amount, movement_type')
       .eq('user_id', user.id),
     admin.from('transactions')
-      .select('movement_type, is_settlement, amount')
+      .select('movement_type, is_settlement, is_passive_income, amount')
       .eq('user_id', user.id),
     admin.from('transactions')
-      .select('id, date, amount, concept, vendor, is_settlement')
+      .select('id, date, amount, concept, vendor, is_settlement, is_passive_income')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .order('date', { ascending: false })
@@ -95,13 +97,17 @@ export default async function AuditoriaPage() {
   const custodios = [...custodioMap.values()]
 
   // Ledger totals
-  let incomeRegular = 0, incomeSettlement = 0, expenseTotal = 0, cashWithdrawals = 0
+  // Passive income (farming, NAV appreciation, airdrops) is excluded from ledgerNet —
+  // these are investment returns that may not be liquid cash, so they should not trigger
+  // a reconciliation gap. They are shown separately as informational only.
+  let incomeRegular = 0, incomePassive = 0, incomeSettlement = 0, expenseTotal = 0, cashWithdrawals = 0
   for (const tx of txRows ?? []) {
     const amt = Number(tx.amount ?? 0)
-    if (tx.movement_type === 'income' && !tx.is_settlement)     incomeRegular    += amt
-    else if (tx.movement_type === 'income' && tx.is_settlement) incomeSettlement += amt
-    else if (tx.movement_type === 'expense')                     expenseTotal     += amt
-    else if (tx.movement_type === 'cash_withdrawal')             cashWithdrawals  += amt
+    if (tx.movement_type === 'income' && tx.is_passive_income)  incomePassive    += amt
+    else if (tx.movement_type === 'income' && !tx.is_settlement) incomeRegular   += amt
+    else if (tx.movement_type === 'income' && tx.is_settlement)  incomeSettlement += amt
+    else if (tx.movement_type === 'expense')                      expenseTotal    += amt
+    else if (tx.movement_type === 'cash_withdrawal')              cashWithdrawals += amt
   }
 
   // envelopeTotal: principal only, all active envelopes except root-level parents
@@ -115,6 +121,7 @@ export default async function AuditoriaPage() {
 
   const flowData: FlowData = {
     incomeRegular,
+    incomePassive,
     incomeSettlement,
     expenseTotal,
     cashWithdrawals,
@@ -129,6 +136,7 @@ export default async function AuditoriaPage() {
         concept: r.concept,
         vendor: r.vendor,
         is_settlement: r.is_settlement ?? false,
+        is_passive_income: r.is_passive_income ?? false,
       })),
   }
 

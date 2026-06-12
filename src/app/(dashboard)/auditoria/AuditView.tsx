@@ -189,7 +189,7 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
   const [adjError, setAdjError]       = useState('')
   const [adjPending, startAdj]        = useTransition()
 
-  const { incomeRegular, incomeSettlement, expenseTotal, cashWithdrawals, ledgerNet, envelopeTotal, recentIncome } = flowData
+  const { incomeRegular, incomePassive, incomeSettlement, expenseTotal, cashWithdrawals, ledgerNet, envelopeTotal, recentIncome } = flowData
   const gap = envelopeTotal - ledgerNet
   const gapAbs = Math.abs(gap)
 
@@ -214,12 +214,13 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
         {[
           { label: 'Ingresos regulares', sub: 'salario, alquiler, otros', val: incomeRegular, color: 'text-[#a3e635]' },
           { label: 'Liquidaciones e inversiones', sub: 'crypto, fondos, OPCs', val: incomeSettlement, color: 'text-[#a3e635]' },
+          ...(incomePassive > 0 ? [{ label: 'Ingresos pasivos', sub: 'farming, rendimientos, airdrops — excluidos del cuadre', val: incomePassive, color: 'text-zinc-500' }] : []),
           { label: 'Gastos registrados', sub: 'todos los egresos', val: -expenseTotal, color: 'text-rose-400' },
           ...(cashWithdrawals > 0 ? [{ label: 'Retiros de efectivo', sub: '', val: -cashWithdrawals, color: 'text-rose-400' }] : []),
         ].map(row => (
           <div key={row.label} className="flex items-center justify-between py-2 border-b border-white/[0.03] last:border-0">
             <div>
-              <p className="text-xs text-zinc-400">{row.label}</p>
+              <p className={`text-xs ${row.color === 'text-zinc-500' ? 'text-zinc-500' : 'text-zinc-400'}`}>{row.label}</p>
               {row.sub && <p className="text-[9px] text-zinc-600">{row.sub}</p>}
             </div>
             <span className={`text-sm font-black tabular-nums ml-4 ${row.color}`}>{fmtCRC(row.val)}</span>
@@ -329,6 +330,9 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
                   <span className="text-[9px] text-zinc-600">{tx.date}</span>
                   {tx.is_settlement && (
                     <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">Liquidación</span>
+                  )}
+                  {tx.is_passive_income && (
+                    <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-700/50 text-zinc-500">Pasivo</span>
                   )}
                 </div>
               </div>
