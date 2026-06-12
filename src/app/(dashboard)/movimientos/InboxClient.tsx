@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   confirmInboxItem, discardInboxItem, insertManualInboxItem,
   reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
+  isCreditCardEmail,
 } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
 import {
@@ -123,6 +124,8 @@ function ItemCard({
     ? Date.now() - new Date(item.email_date).getTime() > 30 * 86400000
     : false
 
+  const isCreditCard = ext?.is_credit_card ?? isCreditCardEmail(item.raw_subject, item.raw_snippet)
+
   function handleCategoryChange(code: string) {
     const cat = categories.find(c => c.code === code)
     setSuggestion(null)
@@ -207,6 +210,14 @@ function ItemCard({
             <p className="text-xs font-semibold text-zinc-200 truncate">
               {item.raw_subject ?? '(sin asunto)'}
             </p>
+            {isCreditCard && (
+              <span
+                title="Tarjeta de crédito — el efectivo saldrá cuando canceles el estado de cuenta"
+                className="text-[9px] font-bold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.5 rounded-full"
+              >
+                TC
+              </span>
+            )}
             {item.status === 'confirmed' && (
               <span className="text-[9px] font-bold text-[#a3e635] bg-[#a3e635]/10 px-1.5 py-0.5 rounded-full">✓ confirmado</span>
             )}
@@ -243,6 +254,17 @@ function ItemCard({
             <p className="text-[10px] text-zinc-600 italic bg-white/[0.02] rounded-lg p-2">
               {item.raw_snippet}
             </p>
+          )}
+
+          {/* Credit card notice */}
+          {isCreditCard && item.status === 'pending' && (
+            <div className="flex items-start gap-2 bg-amber-400/5 border border-amber-400/20 rounded-lg px-3 py-2">
+              <span className="text-amber-400 text-[10px] font-bold shrink-0 mt-0.5">TC</span>
+              <p className="text-[10px] text-amber-400/80 leading-relaxed">
+                Tarjeta de crédito — confirmá el gasto ahora para registrarlo en la fecha de compra.
+                El efectivo saldrá de tu cuenta cuando canceles el estado de cuenta (registralo como liquidación de TC en esa fecha).
+              </p>
+            </div>
           )}
 
           {/* Editable fields */}

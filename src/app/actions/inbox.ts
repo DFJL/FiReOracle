@@ -15,9 +15,10 @@ REGLAS:
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta
 - movement_type: "expense" para débitos/compras/pagos, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
+- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
 FORMATO — respondé SOLO con JSON:
-{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
+{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"category_code":"FOOD_MARKET","confidence":"high"}
 Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 export type ExtractedFields = {
@@ -27,6 +28,7 @@ export type ExtractedFields = {
   concept: string
   date: string
   movement_type: 'expense' | 'income' | 'cash_withdrawal'
+  is_credit_card?: boolean
   category_code?: string
   expense_group?: string
   is_passive_income?: boolean
@@ -42,6 +44,13 @@ export type InboxItem = {
   extracted: ExtractedFields | null
   status: 'pending' | 'confirmed' | 'discarded'
   created_at: string
+}
+
+// Heuristic fallback when AI hasn't set is_credit_card
+export function isCreditCardEmail(subject: string | null, snippet: string | null): boolean {
+  const text = `${subject ?? ''} ${snippet ?? ''}`.toLowerCase()
+  if (/tarjeta\s+de\s+d[eé]bito|\btd\b|d[eé]bito\s+en\s+cuenta|sinpe|retiro\s+atm/.test(text)) return false
+  return /tarjeta\s+de\s+cr[eé]dito|\btc\b|cr[eé]dito.*visa|visa.*cr[eé]dito|mastercard.*cr[eé]dito|cr[eé]dito.*mastercard|cargo\s+a\s+tc|compra\s+tc/.test(text)
 }
 
 export async function getInboxItems(): Promise<InboxItem[]> {
