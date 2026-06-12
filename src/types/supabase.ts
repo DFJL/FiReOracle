@@ -1530,6 +1530,7 @@ export type Database = {
         Row: {
           amount: number
           created_at: string
+          from_envelope_id: string | null
           id: string
           linked_transaction_id: string | null
           notes: string | null
@@ -1539,6 +1540,7 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string
+          from_envelope_id?: string | null
           id?: string
           linked_transaction_id?: string | null
           notes?: string | null
@@ -1548,6 +1550,7 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string
+          from_envelope_id?: string | null
           id?: string
           linked_transaction_id?: string | null
           notes?: string | null
@@ -1555,6 +1558,13 @@ export type Database = {
           self_loan_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "self_loan_payments_from_envelope_id_fkey"
+            columns: ["from_envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "self_loan_payments_linked_transaction_id_fkey"
             columns: ["linked_transaction_id"]
