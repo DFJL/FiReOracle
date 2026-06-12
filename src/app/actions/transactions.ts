@@ -365,6 +365,7 @@ export type EnvelopeLinkInput = {
   txAmount: number
   txConcept: string | null
   txVendor: string | null
+  isIncome?: boolean
 }
 
 /**
@@ -438,17 +439,19 @@ export async function updateTransactionWithLinks(
         if (delErr) return delErr.message
 
         if (envelopeId) {
-          const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
-          const debit   = Math.abs(txAmount)
-          if (balance < debit) {
-            const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
-            return `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})`
+          if (!envelopeLink.isIncome) {
+            const balance = await getEnvelopeBalance(admin, user.id, envelopeId)
+            const debit   = Math.abs(txAmount)
+            if (balance < debit) {
+              const fmt = (n: number) => n.toLocaleString('es-CR', { minimumFractionDigits: 2 })
+              return `Saldo insuficiente en sobre (disponible ₡${fmt(balance)}, requerido ₡${fmt(debit)})`
+            }
           }
           const { error: insErr } = await admin.from('envelope_movements').insert({
             user_id:       user.id,
             envelope_id:   envelopeId,
-            movement_type: 'retiro',
-            amount:        -Math.abs(txAmount),
+            movement_type: envelopeLink.isIncome ? 'deposito' : 'retiro',
+            amount:        envelopeLink.isIncome ? Math.abs(txAmount) : -Math.abs(txAmount),
             date:          txDate,
             notes:         `Tx: ${txConcept || txVendor || ''}`.trim(),
             source_tx_id:  id,

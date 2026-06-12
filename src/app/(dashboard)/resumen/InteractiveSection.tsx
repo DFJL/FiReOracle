@@ -611,6 +611,7 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
           txAmount:   amt,
           txConcept:  concept.trim() || null,
           txVendor:   vendor.trim() || null,
+          isIncome:   tx.movement_type === 'income',
         } : undefined,
       )
       if (result?.error) { setError(result.error); return }
@@ -704,11 +705,11 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
             </div>
           )}
 
-          {/* Envelope section — expenses only */}
-          {isExpense && envelopesReady && envelopes.length > 0 && (
+          {/* Envelope section — all transaction types */}
+          {envelopesReady && envelopes.length > 0 && (
             <div>
               <label className={lbl}>
-                Débito de sobre
+                {tx.movement_type === 'income' ? 'Crédito a sobre' : 'Débito de sobre'}
                 <span className="text-zinc-700 normal-case tracking-normal ml-1">(opcional)</span>
               </label>
               <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inputCls}>
