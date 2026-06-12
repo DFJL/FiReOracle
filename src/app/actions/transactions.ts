@@ -543,6 +543,32 @@ export async function getLeafEnvelopes(): Promise<{ id: string; name: string; cu
     .map(e => ({ id: e.id, name: e.name, custodio: (e as { custodio?: string | null }).custodio ?? null }))
 }
 
+export async function getAllEnvelopes(): Promise<{ id: string; name: string; custodio: string | null; displayName: string }[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('savings_envelopes')
+    .select('id, name, custodio, parent_envelope_id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .order('sort_order')
+
+  if (!data) return []
+  const nameById = new Map(data.map(e => [e.id, e.name as string]))
+  return data.map(e => {
+    const parentName = e.parent_envelope_id ? (nameById.get(e.parent_envelope_id) ?? null) : null
+    return {
+      id: e.id,
+      name: e.name,
+      custodio: (e as { custodio?: string | null }).custodio ?? null,
+      displayName: parentName ? `${parentName} › ${e.name}` : e.name,
+    }
+  })
+}
+
 export async function getTransactionEnvelopeLink(txId: string): Promise<{ envelope_id: string; movement_id: string } | null> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

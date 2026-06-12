@@ -8,7 +8,7 @@ import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import {
   deleteTransaction, type UpdateTransactionInput,
-  getLeafEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
+  getAllEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
   updateTransactionWithLinks,
 } from '@/app/actions/transactions'
 import {
@@ -514,14 +514,14 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
   const [isPending, startTransition]  = useTransition()
 
   // Envelope linkage
-  type Envelope = { id: string; name: string; custodio: string | null }
+  type Envelope = { id: string; name: string; custodio: string | null; displayName: string }
   const [envelopes, setEnvelopes]           = useState<Envelope[]>([])
   const [envelopeId, setEnvelopeId]         = useState('')
   const [initialEnvelopeId, setInitialEnvelopeId] = useState('')
   const [envelopesReady, setEnvelopesReady] = useState(false)
 
   useEffect(() => {
-    Promise.all([getLeafEnvelopes(), getTransactionEnvelopeLink(tx.id)])
+    Promise.all([getAllEnvelopes(), getTransactionEnvelopeLink(tx.id)])
       .then(([envs, link]) => {
         setEnvelopes(envs)
         const cur = link?.envelope_id ?? ''
@@ -722,15 +722,13 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
               <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inputCls}>
                 <option value="">Sin afectación de sobre</option>
                 {envelopes.map(e => (
-                  <option key={e.id} value={e.id}>
-                    {e.custodio ? `${e.custodio} › ${e.name}` : e.name}
-                  </option>
+                  <option key={e.id} value={e.id}>{e.displayName}</option>
                 ))}
               </select>
               {/* Status indicators */}
               {!envChanged && initialEnvelopeId && initialEnv && (
                 <p className="text-[9px] text-amber-400/80 mt-1">
-                  ⚡ Actualmente debita &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                  ⚡ Actualmente debita &quot;{initialEnv.displayName}&quot;
                 </p>
               )}
               {!envChanged && !initialEnvelopeId && (
@@ -738,17 +736,17 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
               )}
               {envAdded && currentEnv && (
                 <p className="text-[9px] text-[#a3e635]/80 mt-1">
-                  + Agrega retiro de &quot;{currentEnv.custodio ? `${currentEnv.custodio} › ` : ''}{currentEnv.name}&quot;
+                  + Agrega retiro de &quot;{currentEnv.displayName}&quot;
                 </p>
               )}
               {envRemoved && initialEnv && (
                 <p className="text-[9px] text-rose-400/80 mt-1">
-                  − Elimina retiro de &quot;{initialEnv.custodio ? `${initialEnv.custodio} › ` : ''}{initialEnv.name}&quot;
+                  − Elimina retiro de &quot;{initialEnv.displayName}&quot;
                 </p>
               )}
               {envSwapped && currentEnv && initialEnv && (
                 <p className="text-[9px] text-cyan-400/80 mt-1">
-                  ↔ Cambia de &quot;{initialEnv.name}&quot; a &quot;{currentEnv.name}&quot;
+                  ↔ Cambia de &quot;{initialEnv.displayName}&quot; a &quot;{currentEnv.displayName}&quot;
                 </p>
               )}
             </div>
