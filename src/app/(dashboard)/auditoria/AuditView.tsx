@@ -214,7 +214,7 @@ function FlowSection({ flowData }: { flowData: FlowData }) {
         {[
           { label: 'Ingresos regulares', sub: 'salario, alquiler, otros', val: incomeRegular, color: 'text-[#a3e635]' },
           { label: 'Liquidaciones e inversiones', sub: 'crypto, fondos, OPCs', val: incomeSettlement, color: 'text-[#a3e635]' },
-          ...(incomePassive > 0 ? [{ label: 'Ingresos pasivos', sub: 'farming, rendimientos, airdrops — excluidos del cuadre', val: incomePassive, color: 'text-zinc-500' }] : []),
+          ...(incomePassive > 0 ? [{ label: 'Ingresos pasivos', sub: 'farming, rendimientos, airdrops', val: incomePassive, color: 'text-zinc-500' }] : []),
           { label: 'Gastos registrados', sub: 'todos los egresos', val: -expenseTotal, color: 'text-rose-400' },
           ...(cashWithdrawals > 0 ? [{ label: 'Retiros de efectivo', sub: '', val: -cashWithdrawals, color: 'text-rose-400' }] : []),
         ].map(row => (

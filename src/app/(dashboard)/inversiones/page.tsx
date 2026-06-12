@@ -205,10 +205,12 @@ export default async function InversionesPage() {
         const c = (tx.concept ?? '').toLowerCase()
         const ci = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
         if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
-          if (tx.movement_type === 'income' && tx.is_settlement)                 txType = 'liquidacion'
+          if (tx.movement_type === 'income' && tx.is_settlement)                      txType = 'liquidacion'
           else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) txType = 'deposit'
-          else if (tx.is_passive_income && tx.movement_type === 'income')        txType = 'rendimiento'
-          else if (tx.is_passive_income)                                         txType = 'valorizacion'
+          else if (tx.is_passive_income && tx.movement_type === 'income')             txType = 'rendimiento'
+          else if (tx.is_passive_income)                                              txType = 'valorizacion'
+          else if (tx.movement_type === 'income')                                     txType = 'rendimiento'
+          else if (tx.movement_type === 'expense')                                    txType = 'perdida'
         } else if (ci(cm.depositConcepts))       txType = 'deposit'
         else if (ci(cm.rendimientosConcepts))    txType = 'rendimiento'
         else if (ci(cm.valorizacionConcepts))    txType = 'valorizacion'

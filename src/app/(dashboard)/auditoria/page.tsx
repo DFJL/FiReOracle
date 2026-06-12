@@ -125,7 +125,7 @@ export default async function AuditoriaPage() {
     incomeSettlement,
     expenseTotal,
     cashWithdrawals,
-    ledgerNet: incomeRegular + incomeSettlement - expenseTotal - cashWithdrawals,
+    ledgerNet: incomeRegular + incomePassive + incomeSettlement - expenseTotal - cashWithdrawals,
     envelopeTotal,
     recentIncome: (recentIncomeRaw ?? [])
       .filter(r => r.date !== null)
