@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation'
 import {
   confirmInboxItem, discardInboxItem, insertManualInboxItem,
   reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
-  isCreditCardEmail,
 } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
+import { isCreditCardEmail } from '@/lib/inbox-utils'
 import {
   CheckCircle, XCircle, Mail, Clock, ChevronDown, ChevronUp, Inbox,
   ClipboardPaste, Loader2, RefreshCw, Plus, Trash2,

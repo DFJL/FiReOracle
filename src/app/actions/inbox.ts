@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import Anthropic from '@anthropic-ai/sdk'
+export { isCreditCardEmail } from '@/lib/inbox-utils'
 
 const RE_EXTRACT_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
 Analizás el asunto y cuerpo del correo y extraés los datos de la transacción.
@@ -46,12 +47,6 @@ export type InboxItem = {
   created_at: string
 }
 
-// Heuristic fallback when AI hasn't set is_credit_card
-export function isCreditCardEmail(subject: string | null, snippet: string | null): boolean {
-  const text = `${subject ?? ''} ${snippet ?? ''}`.toLowerCase()
-  if (/tarjeta\s+de\s+d[eé]bito|\btd\b|d[eé]bito\s+en\s+cuenta|sinpe|retiro\s+atm/.test(text)) return false
-  return /tarjeta\s+de\s+cr[eé]dito|\btc\b|cr[eé]dito.*visa|visa.*cr[eé]dito|mastercard.*cr[eé]dito|cr[eé]dito.*mastercard|cargo\s+a\s+tc|compra\s+tc/.test(text)
-}
 
 export async function getInboxItems(): Promise<InboxItem[]> {
   const supabase = await createClient()
