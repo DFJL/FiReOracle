@@ -87,6 +87,7 @@ export function TransactionEntryFAB({
   const [expenseGroup, setExpenseGroup] = useState('personal')
   // flags
   const [isPassive, setIsPassive]     = useState(false)
+  const [passiveKind, setPassiveKind] = useState<'cobrado' | 'valorizacion'>('cobrado')
   const [isSettlement, setIsSettlement] = useState(false)
   const [isSurvival, setIsSurvival]   = useState(false)
   // envelopes
@@ -321,6 +322,7 @@ export function TransactionEntryFAB({
           vendor, concept,
           category_code: categoryCode || undefined,
           is_passive_income: isPassive,
+          is_valorizacion: isPassive && passiveKind === 'valorizacion',
           is_settlement: isSettlement,
           investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
@@ -389,6 +391,7 @@ export function TransactionEntryFAB({
           vendor, concept,
           category_code: categoryCode || undefined,
           is_passive_income: isPassive,
+          is_valorizacion: isPassive && passiveKind === 'valorizacion',
           is_settlement: isSettlement,
           investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
@@ -723,14 +726,43 @@ export function TransactionEntryFAB({
                     </div>
                   )}
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => setIsPassive(v => !v)}
-                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
-                        isPassive
-                          ? 'bg-cyan-400/10 text-cyan-400 border-cyan-400/20'
-                          : 'bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400'
-                      }`}>
-                      Ingreso pasivo
-                    </button>
+                    {!isPassive ? (
+                      <button type="button" onClick={() => setIsPassive(true)}
+                        className="text-[10px] px-2 py-0.5 rounded-full border transition-all bg-white/[0.03] text-zinc-600 border-white/[0.06] hover:text-zinc-400">
+                        Ingreso pasivo
+                      </button>
+                    ) : (
+                      <div className="w-full rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-2.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-cyan-400 font-medium tracking-wide uppercase">¿Cómo recibiste este rendimiento?</span>
+                          <button type="button"
+                            onClick={() => { setIsPassive(false); setPassiveKind('cobrado') }}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-300 leading-none">✕</button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button type="button"
+                            onClick={() => setPassiveKind('cobrado')}
+                            className={`text-[10px] px-2 py-1.5 rounded-md border text-left transition-all ${
+                              passiveKind === 'cobrado'
+                                ? 'bg-cyan-400/15 text-cyan-300 border-cyan-400/40'
+                                : 'bg-white/[0.03] text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                            }`}>
+                            <div className="font-medium">Cobrado</div>
+                            <div className="text-[9px] opacity-70 mt-0.5">llegó a tu cuenta/billetera</div>
+                          </button>
+                          <button type="button"
+                            onClick={() => setPassiveKind('valorizacion')}
+                            className={`text-[10px] px-2 py-1.5 rounded-md border text-left transition-all ${
+                              passiveKind === 'valorizacion'
+                                ? 'bg-purple-400/15 text-purple-300 border-purple-400/40'
+                                : 'bg-white/[0.03] text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                            }`}>
+                            <div className="font-medium">Valorización</div>
+                            <div className="text-[9px] opacity-70 mt-0.5">se reinvirtió en el fondo</div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <button type="button" onClick={() => setIsSettlement(v => !v)}
                       className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
                         isSettlement
