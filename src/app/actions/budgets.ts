@@ -32,12 +32,33 @@ export async function upsertBudget(
   autoTxCategoryCode: string | null = null,
   autoTxAccountId: string | null = null,
   effectiveFrom = '2000-01-01',
-): Promise<void> {
+): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No autorizado')
 
   const admin = createAdminClient()
+
+  // Validate: income + savings on the same envelope both create deposito → double credit
+  if (envelopeId && (budgetType === 'income' || budgetType === 'savings')) {
+    const { data: conflict } = await admin
+      .from('budgets')
+      .select('category, budget_type')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .eq('envelope_id', envelopeId)
+      .in('budget_type', ['income', 'savings'])
+      .neq('category', category)  // exclude self when editing
+      .limit(1)
+      .maybeSingle()
+
+    if (conflict) {
+      const conflictType = conflict.budget_type === 'income' ? 'ingreso' : 'ahorro'
+      return {
+        error: `El sobre ya está ligado a la línea "${conflict.category}" (${conflictType}). Ligar también esta línea (${budgetType === 'income' ? 'ingreso' : 'ahorro'}) crearía un doble depósito. Desligá el sobre de una de las dos.`,
+      }
+    }
+  }
 
   // Only deactivate rows that are effective from this month onwards;
   // earlier rows stay active so past months keep their historical values.
@@ -63,6 +84,7 @@ export async function upsertBudget(
   })
 
   revalidatePath('/presupuesto')
+  return { error: null }
 }
 
 export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: number, month: number): Promise<void> {

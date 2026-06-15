@@ -106,6 +106,9 @@ export function PresupuestoClient({
   const [newAutoTxCat, setNewAutoTxCat]           = useState<string>('')
   const [newAutoTxAccount, setNewAutoTxAccount]   = useState<string>('')
 
+  const [editError, setEditError]         = useState<string | null>(null)
+  const [addError, setAddError]           = useState<string | null>(null)
+
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
   const [sortKey, setSortKey]             = useState<SortKey | null>(null)
   const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
@@ -275,13 +278,15 @@ export function PresupuestoClient({
     const q1   = parseFloat(editQ1) || 0
     const q2   = parseFloat(editQ2) || 0
     const name = editName.trim() || b.category
+    setEditError(null)
     startTransition(async () => {
-      await upsertBudget(name, q1, q2, b.budget_type,
+      const { error } = await upsertBudget(name, q1, q2, b.budget_type,
         editEnvelopeId || null,
         editAutoTxCat || null,
         editAutoTxAccount || null,
         effectiveFrom,
       )
+      if (error) { setEditError(error); return }
       if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
     })
@@ -291,13 +296,15 @@ export function PresupuestoClient({
     const q1 = parseFloat(newQ1) || 0
     const q2 = parseFloat(newQ2) || 0
     if (!newName.trim()) return
+    setAddError(null)
     startTransition(async () => {
-      await upsertBudget(newName.trim(), q1, q2, newType,
+      const { error } = await upsertBudget(newName.trim(), q1, q2, newType,
         newEnvelopeId || null,
         newAutoTxCat || null,
         newAutoTxAccount || null,
         effectiveFrom,
       )
+      if (error) { setAddError(error); return }
       setShowAdd(false); setNewName(''); setNewQ1(''); setNewQ2('')
       setNewType('expense'); setNewEnvelopeId(''); setNewAutoTxCat(''); setNewAutoTxAccount('')
     })
@@ -534,6 +541,7 @@ export function PresupuestoClient({
       : (q2Plan && effQ2 > q2Plan ? 'text-rose-400' : 'text-emerald-400')
 
     if (isEdit) return (
+      <>
       <tr key={b.id} className="bg-zinc-800/50 border-b border-zinc-700">
         <td className="px-2 py-2 space-y-1.5">
           <input value={editName} onChange={e => setEditName(e.target.value)} list="budget-cat-list"
@@ -569,6 +577,16 @@ export function PresupuestoClient({
           </div>
         </td>
       </tr>
+      {editError && (
+        <tr>
+          <td colSpan={12} className="px-3 pb-2">
+            <p className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-1.5 leading-snug">
+              ⚠ {editError}
+            </p>
+          </td>
+        </tr>
+      )}
+      </>
     )
 
     return (
@@ -881,6 +899,11 @@ export function PresupuestoClient({
           <p className="text-[10px] text-zinc-600">
             Si el nombre coincide con un grupo de categoría (ej. "Supermercado", "Mariam") el Real y el Q1/Q2 Avg se calculan automáticamente.
           </p>
+          {addError && (
+            <p className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-1.5 leading-snug">
+              ⚠ {addError}
+            </p>
+          )}
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={!newName.trim() || isPending}
               className="flex-1 py-2 rounded-lg bg-[#a3e635] text-black text-sm font-bold disabled:opacity-40 transition-opacity">
