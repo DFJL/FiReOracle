@@ -604,6 +604,7 @@ export type Database = {
           id: string
           movement_type: string
           notes: string | null
+          self_loan_payment_id: string | null
           source_tx_id: string | null
           user_id: string
         }
@@ -615,6 +616,7 @@ export type Database = {
           id?: string
           movement_type: string
           notes?: string | null
+          self_loan_payment_id?: string | null
           source_tx_id?: string | null
           user_id: string
         }
@@ -626,6 +628,7 @@ export type Database = {
           id?: string
           movement_type?: string
           notes?: string | null
+          self_loan_payment_id?: string | null
           source_tx_id?: string | null
           user_id?: string
         }

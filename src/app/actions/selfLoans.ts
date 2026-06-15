@@ -191,7 +191,7 @@ async function applyPaymentMovements(
           date: payment.date, amount: Math.abs(portion),
           movement_type: 'traslado_in', notes,
           self_loan_payment_id: paymentId,
-        } as never)
+        })
         if (error) return { error: error.message }
       }
     }
@@ -201,7 +201,7 @@ async function applyPaymentMovements(
       date: payment.date, amount: Math.abs(payment.amount),
       movement_type: 'traslado_in', notes,
       self_loan_payment_id: paymentId,
-    } as never)
+    })
     if (error) return { error: error.message }
   }
 
@@ -211,7 +211,7 @@ async function applyPaymentMovements(
       date: payment.date, amount: -Math.abs(payment.amount),
       movement_type: 'traslado_out', notes,
       self_loan_payment_id: paymentId,
-    } as never)
+    })
     if (error) return { error: error.message }
   }
 
