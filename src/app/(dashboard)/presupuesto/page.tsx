@@ -89,7 +89,7 @@ export default async function PresupuestoPage({
       .order('name'),
 
     admin.from('savings_envelopes')
-      .select('id, name, parent_envelope_id')
+      .select('id, name, parent_envelope_id, custodio')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),

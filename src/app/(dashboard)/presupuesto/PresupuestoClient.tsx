@@ -15,6 +15,7 @@ export type Envelope = {
   id: string
   name: string
   parent_envelope_id: string | null
+  custodio: string | null
 }
 
 export type TxCategory = {
@@ -51,6 +52,103 @@ function barCls(pct: number) {
 
 type SortKey = 'name' | 'q1_plan' | 'q2_plan' | 'actual' | 'history' | 'pct'
 type BudgetType = 'expense' | 'savings' | 'income'
+
+// ── TransferSummary ───────────────────────────────────────────────────────────
+
+function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes: Envelope[] }) {
+  const [q, setQ] = useState<1 | 2>(1)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const envelopeMap = new Map(envelopes.map(e => [e.id, e]))
+
+  // Only savings lines with an envelope → these need real bank transfers
+  const lines = budgets
+    .filter(b => b.budget_type === 'savings' && b.envelope_id)
+    .map(b => {
+      const env = envelopeMap.get(b.envelope_id!)
+      return {
+        ...b,
+        envName:  env?.name ?? b.envelope_id!,
+        custodio: env?.custodio ?? 'Sin custodio',
+        amount:   Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
+      }
+    })
+    .filter(l => l.amount > 0)
+
+  // Group by custodio
+  const byCustomer = new Map<string, typeof lines>()
+  for (const l of lines) {
+    const arr = byCustomer.get(l.custodio) ?? []
+    arr.push(l)
+    byCustomer.set(l.custodio, arr)
+  }
+  const custodios = [...byCustomer.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  const total = lines.reduce((s, l) => s + l.amount, 0)
+
+  function toggle(c: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(c) ? next.delete(c) : next.add(c)
+      return next
+    })
+  }
+
+  if (lines.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.16em]">Plan de transferencias</span>
+          <span className="text-[9px] text-zinc-600">·</span>
+          <span className="text-xs font-bold text-white">₡{Math.round(total).toLocaleString('es-CR')}</span>
+        </div>
+        <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5">
+          {([1, 2] as const).map(qi => (
+            <button key={qi} onClick={() => setQ(qi)}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${q === qi ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              Q{qi}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="divide-y divide-white/[0.04]">
+        {custodios.map(([custodio, items]) => {
+          const subtotal = items.reduce((s, l) => s + l.amount, 0)
+          const isOpen   = expanded.has(custodio)
+          return (
+            <div key={custodio}>
+              <button onClick={() => toggle(custodio)}
+                className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors text-left">
+                <div className="flex items-center gap-2">
+                  {isOpen
+                    ? <ChevronUp size={12} className="text-zinc-500 shrink-0" />
+                    : <ChevronDown size={12} className="text-zinc-500 shrink-0" />}
+                  <span className="text-xs font-semibold text-zinc-200">{custodio}</span>
+                  <span className="text-[10px] text-zinc-600">· {items.length} sobre{items.length !== 1 ? 's' : ''}</span>
+                </div>
+                <span className="text-xs font-bold text-[#a3e635]">₡{Math.round(subtotal).toLocaleString('es-CR')}</span>
+              </button>
+              {isOpen && (
+                <div className="px-4 pb-2.5 space-y-1">
+                  {items.map(l => (
+                    <div key={l.id} className="flex items-center justify-between pl-4">
+                      <span className="text-[11px] text-zinc-400">{l.category}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] text-zinc-600">{l.envName}</span>
+                        <span className="text-[11px] font-medium text-zinc-300">₡{Math.round(l.amount).toLocaleString('es-CR')}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 interface Props {
   budgets:      Budget[]
@@ -93,6 +191,7 @@ export function PresupuestoClient({
   const [editName, setEditName]                   = useState('')
   const [editQ1, setEditQ1]                       = useState('')
   const [editQ2, setEditQ2]                       = useState('')
+  const [editBudgetType, setEditBudgetType]       = useState<BudgetType>('expense')
   const [editEnvelopeId, setEditEnvelopeId]       = useState<string>('')
   const [editAutoTxCat, setEditAutoTxCat]         = useState<string>('')
   const [editAutoTxAccount, setEditAutoTxAccount] = useState<string>('')
@@ -266,9 +365,11 @@ export function PresupuestoClient({
   function startEdit(b: Budget) {
     setEditId(b.id); setEditName(b.category)
     setEditQ1(String(b.q1_amount ?? '')); setEditQ2(String(b.q2_amount ?? ''))
+    setEditBudgetType(b.budget_type as BudgetType)
     setEditEnvelopeId(b.envelope_id ?? '')
     setEditAutoTxCat(b.auto_tx_category_code ?? '')
     setEditAutoTxAccount(b.auto_tx_account_id ?? '')
+    setEditError(null)
   }
 
   // First day of the currently viewed month — edits apply from here forward
@@ -280,7 +381,7 @@ export function PresupuestoClient({
     const name = editName.trim() || b.category
     setEditError(null)
     startTransition(async () => {
-      const { error } = await upsertBudget(name, q1, q2, b.budget_type,
+      const { error } = await upsertBudget(name, q1, q2, editBudgetType,
         editEnvelopeId || null,
         editAutoTxCat || null,
         editAutoTxAccount || null,
@@ -546,6 +647,12 @@ export function PresupuestoClient({
         <td className="px-2 py-2 space-y-1.5">
           <input value={editName} onChange={e => setEditName(e.target.value)} list="budget-cat-list"
             className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635]" />
+          <select value={editBudgetType} onChange={e => setEditBudgetType(e.target.value as BudgetType)}
+            className="w-full bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#a3e635]">
+            <option value="expense">Gasto (débita sobre)</option>
+            <option value="savings">Ahorro/Inversión (acredita sobre)</option>
+            <option value="income">Ingreso esperado</option>
+          </select>
           <EnvelopeSelect value={editEnvelopeId} onChange={setEditEnvelopeId} />
           <TxCategorySelect value={editAutoTxCat} onChange={setEditAutoTxCat} />
           {editAutoTxCat && <AccountSelect value={editAutoTxAccount} onChange={setEditAutoTxAccount} />}
@@ -756,6 +863,9 @@ export function PresupuestoClient({
           ) : <p className="text-sm font-black text-zinc-600">—</p>}
         </div>
       </div>
+
+      {/* Transfer summary */}
+      <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} />
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
