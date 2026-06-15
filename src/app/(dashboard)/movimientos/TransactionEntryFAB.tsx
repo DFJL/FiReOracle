@@ -104,7 +104,8 @@ export function TransactionEntryFAB({
   const [isPending, startTransition]  = useTransition()
 
   // ── Side-effect fields (optional, gasto/ingreso only) ───────────────────────
-  const [debitEnvelopeId, setDebitEnvelope] = useState('')
+  const [debitEnvelopeId, setDebitEnvelope]   = useState('')
+  const [creditEnvelopeId, setCreditEnvelope] = useState('')
   const [loanMode, setLoanMode]             = useState<'' | 'new' | string>('')  // '' | 'new' | <loanId>
   const [newLoanDesc, setNewLoanDesc]       = useState('')
   const [mortgageLoanId, setMortgageLoanId] = useState('')
@@ -326,7 +327,7 @@ export function TransactionEntryFAB({
           is_settlement: isSettlement,
           investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
-          debit_envelope_id: debitEnvelopeId || undefined,
+          credit_envelope_id: creditEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
@@ -395,7 +396,7 @@ export function TransactionEntryFAB({
           is_settlement: isSettlement,
           investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
           notes: notes || undefined,
-          debit_envelope_id: debitEnvelopeId || undefined,
+          credit_envelope_id: creditEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
@@ -811,15 +812,28 @@ export function TransactionEntryFAB({
               {(type === 'gasto' || type === 'ingreso') && (
                 <div className="space-y-2 rounded-xl bg-white/[0.03] border border-white/[0.06] p-3">
                   <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.16em]">Opcionales</p>
-                  <div>
-                    <label className={lbl}>Débito de sobre</label>
-                    <select value={debitEnvelopeId} onChange={e => setDebitEnvelope(e.target.value)} className={inputCls}>
-                      <option value="">— ninguno —</option>
-                      {leafEnvelopes.map(env => (
-                        <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {type === 'gasto' && (
+                    <div>
+                      <label className={lbl}>Débito de sobre</label>
+                      <select value={debitEnvelopeId} onChange={e => setDebitEnvelope(e.target.value)} className={inputCls}>
+                        <option value="">— ninguno —</option>
+                        {leafEnvelopes.map(env => (
+                          <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {type === 'ingreso' && (
+                    <div>
+                      <label className={lbl}>Crédito a sobre <span className="text-zinc-700 normal-case tracking-normal">(el ingreso llega directo a este sobre)</span></label>
+                      <select value={creditEnvelopeId} onChange={e => setCreditEnvelope(e.target.value)} className={inputCls}>
+                        <option value="">— ninguno —</option>
+                        {leafEnvelopes.map(env => (
+                          <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div>
                     <label className={lbl}>Autopréstamo</label>
                     <select value={loanMode} onChange={e => setLoanMode(e.target.value)} className={inputCls}>

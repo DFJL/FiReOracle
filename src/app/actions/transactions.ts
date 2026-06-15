@@ -65,7 +65,8 @@ type CurrencyFields = {
 
 // Optional side-effects on gasto/ingreso
 type SideEffects = {
-  debit_envelope_id?: string    // retiro from this envelope
+  debit_envelope_id?: string    // retiro from this envelope (gasto only)
+  credit_envelope_id?: string   // depósito to this envelope (ingreso only)
   loan_id?: string              // add amount to this existing self_loan
   new_loan_description?: string // create a new self_loan with this description
   mortgage_loan_id?: string     // tag transaction with a mortgage/bank loan (loans table)
@@ -133,7 +134,7 @@ async function getEnvelopeBalance(
 async function applySideEffects(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
-  input: { date: string; amount: number; debit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string; source_tx_id?: string },
+  input: { date: string; amount: number; debit_envelope_id?: string; credit_envelope_id?: string; loan_id?: string; new_loan_description?: string; concept?: string; vendor?: string; notes?: string; source_tx_id?: string },
 ): Promise<string | null> {
   if (input.debit_envelope_id) {
     const balance = await getEnvelopeBalance(admin, userId, input.debit_envelope_id)
@@ -147,6 +148,20 @@ async function applySideEffects(
       envelope_id: input.debit_envelope_id,
       movement_type: 'retiro',
       amount: -Math.abs(input.amount),
+      date: input.date,
+      notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
+      ...(input.source_tx_id ? { source_tx_id: input.source_tx_id } : {}),
+    } as never)
+    if (error) return error.message
+    revalidatePath('/liquidez')
+  }
+
+  if (input.credit_envelope_id) {
+    const { error } = await admin.from('envelope_movements').insert({
+      user_id: userId,
+      envelope_id: input.credit_envelope_id,
+      movement_type: 'deposito',
+      amount: Math.abs(input.amount),
       date: input.date,
       notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
       ...(input.source_tx_id ? { source_tx_id: input.source_tx_id } : {}),
@@ -260,7 +275,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       notes: input.notes?.trim() || null,
     })
     if (error) return { error: error.message }
-    if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
+    if (input.credit_envelope_id || input.loan_id || input.new_loan_description) {
       const sideErr = await applySideEffects(admin, user.id, input)
       if (sideErr) return { error: sideErr }
     }
