@@ -319,6 +319,20 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
     })
   }
 
+  function settle() {
+    setError('')
+    start(async () => {
+      const res = await recordSelfLoanPayment(loan.id, {
+        amount: remaining,
+        date,
+        notes: notes || 'Saldo total cancelado',
+        from_envelope_id: fromEnvelopeId || undefined,
+      })
+      if (res?.error) { setError(res.error); return }
+      onClose()
+    })
+  }
+
   return (
     <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
       <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
@@ -385,13 +399,20 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
 
       {error && <p className="text-xs text-rose-400">{error}</p>}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <button
           onClick={submit}
           disabled={isPending}
           className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50"
         >
           {isPending ? '...' : 'Abonar'}
+        </button>
+        <button
+          onClick={settle}
+          disabled={isPending}
+          className="px-4 py-2 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold disabled:opacity-50 hover:bg-rose-500/30 transition-colors"
+        >
+          {isPending ? '...' : `Saldar · ₡${Math.round(remaining).toLocaleString('es-CR')}`}
         </button>
         <button
           onClick={onClose}
