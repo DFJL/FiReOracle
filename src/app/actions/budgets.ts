@@ -354,3 +354,27 @@ export async function deleteBudget(id: string): Promise<void> {
 
   revalidatePath('/presupuesto')
 }
+
+export async function recordTransferFromSource(
+  fromEnvelopeId: string,
+  amount: number,
+  label: string,
+  date: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: fromEnvelopeId,
+    date,
+    amount: -Math.abs(amount),
+    movement_type: 'traslado_out',
+    notes: `Transferencia plan → ${label}`,
+  })
+  if (error) return { error: error.message }
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
