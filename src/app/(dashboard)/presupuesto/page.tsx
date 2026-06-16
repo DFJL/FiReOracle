@@ -135,16 +135,24 @@ export default async function PresupuestoPage({
       : Number(tx.amount_usd ?? 0) * tcRate
   }
 
-  // Actual Q1 (day 1-15) and Q2 (day 16+) by L1 group
+  // Actual Q1 (day 1-15) and Q2 (day 16+)
+  // Indexed by BOTH group label AND raw category_code so budget rows match
+  // regardless of whether they use auto_tx_category_code or a free-text name.
   const actualQ1: Record<string, number> = {}
   const actualQ2: Record<string, number> = {}
   for (const tx of txRows ?? []) {
     if (tx.expense_group === 'objetivos_financieros') continue
-    const group = getGroupLabel(tx.category_code ?? 'MISC_EXPENSE')
+    const code  = tx.category_code ?? 'MISC_EXPENSE'
+    const group = getGroupLabel(code)
     const crc   = toCRC(tx)
     const day   = tx.day ?? 0
-    if (day <= 15) actualQ1[group] = (actualQ1[group] ?? 0) + crc
-    else           actualQ2[group] = (actualQ2[group] ?? 0) + crc
+    if (day <= 15) {
+      actualQ1[group] = (actualQ1[group] ?? 0) + crc
+      if (code !== group) actualQ1[code] = (actualQ1[code] ?? 0) + crc
+    } else {
+      actualQ2[group] = (actualQ2[group] ?? 0) + crc
+      if (code !== group) actualQ2[code] = (actualQ2[code] ?? 0) + crc
+    }
   }
 
   // Historical avg (last 3 months) per L1 group, split by quincena

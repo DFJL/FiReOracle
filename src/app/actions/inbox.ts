@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { fetchExchangeRate } from '@/lib/exchange-rate'
 import Anthropic from '@anthropic-ai/sdk'
 
 const RE_EXTRACT_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
@@ -146,11 +147,17 @@ export async function confirmInboxItem(
   if (tx.envelope_id) {
     const envMovType = tx.movement_type === 'income' ? 'deposito' : 'retiro'
     const isDebit    = envMovType === 'retiro'
+    // Convert to CRC if the transaction is in a foreign currency
+    let crcAmount = tx.amount
+    if (tx.currency_code && tx.currency_code !== 'CRC') {
+      const rate = await fetchExchangeRate()
+      crcAmount  = tx.amount * rate.sell
+    }
     await admin.from('envelope_movements').insert({
       user_id:       user.id,
       envelope_id:   tx.envelope_id,
       date:          tx.date,
-      amount:        isDebit ? -Math.abs(tx.amount) : Math.abs(tx.amount),
+      amount:        isDebit ? -Math.abs(crcAmount) : Math.abs(crcAmount),
       movement_type: envMovType,
       notes:         tx.concept,
     })

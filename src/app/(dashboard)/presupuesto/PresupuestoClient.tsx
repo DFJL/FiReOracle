@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements, bulkMarkDone } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
@@ -62,16 +62,23 @@ type TransferItem = {
   envId: string
   amount: number
   budgetType: string
+  qDone: boolean   // whether this quincena is already marked done for current month
 }
 
 function CustodioRow({
-  custodio, items, envelopes,
+  custodio, items, envelopes, q, year, month,
 }: {
   custodio: string
   items: TransferItem[]
   envelopes: Envelope[]
+  q: 1 | 2
+  year: number
+  month: number
 }) {
-  const [checked, setChecked] = useState<Set<string>>(() => new Set(items.map(i => i.id)))
+  // Default: savings items already done → start unchecked (already registered)
+  const [checked, setChecked] = useState<Set<string>>(
+    () => new Set(items.filter(i => !i.qDone).map(i => i.id))
+  )
   const [amounts, setAmounts] = useState<Map<string, string>>(
     () => new Map(items.map(i => [i.id, String(Math.round(i.amount))]))
   )
@@ -81,12 +88,14 @@ function CustodioRow({
   const [err, setErr] = useState('')
   const [isPending, start] = useTransition()
 
+  const pendingItems = items.filter(i => !i.qDone)
+
   const allCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (allCheckRef.current) {
-      allCheckRef.current.indeterminate = checked.size > 0 && checked.size < items.length
+      allCheckRef.current.indeterminate = checked.size > 0 && checked.size < pendingItems.length
     }
-  }, [checked.size, items.length])
+  }, [checked.size, pendingItems.length])
 
   function toggleItem(id: string) {
     setChecked(prev => {
@@ -97,43 +106,53 @@ function CustodioRow({
   }
 
   function toggleAll() {
-    setChecked(checked.size === items.length ? new Set() : new Set(items.map(i => i.id)))
+    setChecked(checked.size === pendingItems.length
+      ? new Set()
+      : new Set(pendingItems.map(i => i.id)))
   }
 
   function getAmt(id: string) { return parseFloat(amounts.get(id) ?? '0') || 0 }
   function setAmt(id: string, v: string) { setAmounts(prev => new Map(prev).set(id, v)) }
 
   const checkedItems = items.filter(i => checked.has(i.id))
-  const subtotal = checkedItems.reduce((s, i) => s + getAmt(i.id), 0)
+  const subtotal = [...items.filter(i => i.qDone), ...checkedItems]
+    .reduce((s, i) => s + getAmt(i.id), 0)
 
   function register() {
     if (checkedItems.length === 0) { setErr('Seleccioná al menos una línea'); return }
     setErr('')
 
-    const movements = checkedItems.map(i => ({
-      envelope_id:   i.envId,
-      amount:        getAmt(i.id),
-      movement_type: 'deposito' as const,
-      notes: `Plan transferencias: ${i.category}`,
-    }))
+    const savings  = checkedItems.filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
+    const expenses = checkedItems.filter(i => i.budgetType === 'expense')
 
     start(async () => {
+      // All selected lines: deposito to their envelopes
+      const movements = checkedItems.map(i => ({
+        envelope_id:   i.envId,
+        amount:        getAmt(i.id),
+        movement_type: 'deposito' as const,
+        notes:         `Plan transferencias: ${i.category}`,
+      }))
       const res = await recordBatchEnvelopeMovements(movements, date)
       if (res.error) { setErr(res.error); return }
 
-      if (fromId) {
-        const savingsTotal = checkedItems
-          .filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
-          .reduce((s, i) => s + getAmt(i.id), 0)
-        if (savingsTotal > 0) {
-          const res2 = await recordTransferFromSource(fromId, savingsTotal, custodio, date)
-          if (res2.error) { setErr(res2.error); return }
-        }
+      // Savings: also mark the quincena as done so main table reflects it
+      if (savings.length > 0) {
+        await bulkMarkDone(savings.map(i => i.id), q, year, month)
+      }
+
+      // Optional source debit (traslado_out from Líquido BAC) for savings total
+      if (fromId && savings.length > 0) {
+        const savingsTotal = savings.reduce((s, i) => s + getAmt(i.id), 0)
+        const res2 = await recordTransferFromSource(fromId, savingsTotal, custodio, date)
+        if (res2.error) { setErr(res2.error); return }
       }
 
       setOk(true)
     })
   }
+
+  const isSavings = (i: TransferItem) => i.budgetType === 'savings' || i.budgetType === 'income'
 
   return (
     <>
@@ -141,7 +160,7 @@ function CustodioRow({
       <tr className="bg-white/[0.03] border-t border-white/[0.06]">
         <td className="px-3 py-1.5 w-7">
           <input ref={allCheckRef} type="checkbox"
-            checked={checked.size === items.length && items.length > 0}
+            checked={checked.size > 0 && checked.size === pendingItems.length}
             onChange={toggleAll}
             className="accent-[#a3e635] w-3 h-3 cursor-pointer"
           />
@@ -149,6 +168,11 @@ function CustodioRow({
         <td colSpan={2} className="px-2 py-1.5">
           <span className="text-[10px] font-bold text-zinc-300">{custodio}</span>
           <span className="text-[9px] text-zinc-600 ml-1.5">{items.length} línea{items.length !== 1 ? 's' : ''}</span>
+          {items.some(i => i.qDone) && (
+            <span className="ml-2 text-[9px] text-[#a3e635]/60">
+              {items.filter(i => i.qDone).length} ya hecho{items.filter(i => i.qDone).length !== 1 ? 's' : ''}
+            </span>
+          )}
         </td>
         <td className="px-4 py-1.5 text-right text-[10px] font-bold text-[#a3e635]">
           ₡{Math.round(subtotal).toLocaleString('es-CR')}
@@ -157,26 +181,38 @@ function CustodioRow({
       {/* Line items */}
       {items.map(l => (
         <tr key={l.id}
-          className={`border-t border-white/[0.03] hover:bg-white/[0.02] transition-opacity ${!checked.has(l.id) ? 'opacity-35' : ''}`}
+          className={`border-t border-white/[0.03] transition-opacity ${
+            l.qDone
+              ? 'opacity-30'
+              : checked.has(l.id) ? 'hover:bg-white/[0.02]' : 'opacity-40'
+          }`}
         >
           <td className="px-3 py-1 w-7">
-            <input type="checkbox" checked={checked.has(l.id)} onChange={() => toggleItem(l.id)}
-              className="accent-[#a3e635] w-3 h-3 cursor-pointer" />
+            {l.qDone ? (
+              <span className="text-[10px] text-[#a3e635]">✓</span>
+            ) : (
+              <input type="checkbox" checked={checked.has(l.id)} onChange={() => toggleItem(l.id)}
+                className="accent-[#a3e635] w-3 h-3 cursor-pointer" />
+            )}
           </td>
           <td className="px-2 py-1 text-[11px] text-zinc-400">
-            <span className={`mr-1 text-[9px] ${l.budgetType === 'expense' ? 'text-rose-500/60' : 'text-[#a3e635]/50'}`}>
-              {l.budgetType === 'expense' ? '▾' : '▴'}
+            <span className={`mr-1 text-[9px] ${isSavings(l) ? 'text-[#a3e635]/50' : 'text-rose-500/60'}`}>
+              {isSavings(l) ? '▴' : '▾'}
             </span>
             {l.category}
           </td>
           <td className="px-2 py-1 text-[11px] text-zinc-500">{l.envName}</td>
           <td className="px-4 py-1 text-right">
-            <input
-              type="number"
-              value={amounts.get(l.id) ?? ''}
-              onChange={e => setAmt(l.id, e.target.value)}
-              className="w-24 text-right bg-transparent border border-transparent hover:border-white/[0.08] focus:border-[#a3e635]/40 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 focus:outline-none focus:text-white"
-            />
+            {l.qDone ? (
+              <span className="text-[11px] text-zinc-600">₡{Math.round(l.amount).toLocaleString('es-CR')}</span>
+            ) : (
+              <input
+                type="number"
+                value={amounts.get(l.id) ?? ''}
+                onChange={e => setAmt(l.id, e.target.value)}
+                className="w-24 text-right bg-transparent border border-transparent hover:border-white/[0.08] focus:border-[#a3e635]/40 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 focus:outline-none focus:text-white"
+              />
+            )}
           </td>
         </tr>
       ))}
@@ -184,7 +220,11 @@ function CustodioRow({
       <tr className="border-t border-white/[0.04] bg-white/[0.01]">
         <td colSpan={4} className="px-4 py-2">
           {ok ? (
-            <span className="text-[11px] text-[#a3e635]">✓ Registrado ({checkedItems.length} movimiento{checkedItems.length !== 1 ? 's' : ''})</span>
+            <span className="text-[11px] text-[#a3e635]">
+              ✓ Registrado ({checkedItems.length} movimiento{checkedItems.length !== 1 ? 's' : ''})
+            </span>
+          ) : pendingItems.length === 0 ? (
+            <span className="text-[11px] text-zinc-600">Todas las líneas ya están registradas</span>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <select value={fromId} onChange={e => setFromId(e.target.value)}
@@ -209,7 +249,14 @@ function CustodioRow({
   )
 }
 
-function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes: Envelope[] }) {
+function TransferSummary({
+  budgets, envelopes, year, month,
+}: {
+  budgets: Budget[]
+  envelopes: Envelope[]
+  year: number
+  month: number
+}) {
   const [q, setQ] = useState<1 | 2>(1)
   const [open, setOpen] = useState(false)
 
@@ -219,13 +266,17 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
     .filter(b => (b.budget_type === 'savings' || b.budget_type === 'expense') && b.envelope_id)
     .map(b => {
       const env = envelopeMap.get(b.envelope_id!)
+      const qDone = b.budget_type === 'savings' || b.budget_type === 'income'
+        ? (q === 1 ? b.q1_done : b.q2_done)
+        : false   // expenses: quincena done = spent, not the same as "funded"
       return {
         ...b,
-        envId:    b.envelope_id!,
-        envName:  env?.name ?? b.envelope_id!,
-        custodio: env?.custodio ?? 'Sin custodio',
-        amount:   Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
+        envId:      b.envelope_id!,
+        envName:    env?.name ?? b.envelope_id!,
+        custodio:   env?.custodio ?? 'Sin custodio',
+        amount:     Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
         budgetType: b.budget_type,
+        qDone:      !!qDone,
       }
     })
     .filter(l => l.amount > 0)
@@ -279,6 +330,9 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
                 custodio={custodio}
                 items={items}
                 envelopes={envelopes}
+                q={q}
+                year={year}
+                month={month}
               />
             ))}
           </tbody>
@@ -443,10 +497,10 @@ export function PresupuestoClient({
   const allQ1Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q1_done)
   const allQ2Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q2_done)
 
-  // Resolve lookup key: prefer the group label derived from auto_tx_category_code so that
-  // a budget line named "Abarrotes" (code FOOD_SUPER → "Supermercado") matches transaction actuals.
+  // Resolve lookup key: prefer the raw auto_tx_category_code so the match is exact.
+  // Actuals are indexed by both raw code and group label, so this finds either.
   function resolveKey(b: Budget) {
-    return b.auto_tx_category_code ? getGroupLabel(b.auto_tx_category_code) : b.category
+    return b.auto_tx_category_code ?? b.category
   }
 
   // Manual override > transaction actual > plan-if-done fallback
@@ -1003,7 +1057,7 @@ export function PresupuestoClient({
       </div>
 
       {/* Transfer summary */}
-      <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} />
+      <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} year={year} month={month} />
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
