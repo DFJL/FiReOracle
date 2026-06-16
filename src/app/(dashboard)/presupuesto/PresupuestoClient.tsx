@@ -497,10 +497,19 @@ export function PresupuestoClient({
   const allQ1Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q1_done)
   const allQ2Done = optimisticBudgets.length > 0 && optimisticBudgets.every(b => b.q2_done)
 
-  // Resolve lookup key: prefer the raw auto_tx_category_code so the match is exact.
-  // Actuals are indexed by both raw code and group label, so this finds either.
+  // Resolve lookup key for actualQ1/Q2 maps.
+  // Priority: exact auto_tx_category_code → exact category name → prefix fuzzy match
+  // (e.g., "Supermercado/ab..." startsWith "Supermercado" → match)
   function resolveKey(b: Budget) {
-    return b.auto_tx_category_code ?? b.category
+    if (b.auto_tx_category_code) return b.auto_tx_category_code
+    if (actualQ1[b.category] !== undefined || actualQ2[b.category] !== undefined) return b.category
+    const catLower = b.category.toLowerCase()
+    const allKeys  = [...new Set([...Object.keys(actualQ1), ...Object.keys(actualQ2)])]
+    const hit = allKeys.find(k => {
+      const kl = k.toLowerCase()
+      return catLower.startsWith(kl) || kl.startsWith(catLower)
+    })
+    return hit ?? b.category
   }
 
   // Manual override > transaction actual > plan-if-done fallback
