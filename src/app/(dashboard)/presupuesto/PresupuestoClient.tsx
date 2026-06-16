@@ -57,6 +57,7 @@ type BudgetType = 'expense' | 'savings' | 'income'
 
 function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes: Envelope[] }) {
   const [q, setQ] = useState<1 | 2>(1)
+  const [open, setOpen] = useState(false)
 
   const envelopeMap = new Map(envelopes.map(e => [e.id, e]))
 
@@ -88,14 +89,18 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
 
   return (
     <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]">
+      {/* Header — always visible, click to toggle */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors text-left"
+      >
         <div className="flex items-center gap-2">
+          {open ? <ChevronUp size={12} className="text-zinc-500 shrink-0" /> : <ChevronDown size={12} className="text-zinc-500 shrink-0" />}
           <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.16em]">Plan de transferencias</span>
           <span className="text-[9px] text-zinc-600">·</span>
           <span className="text-xs font-bold text-white">₡{Math.round(total).toLocaleString('es-CR')}</span>
         </div>
-        <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5">
+        <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5" onClick={e => e.stopPropagation()}>
           {([1, 2] as const).map(qi => (
             <button key={qi} onClick={() => setQ(qi)}
               className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${q === qi ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'}`}>
@@ -103,9 +108,10 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
             </button>
           ))}
         </div>
-      </div>
-      {/* Table */}
-      <table className="w-full text-xs border-collapse">
+      </button>
+      {/* Table — only when open */}
+      {open && (
+        <table className="w-full text-xs border-collapse border-t border-white/[0.06]">
         <thead>
           <tr className="border-b border-white/[0.06]">
             <th className="text-left px-4 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest w-[35%]">Línea</th>
@@ -143,6 +149,7 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
           })}
         </tbody>
       </table>
+      )}
     </div>
   )
 }
