@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useTransition, useOptimistic } from 'react'
+import { useState, useTransition, useOptimistic, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   PlusCircle, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
@@ -55,86 +55,152 @@ type BudgetType = 'expense' | 'savings' | 'income'
 
 // ── TransferSummary ───────────────────────────────────────────────────────────
 
-// Per-custodio row with editable amount + source envelope + register button
+type TransferItem = {
+  id: string
+  category: string
+  envName: string
+  envId: string
+  amount: number
+  budgetType: string
+}
+
 function CustodioRow({
-  custodio, items, subtotal, envelopes,
+  custodio, items, envelopes,
 }: {
   custodio: string
-  items: { id: string; category: string; envName: string; amount: number }[]
-  subtotal: number
+  items: TransferItem[]
   envelopes: Envelope[]
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const [amount, setAmount] = useState(String(Math.round(subtotal)))
+  const [checked, setChecked] = useState<Set<string>>(() => new Set(items.map(i => i.id)))
+  const [amounts, setAmounts] = useState<Map<string, string>>(
+    () => new Map(items.map(i => [i.id, String(Math.round(i.amount))]))
+  )
   const [fromId, setFromId] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
   const [isPending, start] = useTransition()
 
+  const allCheckRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (allCheckRef.current) {
+      allCheckRef.current.indeterminate = checked.size > 0 && checked.size < items.length
+    }
+  }, [checked.size, items.length])
+
+  function toggleItem(id: string) {
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setChecked(checked.size === items.length ? new Set() : new Set(items.map(i => i.id)))
+  }
+
+  function getAmt(id: string) { return parseFloat(amounts.get(id) ?? '0') || 0 }
+  function setAmt(id: string, v: string) { setAmounts(prev => new Map(prev).set(id, v)) }
+
+  const checkedItems = items.filter(i => checked.has(i.id))
+  const subtotal = checkedItems.reduce((s, i) => s + getAmt(i.id), 0)
+
   function register() {
-    const amt = parseFloat(amount.replace(/,/g, ''))
-    if (!amt || amt <= 0 || !fromId) { setErr('Seleccioná un sobre origen y un monto'); return }
+    if (checkedItems.length === 0) { setErr('Seleccioná al menos una línea'); return }
     setErr('')
+
+    const movements = checkedItems.map(i => ({
+      envelope_id:   i.envId,
+      amount:        getAmt(i.id),
+      movement_type: (i.budgetType === 'savings' || i.budgetType === 'income')
+        ? 'deposito' as const
+        : 'retiro' as const,
+      notes: `Plan transferencias: ${i.category}`,
+    }))
+
     start(async () => {
-      const res = await recordTransferFromSource(fromId, amt, custodio, date)
+      const res = await recordBatchEnvelopeMovements(movements, date)
       if (res.error) { setErr(res.error); return }
+
+      if (fromId) {
+        const savingsTotal = checkedItems
+          .filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
+          .reduce((s, i) => s + getAmt(i.id), 0)
+        if (savingsTotal > 0) {
+          const res2 = await recordTransferFromSource(fromId, savingsTotal, custodio, date)
+          if (res2.error) { setErr(res2.error); return }
+        }
+      }
+
       setOk(true)
     })
   }
 
   return (
     <>
+      {/* Custodio header */}
       <tr className="bg-white/[0.03] border-t border-white/[0.06]">
-        <td colSpan={2} className="px-4 py-1.5">
-          <button onClick={() => setExpanded(e => !e)} className="flex items-center gap-1.5 text-left">
-            {expanded ? <ChevronUp size={10} className="text-zinc-600" /> : <ChevronDown size={10} className="text-zinc-600" />}
-            <span className="text-[10px] font-bold text-zinc-300">{custodio}</span>
-            <span className="text-[9px] text-zinc-600">{items.length} sobre{items.length !== 1 ? 's' : ''}</span>
-          </button>
+        <td className="px-3 py-1.5 w-7">
+          <input ref={allCheckRef} type="checkbox"
+            checked={checked.size === items.length && items.length > 0}
+            onChange={toggleAll}
+            className="accent-[#a3e635] w-3 h-3 cursor-pointer"
+          />
+        </td>
+        <td colSpan={2} className="px-2 py-1.5">
+          <span className="text-[10px] font-bold text-zinc-300">{custodio}</span>
+          <span className="text-[9px] text-zinc-600 ml-1.5">{items.length} línea{items.length !== 1 ? 's' : ''}</span>
         </td>
         <td className="px-4 py-1.5 text-right text-[10px] font-bold text-[#a3e635]">
           ₡{Math.round(subtotal).toLocaleString('es-CR')}
         </td>
       </tr>
-      {expanded && items.map(l => (
-        <tr key={l.id} className="border-t border-white/[0.03] hover:bg-white/[0.02]">
-          <td className="px-4 py-1 pl-8 text-[11px] text-zinc-400">{l.category}</td>
+      {/* Line items */}
+      {items.map(l => (
+        <tr key={l.id}
+          className={`border-t border-white/[0.03] hover:bg-white/[0.02] transition-opacity ${!checked.has(l.id) ? 'opacity-35' : ''}`}
+        >
+          <td className="px-3 py-1 w-7">
+            <input type="checkbox" checked={checked.has(l.id)} onChange={() => toggleItem(l.id)}
+              className="accent-[#a3e635] w-3 h-3 cursor-pointer" />
+          </td>
+          <td className="px-2 py-1 text-[11px] text-zinc-400">
+            <span className={`mr-1 text-[9px] ${l.budgetType === 'expense' ? 'text-rose-500/60' : 'text-[#a3e635]/50'}`}>
+              {l.budgetType === 'expense' ? '▾' : '▴'}
+            </span>
+            {l.category}
+          </td>
           <td className="px-2 py-1 text-[11px] text-zinc-500">{l.envName}</td>
-          <td className="px-4 py-1 text-right text-[11px] font-medium text-zinc-300">
-            ₡{Math.round(l.amount).toLocaleString('es-CR')}
+          <td className="px-4 py-1 text-right">
+            <input
+              type="number"
+              value={amounts.get(l.id) ?? ''}
+              onChange={e => setAmt(l.id, e.target.value)}
+              className="w-24 text-right bg-transparent border border-transparent hover:border-white/[0.08] focus:border-[#a3e635]/40 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 focus:outline-none focus:text-white"
+            />
           </td>
         </tr>
       ))}
-      {/* Register transfer row */}
+      {/* Register row */}
       <tr className="border-t border-white/[0.04] bg-white/[0.01]">
-        <td colSpan={3} className="px-4 py-2">
+        <td colSpan={4} className="px-4 py-2">
           {ok ? (
-            <span className="text-[11px] text-[#a3e635]">✓ Registrado</span>
+            <span className="text-[11px] text-[#a3e635]">✓ Registrado ({checkedItems.length} movimiento{checkedItems.length !== 1 ? 's' : ''})</span>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={fromId} onChange={e => setFromId(e.target.value)}
-                className="bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-zinc-300 focus:outline-none focus:border-[#a3e635]/40"
-              >
-                <option value="">Desde sobre…</option>
+              <select value={fromId} onChange={e => setFromId(e.target.value)}
+                className="bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-zinc-400 focus:outline-none focus:border-[#a3e635]/40">
+                <option value="">Débito desde sobre… (opcional)</option>
                 {envelopes.map(e => (
                   <option key={e.id} value={e.id}>{e.name}{e.custodio ? ` (${e.custodio})` : ''}</option>
                 ))}
               </select>
-              <input
-                type="number" value={amount} onChange={e => setAmount(e.target.value)}
-                className="w-28 bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-[#a3e635]/40"
-              />
-              <input
-                type="date" value={date} onChange={e => setDate(e.target.value)}
-                className="bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-[#a3e635]/40"
-              />
-              <button
-                onClick={register} disabled={isPending}
-                className="px-3 py-1 rounded bg-white/[0.08] text-zinc-300 text-[11px] font-semibold hover:bg-white/[0.12] disabled:opacity-50 transition-colors"
-              >
-                {isPending ? '...' : 'Registrar'}
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                className="bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-[#a3e635]/40" />
+              <button onClick={register} disabled={isPending || checkedItems.length === 0}
+                className="px-3 py-1 rounded bg-white/[0.08] text-zinc-300 text-[11px] font-semibold hover:bg-white/[0.12] disabled:opacity-50 transition-colors">
+                {isPending ? '...' : `Registrar${checkedItems.length > 0 ? ` (${checkedItems.length})` : ''}`}
               </button>
               {err && <span className="text-[10px] text-rose-400">{err}</span>}
             </div>
@@ -152,14 +218,16 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
   const envelopeMap = new Map(envelopes.map(e => [e.id, e]))
 
   const lines = budgets
-    .filter(b => b.budget_type === 'savings' && b.envelope_id)
+    .filter(b => (b.budget_type === 'savings' || b.budget_type === 'expense') && b.envelope_id)
     .map(b => {
       const env = envelopeMap.get(b.envelope_id!)
       return {
         ...b,
+        envId:    b.envelope_id!,
         envName:  env?.name ?? b.envelope_id!,
         custodio: env?.custodio ?? 'Sin custodio',
         amount:   Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
+        budgetType: b.budget_type,
       }
     })
     .filter(l => l.amount > 0)
@@ -200,9 +268,10 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
         <table className="w-full text-xs border-collapse border-t border-white/[0.06]">
           <thead>
             <tr className="border-b border-white/[0.06]">
-              <th className="text-left px-4 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest w-[35%]">Línea</th>
-              <th className="text-left px-2 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest w-[35%]">Sobre</th>
-              <th className="text-right px-4 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest">Plan</th>
+              <th className="w-7" />
+              <th className="text-left px-2 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest w-[38%]">Línea</th>
+              <th className="text-left px-2 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest">Sobre</th>
+              <th className="text-right px-4 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-widest w-28">Monto</th>
             </tr>
           </thead>
           <tbody>
@@ -211,7 +280,6 @@ function TransferSummary({ budgets, envelopes }: { budgets: Budget[]; envelopes:
                 key={custodio}
                 custodio={custodio}
                 items={items}
-                subtotal={items.reduce((s, l) => s + l.amount, 0)}
                 envelopes={envelopes}
               />
             ))}

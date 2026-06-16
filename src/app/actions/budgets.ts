@@ -355,6 +355,34 @@ export async function deleteBudget(id: string): Promise<void> {
   revalidatePath('/presupuesto')
 }
 
+export async function recordBatchEnvelopeMovements(
+  movements: Array<{
+    envelope_id: string
+    amount: number
+    movement_type: 'deposito' | 'retiro' | 'traslado_in' | 'traslado_out'
+    notes: string
+  }>,
+  date: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const rows = movements.map(m => ({
+    user_id:       user.id,
+    envelope_id:   m.envelope_id,
+    date,
+    amount:        m.amount,
+    movement_type: m.movement_type,
+    notes:         m.notes,
+  }))
+  const { error } = await admin.from('envelope_movements').insert(rows)
+  if (error) return { error: error.message }
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
+
 export async function recordTransferFromSource(
   fromEnvelopeId: string,
   amount: number,
