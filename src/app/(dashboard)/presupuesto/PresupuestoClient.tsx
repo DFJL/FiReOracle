@@ -113,9 +113,7 @@ function CustodioRow({
     const movements = checkedItems.map(i => ({
       envelope_id:   i.envId,
       amount:        getAmt(i.id),
-      movement_type: (i.budgetType === 'savings' || i.budgetType === 'income')
-        ? 'deposito' as const
-        : 'retiro' as const,
+      movement_type: 'deposito' as const,
       notes: `Plan transferencias: ${i.category}`,
     }))
 
