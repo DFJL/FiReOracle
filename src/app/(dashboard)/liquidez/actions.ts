@@ -31,7 +31,6 @@ export async function addMovement(
       .select('amount')
       .eq('user_id', user.id)
       .eq('envelope_id', envelopeId)
-      .neq('movement_type', 'interes')
 
     if (sumErr) return { error: sumErr.message }
     const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
@@ -68,7 +67,6 @@ export async function transferBetweenEnvelopes(
     .select('amount')
     .eq('user_id', user.id)
     .eq('envelope_id', fromId)
-    .neq('movement_type', 'interes')
 
   if (sumErr) return { error: sumErr.message }
   const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
