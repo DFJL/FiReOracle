@@ -125,7 +125,6 @@ async function getEnvelopeBalance(
     .eq('user_id', userId)
     .eq('envelope_id', envelopeId)
   return (data ?? [])
-    .filter((m: { movement_type: string }) => m.movement_type !== 'interes')
     .reduce((sum: number, m: { amount: string | number }) => sum + Number(m.amount), 0)
 }
 
