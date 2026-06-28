@@ -75,7 +75,7 @@ function CustodioRow({
   year: number
   month: number
 }) {
-  // Default: savings items already done → start unchecked (already registered)
+  // Done items start unchecked (already registered) but remain selectable for additional deposits
   const [checked, setChecked] = useState<Set<string>>(
     () => new Set(items.filter(i => !i.qDone).map(i => i.id))
   )
@@ -88,14 +88,12 @@ function CustodioRow({
   const [err, setErr] = useState('')
   const [isPending, start] = useTransition()
 
-  const pendingItems = items.filter(i => !i.qDone)
-
   const allCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (allCheckRef.current) {
-      allCheckRef.current.indeterminate = checked.size > 0 && checked.size < pendingItems.length
+      allCheckRef.current.indeterminate = checked.size > 0 && checked.size < items.length
     }
-  }, [checked.size, pendingItems.length])
+  }, [checked.size, items.length])
 
   function toggleItem(id: string) {
     setChecked(prev => {
@@ -106,24 +104,22 @@ function CustodioRow({
   }
 
   function toggleAll() {
-    setChecked(checked.size === pendingItems.length
+    setChecked(checked.size === items.length
       ? new Set()
-      : new Set(pendingItems.map(i => i.id)))
+      : new Set(items.map(i => i.id)))
   }
 
   function getAmt(id: string) { return parseFloat(amounts.get(id) ?? '0') || 0 }
   function setAmt(id: string, v: string) { setAmounts(prev => new Map(prev).set(id, v)) }
 
   const checkedItems = items.filter(i => checked.has(i.id))
-  const subtotal = [...items.filter(i => i.qDone), ...checkedItems]
-    .reduce((s, i) => s + getAmt(i.id), 0)
+  const subtotal = checkedItems.reduce((s, i) => s + getAmt(i.id), 0)
 
   function register() {
     if (checkedItems.length === 0) { setErr('Seleccioná al menos una línea'); return }
     setErr('')
 
-    const savings  = checkedItems.filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
-    const expenses = checkedItems.filter(i => i.budgetType === 'expense')
+    const savings = checkedItems.filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
 
     start(async () => {
       // All selected lines: deposito to their envelopes
@@ -136,12 +132,13 @@ function CustodioRow({
       const res = await recordBatchEnvelopeMovements(movements, date)
       if (res.error) { setErr(res.error); return }
 
-      // Savings: also mark the quincena as done so main table reflects it
-      if (savings.length > 0) {
-        await bulkMarkDone(savings.map(i => i.id), q, year, month)
+      // Savings not yet done: mark the quincena so main table reflects it
+      const newSavings = savings.filter(i => !i.qDone)
+      if (newSavings.length > 0) {
+        await bulkMarkDone(newSavings.map(i => i.id), q, year, month)
       }
 
-      // Optional source debit (traslado_out from Líquido BAC) for savings total
+      // Optional source debit (traslado_out from source envelope) for savings total
       if (fromId && savings.length > 0) {
         const savingsTotal = savings.reduce((s, i) => s + getAmt(i.id), 0)
         const res2 = await recordTransferFromSource(fromId, savingsTotal, custodio, date)
@@ -160,7 +157,7 @@ function CustodioRow({
       <tr className="bg-white/[0.03] border-t border-white/[0.06]">
         <td className="px-3 py-1.5 w-7">
           <input ref={allCheckRef} type="checkbox"
-            checked={checked.size > 0 && checked.size === pendingItems.length}
+            checked={checked.size > 0 && checked.size === items.length}
             onChange={toggleAll}
             className="accent-[#a3e635] w-3 h-3 cursor-pointer"
           />
@@ -182,37 +179,28 @@ function CustodioRow({
       {items.map(l => (
         <tr key={l.id}
           className={`border-t border-white/[0.03] transition-opacity ${
-            l.qDone
-              ? 'opacity-30'
-              : checked.has(l.id) ? 'hover:bg-white/[0.02]' : 'opacity-40'
+            checked.has(l.id) ? 'hover:bg-white/[0.02]' : 'opacity-40'
           }`}
         >
           <td className="px-3 py-1 w-7">
-            {l.qDone ? (
-              <span className="text-[10px] text-[#a3e635]">✓</span>
-            ) : (
-              <input type="checkbox" checked={checked.has(l.id)} onChange={() => toggleItem(l.id)}
-                className="accent-[#a3e635] w-3 h-3 cursor-pointer" />
-            )}
+            <input type="checkbox" checked={checked.has(l.id)} onChange={() => toggleItem(l.id)}
+              className="accent-[#a3e635] w-3 h-3 cursor-pointer" />
           </td>
           <td className="px-2 py-1 text-[11px] text-zinc-400">
             <span className={`mr-1 text-[9px] ${isSavings(l) ? 'text-[#a3e635]/50' : 'text-rose-500/60'}`}>
               {isSavings(l) ? '▴' : '▾'}
             </span>
             {l.category}
+            {l.qDone && <span className="ml-1 text-[9px] text-[#a3e635]/60">✓</span>}
           </td>
           <td className="px-2 py-1 text-[11px] text-zinc-500">{l.envName}</td>
           <td className="px-4 py-1 text-right">
-            {l.qDone ? (
-              <span className="text-[11px] text-zinc-600">₡{Math.round(l.amount).toLocaleString('es-CR')}</span>
-            ) : (
-              <input
-                type="number"
-                value={amounts.get(l.id) ?? ''}
-                onChange={e => setAmt(l.id, e.target.value)}
-                className="w-24 text-right bg-transparent border border-transparent hover:border-white/[0.08] focus:border-[#a3e635]/40 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 focus:outline-none focus:text-white"
-              />
-            )}
+            <input
+              type="number"
+              value={amounts.get(l.id) ?? ''}
+              onChange={e => setAmt(l.id, e.target.value)}
+              className="w-24 text-right bg-transparent border border-transparent hover:border-white/[0.08] focus:border-[#a3e635]/40 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 focus:outline-none focus:text-white"
+            />
           </td>
         </tr>
       ))}
@@ -223,8 +211,6 @@ function CustodioRow({
             <span className="text-[11px] text-[#a3e635]">
               ✓ Registrado ({checkedItems.length} movimiento{checkedItems.length !== 1 ? 's' : ''})
             </span>
-          ) : pendingItems.length === 0 ? (
-            <span className="text-[11px] text-zinc-600">Todas las líneas ya están registradas</span>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <select value={fromId} onChange={e => setFromId(e.target.value)}
