@@ -15,9 +15,10 @@ REGLAS:
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta
 - movement_type: "expense" para débitos/compras, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
+- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, Mastercard, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro
 - confidence: "high", "medium", o "low"
 FORMATO — respondé SOLO con JSON:
-{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
+{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"category_code":"FOOD_MARKET","confidence":"high"}
 Si no podés extraer datos de transacción: {"skip":true,"reason":"No es notificación de transacción"}`
 
 // Bank sender patterns to filter in Yahoo Mail
