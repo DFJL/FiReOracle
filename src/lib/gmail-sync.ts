@@ -25,6 +25,7 @@ REGLAS:
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios", "Comprobante BNCR")
 - movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
+- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, Mastercard, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
 CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
 Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
@@ -32,7 +33,7 @@ devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comp
 NO uses skip:true para comprobantes bancarios aunque falte el monto.
 Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
-{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","category_code":"FOOD_MARKET","confidence":"high"}
+{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"category_code":"FOOD_MARKET","confidence":"high"}
 Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 export type GmailPart = {
