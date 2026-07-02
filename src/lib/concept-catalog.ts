@@ -309,10 +309,21 @@ export const CONCEPT_MAP = new Map<string, CatalogEntry>(
   CONCEPT_CATALOG.map(e => [e.concepto.toLowerCase().trim(), e])
 )
 
+// Spanish stopwords stripped before significant-word matching (tier 4)
+const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'a', 'en', 'por', 'para', 'con', 'al', 'su', 'sus', 'lo', 'le'])
+const sigWords = (s: string): string[] => s.split(/\s+/).filter(w => w.length > 1 && !STOPWORDS.has(w))
+
+// Pre-computed significant-word sets for each catalog key (avoids recomputing per lookup)
+const CONCEPT_SIG = new Map<string, Set<string>>(
+  Array.from(CONCEPT_MAP.keys()).map(k => [k, new Set(sigWords(k))])
+)
+
 // Lookup by concept text. Tries:
 //   1. Exact case-insensitive match
 //   2. Any catalog entry whose key starts with the user's text (user typed prefix)
 //   3. Any catalog entry whose key starts with the first 3 words of user's text
+//   4. All significant words in user input are found in a catalog key
+//      (handles dropped articles/prepositions, e.g. "Limpieza casa" → "Limpieza de casa")
 export function lookupConcept(text: string): CatalogEntry | undefined {
   const t = text.trim().toLowerCase()
   if (!t) return undefined
@@ -333,6 +344,15 @@ export function lookupConcept(text: string): CatalogEntry | undefined {
   if (first3.length >= 8) {
     for (const [key, entry] of CONCEPT_MAP) {
       if (key.startsWith(first3)) return entry
+    }
+  }
+
+  // 4. Significant-word subset: all content words from user input appear in a catalog key.
+  //    Prepositions/articles stripped from both sides, so "Limpieza casa" matches "Limpieza de casa".
+  const userSig = sigWords(t)
+  if (userSig.length >= 2) {
+    for (const [key, entry] of CONCEPT_SIG) {
+      if (userSig.every(w => entry.has(w))) return CONCEPT_MAP.get(key)!
     }
   }
 
