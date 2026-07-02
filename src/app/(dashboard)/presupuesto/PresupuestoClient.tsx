@@ -1,19 +1,20 @@
 'use client'
 
-import { useState, useTransition, useOptimistic } from 'react'
+import { useState, useTransition, useOptimistic, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   PlusCircle, Pencil, Trash2, X, Check,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements, bulkMarkDone } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
 export type Envelope = {
   id: string
   name: string
+  custodio?: string
   parent_envelope_id: string | null
 }
 

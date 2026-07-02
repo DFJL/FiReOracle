@@ -195,3 +195,101 @@ export async function deleteBudget(id: string): Promise<void> {
 
   revalidatePath('/presupuesto')
 }
+
+export async function bulkMarkDone(
+  ids: string[], q: 1 | 2, year: number, month: number,
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('No autorizado')
+
+  const admin = createAdminClient()
+
+  const { data: rows } = await admin
+    .from('budgets')
+    .select('id, category, q1_done, q2_done')
+    .in('id', ids)
+    .eq('user_id', user.id)
+
+  if (!rows?.length) return
+
+  const categories = rows.map(r => r.category)
+  const { data: existing } = await admin
+    .from('budget_monthly_done')
+    .select('category, q1_done, q2_done')
+    .eq('user_id', user.id)
+    .eq('year', year)
+    .eq('month', month)
+    .in('category', categories)
+
+  const curMap = new Map((existing ?? []).map(e => [e.category, e]))
+
+  const upserts = rows.map(r => {
+    const cur = curMap.get(r.category)
+    return {
+      user_id:  user.id,
+      category: r.category,
+      year,
+      month,
+      q1_done: q === 1 ? true : (cur?.q1_done ?? r.q1_done),
+      q2_done: q === 2 ? true : (cur?.q2_done ?? r.q2_done),
+    }
+  })
+
+  await admin.from('budget_monthly_done')
+    .upsert(upserts, { onConflict: 'user_id,category,year,month' })
+
+  revalidatePath('/presupuesto')
+}
+
+export async function recordBatchEnvelopeMovements(
+  movements: Array<{
+    envelope_id: string
+    amount: number
+    movement_type: 'deposito' | 'retiro' | 'traslado_in' | 'traslado_out'
+    notes: string
+  }>,
+  date: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const rows = movements.map(m => ({
+    user_id:       user.id,
+    envelope_id:   m.envelope_id,
+    date,
+    amount:        m.amount,
+    movement_type: m.movement_type,
+    notes:         m.notes,
+  }))
+  const { error } = await admin.from('envelope_movements').insert(rows)
+  if (error) return { error: error.message }
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
+
+export async function recordTransferFromSource(
+  fromEnvelopeId: string,
+  amount: number,
+  label: string,
+  date: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: fromEnvelopeId,
+    date,
+    amount: -Math.abs(amount),
+    movement_type: 'traslado_out',
+    notes: `Transferencia plan → ${label}`,
+  })
+  if (error) return { error: error.message }
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
