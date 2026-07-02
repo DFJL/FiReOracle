@@ -129,9 +129,8 @@ export function TransactionEntryFAB({
   const galleryInputRef               = useRef<HTMLInputElement>(null)
   const pdfInputRef                   = useRef<HTMLInputElement>(null)
 
-  // Leaf-only envelopes; parents only used for display label
-  const parentIds = new Set(envelopes.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
-  const leafEnvelopes = envelopes.filter(e => !parentIds.has(e.id))
+  // All active envelopes — shown in every dropdown so users can assign to any level
+  const leafEnvelopes = envelopes
 
   // Auto-derive all classification flags from selected category
   useEffect(() => {
@@ -634,6 +633,11 @@ export function TransactionEntryFAB({
                           setConcept(v)
                           const hit = lookupConcept(v)
                           if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
+                          else if (!hit) setCategoryCode('')
+                        }}
+                        onBlur={e => {
+                          const hit = lookupConcept(e.target.value)
+                          if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
                         }}
                         placeholder="Almuerzo, Supermercado…" className={inputCls} />
                       <datalist id="catalog-expense">
@@ -697,6 +701,11 @@ export function TransactionEntryFAB({
                           const v = e.target.value
                           setConcept(v)
                           const hit = lookupConcept(v)
+                          if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
+                          else if (!hit) setCategoryCode('')
+                        }}
+                        onBlur={e => {
+                          const hit = lookupConcept(e.target.value)
                           if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
                         }}
                         placeholder="Salario, Rendimientos Farming…" className={inputCls} />
