@@ -637,11 +637,11 @@ export function TransactionEntryFAB({
                           setConcept(v)
                           const hit = lookupConcept(v)
                           if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
-                          else if (!hit) setCategoryCode('')
                         }}
                         onBlur={e => {
                           const hit = lookupConcept(e.target.value)
                           if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
+                          else if (!hit) setCategoryCode('')
                         }}
                         placeholder="Almuerzo, Supermercado…" className={inputCls} />
                       <datalist id="catalog-expense">
@@ -706,11 +706,11 @@ export function TransactionEntryFAB({
                           setConcept(v)
                           const hit = lookupConcept(v)
                           if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
-                          else if (!hit) setCategoryCode('')
                         }}
                         onBlur={e => {
                           const hit = lookupConcept(e.target.value)
                           if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
+                          else if (!hit) setCategoryCode('')
                         }}
                         placeholder="Salario, Rendimientos Farming…" className={inputCls} />
                       <datalist id="catalog-income">
