@@ -130,6 +130,13 @@ export const CONCEPT_CATALOG: CatalogEntry[] = [
   { concepto: 'Pago de alquiler de casa',                         categoryCode: 'RENT_SERVICE',             type: 'expense' },
   { concepto: 'Cobros Bancarios',                                 categoryCode: 'MISC_EXPENSE',             type: 'expense' },
   { concepto: 'Comisiones',                                       categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Cuota anual TC',                                   categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Cuota anual tarjeta',                              categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Intereses TC',                                     categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Interés TC',                                       categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Cargo por mora',                                   categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Retiro ATM',                                       categoryCode: 'MISC_EXPENSE',             type: 'expense' },
+  { concepto: 'Retiro efectivo',                                  categoryCode: 'MISC_EXPENSE',             type: 'expense' },
 
   // Salud
   { concepto: 'Medicamentos',                                     categoryCode: 'HEALTH_MEDS',              type: 'expense' },
@@ -153,6 +160,10 @@ export const CONCEPT_CATALOG: CatalogEntry[] = [
   { concepto: 'Seguro auto',                                      categoryCode: 'INSURANCE_CAR',            type: 'expense' },
   { concepto: 'Seguro de vida/gastos médicos',                    categoryCode: 'INSURANCE_LIFE',           type: 'expense' },
   { concepto: 'Seguro tarjetas',                                  categoryCode: 'INSURANCE_LIFE',           type: 'expense' },
+  { concepto: 'Seguro TC',                                        categoryCode: 'INSURANCE_LIFE',           type: 'expense' },
+  { concepto: 'Seguro de saldo',                                  categoryCode: 'INSURANCE_LIFE',           type: 'expense' },
+  { concepto: 'Seguro vehículo',                                  categoryCode: 'INSURANCE_CAR',            type: 'expense' },
+  { concepto: 'Seguro hogar',                                     categoryCode: 'INSURANCE_LIFE',           type: 'expense' },
 
   // Entretenimiento
   { concepto: 'Entradas de cine',                                 categoryCode: 'ENTERTAINMENT_EVENTS',     type: 'expense' },
