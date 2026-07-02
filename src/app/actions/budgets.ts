@@ -78,7 +78,7 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
 
   const { data: budget } = await admin
     .from('budgets')
-    .select('envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id, q1_done, q2_done')
+    .select('category, q1_done, q2_done')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
@@ -91,8 +91,6 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
       .eq('year', year)
       .eq('month', month)
       .maybeSingle()
-    // For the unchanged quincena: prefer the monthly record; fall back to the
-    // budget-row value (which was just updated, so the other quincena is correct).
     await admin.from('budget_monthly_done').upsert({
       user_id:  user.id,
       category: budget.category,
@@ -101,76 +99,6 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
       q1_done:  q === 1 ? done : (cur?.q1_done  ?? budget.q1_done),
       q2_done:  q === 2 ? done : (cur?.q2_done  ?? budget.q2_done),
     }, { onConflict: 'user_id,category,year,month' })
-  }
-
-  const envelopeRef = `presupuesto_q${q}:${id}`
-  const txRef       = `budget_tx_q${q}:${id}`
-
-  // ── Envelope movement ───────────────────────────────────────────────────────
-  if (budget?.envelope_id) {
-    if (done) {
-      const amount       = Number(q === 1 ? budget.q1_amount : budget.q2_amount) || 0
-      const movementType = budget.budget_type === 'expense' ? 'retiro' : 'deposito'
-      await admin.from('envelope_movements').insert({
-        user_id:       user.id,
-        envelope_id:   budget.envelope_id,
-        date:          new Date().toISOString().slice(0, 10),
-        amount,
-        movement_type: movementType,
-        notes:         envelopeRef,
-      })
-    } else {
-      await admin.from('envelope_movements')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('notes', envelopeRef)
-    }
-  }
-
-  // ── Auto-create transaction in ledger ────────────────────────────────────────
-  if (budget?.auto_tx_category_code) {
-    if (done) {
-      const { data: cat } = await admin
-        .from('transaction_categories')
-        .select('group_gasto, is_passive_income, is_survival_expense')
-        .eq('code', budget.auto_tx_category_code)
-        .maybeSingle()
-
-      const today      = new Date()
-      const movType    = budget.budget_type === 'income'  ? 'income'
-                       : budget.budget_type === 'savings' ? 'transfer'
-                       : 'expense'
-      const amount     = Number(q === 1 ? budget.q1_amount : budget.q2_amount) || 0
-
-      await admin.from('transactions').insert({
-        user_id:            user.id,
-        external_id:        txRef,
-        date:               today.toISOString().slice(0, 10),
-        year:               today.getFullYear(),
-        month:              today.getMonth() + 1,
-        day:                today.getDate(),
-        weekday:            today.getDay(),
-        concept:            budget.category,
-        vendor:             budget.category,
-        category_code:      budget.auto_tx_category_code,
-        movement_type:      movType,
-        amount,
-        currency_code:      'CRC',
-        account_id:         budget.auto_tx_account_id ?? null,
-        expense_group:      cat?.group_gasto ?? null,
-        is_passive_income:  cat?.is_passive_income  ?? false,
-        is_survival_expense: cat?.is_survival_expense ?? false,
-        is_settlement:      false,
-        source:             'budget',
-        notes:              txRef,
-      })
-    } else {
-      await admin.from('transactions')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('external_id', txRef)
-        .eq('source', 'budget')
-    }
   }
 
   revalidatePath('/presupuesto')
@@ -185,7 +113,7 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
 
   const [{ data: all }, { data: monthlyDone }] = await Promise.all([
     admin.from('budgets')
-      .select('id, envelope_id, q1_amount, q2_amount, budget_type, category, auto_tx_category_code, auto_tx_account_id, q1_done, q2_done')
+      .select('id, category, q1_done, q2_done')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('budget_monthly_done')
@@ -218,71 +146,6 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
     }
   })
   await admin.from('budget_monthly_done').upsert(doneRows, { onConflict: 'user_id,category,year,month' })
-
-  const today     = new Date()
-  const todayStr  = today.toISOString().slice(0, 10)
-
-  // ── Envelope movements (batch) ────────────────────────────────────────────────
-  const envItems = changing.filter(b => b.envelope_id)
-  if (done) {
-    const rows = envItems.map(b => ({
-      user_id:       user.id,
-      envelope_id:   b.envelope_id!,
-      date:          todayStr,
-      amount:        Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
-      movement_type: b.budget_type === 'expense' ? 'retiro' : 'deposito',
-      notes:         `presupuesto_q${q}:${b.id}`,
-    }))
-    if (rows.length) await admin.from('envelope_movements').insert(rows)
-  } else {
-    const refs = envItems.map(b => `presupuesto_q${q}:${b.id}`)
-    if (refs.length) await admin.from('envelope_movements').delete().eq('user_id', user.id).in('notes', refs)
-  }
-
-  // ── Auto-tx transactions (batch) ──────────────────────────────────────────────
-  const txItems = changing.filter(b => b.auto_tx_category_code)
-  if (txItems.length) {
-    if (done) {
-      const codes = [...new Set(txItems.map(b => b.auto_tx_category_code!))]
-      const { data: cats } = await admin.from('transaction_categories')
-        .select('code, group_gasto, is_passive_income, is_survival_expense')
-        .in('code', codes)
-      const catMap = new Map((cats ?? []).map(c => [c.code, c]))
-
-      const rows = txItems.map(b => {
-        const cat     = catMap.get(b.auto_tx_category_code!)
-        const movType = b.budget_type === 'income'  ? 'income'
-                      : b.budget_type === 'savings' ? 'transfer'
-                      : 'expense'
-        return {
-          user_id:             user.id,
-          external_id:         `budget_tx_q${q}:${b.id}`,
-          date:                todayStr,
-          year:                today.getFullYear(),
-          month:               today.getMonth() + 1,
-          day:                 today.getDate(),
-          weekday:             today.getDay(),
-          concept:             b.category,
-          vendor:              b.category,
-          category_code:       b.auto_tx_category_code!,
-          movement_type:       movType,
-          amount:              Number(q === 1 ? b.q1_amount : b.q2_amount) || 0,
-          currency_code:       'CRC' as const,
-          account_id:          b.auto_tx_account_id ?? null,
-          expense_group:       cat?.group_gasto ?? null,
-          is_passive_income:   cat?.is_passive_income  ?? false,
-          is_survival_expense: cat?.is_survival_expense ?? false,
-          is_settlement:       false,
-          source:              'budget',
-          notes:               `budget_tx_q${q}:${b.id}`,
-        }
-      })
-      if (rows.length) await admin.from('transactions').insert(rows)
-    } else {
-      const refs = txItems.map(b => `budget_tx_q${q}:${b.id}`)
-      await admin.from('transactions').delete().eq('user_id', user.id).in('external_id', refs).eq('source', 'budget')
-    }
-  }
 
   revalidatePath('/presupuesto')
 }
