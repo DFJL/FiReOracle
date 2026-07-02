@@ -268,7 +268,12 @@ export function TransactionEntryFAB({
         if (f.currency === 'USD') setCurrency('USD'); else setCurrency('CRC')
         if (typeof f.vendor === 'string') setVendor(f.vendor)
         if (typeof f.concept === 'string') setConcept(f.concept)
-        if (typeof f.category_code === 'string') setCategoryCode(f.category_code)
+        {
+          const aiCat = typeof f.category_code === 'string' ? f.category_code : ''
+          const txT = f.type === 'ingreso' ? 'income' : 'expense'
+          const resolved = aiCat || (typeof f.concept === 'string' ? resolveCategory(f.concept, txT) : '')
+          if (resolved) setCategoryCode(resolved)
+        }
         if (typeof f.is_passive_income === 'boolean') setIsPassive(f.is_passive_income)
         if (typeof f.is_settlement === 'boolean') setIsSettlement(f.is_settlement)
         if (typeof f.is_survival_expense === 'boolean') setIsSurvival(f.is_survival_expense)
