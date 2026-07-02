@@ -5,6 +5,28 @@ import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
 import { CONCEPT_CATALOG, lookupConcept } from '@/lib/concept-catalog'
 
+// Persistent concept→category memory (localStorage).
+// When the user manually picks a category for a concept not in the static
+// catalog, we remember it so it auto-fills next time.
+const MEM_KEY = 'fro_concept_cat_v1'
+function readMem(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try { return JSON.parse(localStorage.getItem(MEM_KEY) ?? '{}') } catch { return {} }
+}
+function saveMem(concept: string, code: string) {
+  if (typeof window === 'undefined' || !concept.trim() || !code) return
+  const m = readMem(); m[concept.trim().toLowerCase()] = code
+  localStorage.setItem(MEM_KEY, JSON.stringify(m))
+}
+function lookupMem(concept: string): string | undefined {
+  return readMem()[concept.trim().toLowerCase()]
+}
+function resolveCategory(concept: string, txType: 'expense' | 'income'): string {
+  const hit = lookupConcept(concept)
+  if (hit && hit.type === txType) return hit.categoryCode
+  return lookupMem(concept) ?? ''
+}
+
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
 type InvestmentBucket = { id: string; name: string }
 type Category = {
@@ -631,13 +653,12 @@ export function TransactionEntryFAB({
                         onChange={e => {
                           const v = e.target.value
                           setConcept(v)
-                          const hit = lookupConcept(v)
-                          if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
+                          const code = resolveCategory(v, 'expense')
+                          if (code) setCategoryCode(code)
                         }}
                         onBlur={e => {
-                          const hit = lookupConcept(e.target.value)
-                          if (hit && hit.type === 'expense') setCategoryCode(hit.categoryCode)
-                          else if (!hit) setCategoryCode('')
+                          const code = resolveCategory(e.target.value, 'expense')
+                          setCategoryCode(code)
                         }}
                         placeholder="Almuerzo, Supermercado…" className={inputCls} />
                       <datalist id="catalog-expense">
@@ -650,7 +671,7 @@ export function TransactionEntryFAB({
                   <div>
                     <label className={lbl}>Categoría <span className="text-zinc-700 normal-case tracking-normal">(auto-asigna al elegir concepto)</span></label>
                     <CategorySelect categories={categories} value={categoryCode}
-                      onChange={v => { setCategoryCode(v); if (!v) setExpenseGroup('personal') }}
+                      onChange={v => { setCategoryCode(v); if (!v) setExpenseGroup('personal'); saveMem(concept, v) }}
                       typeFilter="expense" className={inputCls} />
                   </div>
                   {!categoryCode && (
@@ -700,13 +721,12 @@ export function TransactionEntryFAB({
                         onChange={e => {
                           const v = e.target.value
                           setConcept(v)
-                          const hit = lookupConcept(v)
-                          if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
+                          const code = resolveCategory(v, 'income')
+                          if (code) setCategoryCode(code)
                         }}
                         onBlur={e => {
-                          const hit = lookupConcept(e.target.value)
-                          if (hit && hit.type === 'income') setCategoryCode(hit.categoryCode)
-                          else if (!hit) setCategoryCode('')
+                          const code = resolveCategory(e.target.value, 'income')
+                          setCategoryCode(code)
                         }}
                         placeholder="Salario, Rendimientos Farming…" className={inputCls} />
                       <datalist id="catalog-income">
@@ -719,7 +739,7 @@ export function TransactionEntryFAB({
                   <div>
                     <label className={lbl}>Categoría <span className="text-zinc-700 normal-case tracking-normal">(auto-asigna al elegir concepto)</span></label>
                     <CategorySelect categories={categories} value={categoryCode}
-                      onChange={v => setCategoryCode(v)}
+                      onChange={v => { setCategoryCode(v); saveMem(concept, v) }}
                       typeFilter="income" className={inputCls} />
                   </div>
                   {isSettlement && buckets.length > 0 && (
