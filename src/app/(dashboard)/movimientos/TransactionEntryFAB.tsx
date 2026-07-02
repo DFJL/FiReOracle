@@ -64,6 +64,7 @@ function CategorySelect({
         const kids = children.filter(c => c.parent_code === p.code)
         return kids.length > 0 ? (
           <optgroup key={p.code} label={p.name}>
+            <option value={p.code}>{p.name}</option>
             {kids.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
           </optgroup>
         ) : (
