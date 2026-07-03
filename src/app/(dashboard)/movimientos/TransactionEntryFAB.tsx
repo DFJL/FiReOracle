@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect, useRef } from 'react'
-import { Plus, X, Sparkles, Camera, FileText, Loader2 } from 'lucide-react'
+import { Plus, X, Sparkles, Camera, FileText, Loader2, ChevronDown } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
 import { CONCEPT_CATALOG, lookupConcept } from '@/lib/concept-catalog'
 
@@ -95,6 +95,7 @@ export function TransactionEntryFAB({
 }) {
   const [open, setOpen]               = useState(false)
   const [type, setType]               = useState<TxEntryType>('gasto')
+  const [showOpcionales, setShowOpcionales] = useState(false)
   // common
   const [date, setDate]               = useState(today())
   const [amount, setAmount]           = useState('')
@@ -203,6 +204,7 @@ export function TransactionEntryFAB({
     setAiQuestion(null); setAiAnswer(''); setAiLoading(false)
     setAiError(null); setAiPrefilled(false)
     setDupHits([]); setDupDismissed(false)
+    setShowOpcionales(false)
   }
 
   function close() { reset(); setOpen(false) }
@@ -467,7 +469,8 @@ export function TransactionEntryFAB({
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={close} />
 
-          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto">
+          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl flex flex-col max-h-[92vh]">
+          <div className="overflow-y-auto flex-1 p-5 space-y-4">
 
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -566,7 +569,7 @@ export function TransactionEntryFAB({
               ))}
             </div>}
 
-            {!aiMode && <form onSubmit={submit} className="space-y-3">
+            {!aiMode && <form id="tx-form" onSubmit={submit} className="space-y-3">
 
               {/* Revisión IA banner */}
               {aiPrefilled && (
@@ -809,53 +812,65 @@ export function TransactionEntryFAB({
                 </>
               )}
 
-              {/* ── Autopréstamo fields ── */}
-              {/* ── Optional side-effects (gasto / ingreso only) ── */}
+              {/* ── Optional side-effects + Notes (gasto / ingreso only) ── */}
               {(type === 'gasto' || type === 'ingreso') && (
-                <div className="space-y-2 rounded-xl bg-white/[0.03] border border-white/[0.06] p-3">
-                  <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.16em]">Opcionales</p>
-                  <div>
-                    <label className={lbl}>Débito de sobre</label>
-                    <select value={debitEnvelopeId} onChange={e => setDebitEnvelope(e.target.value)} className={inputCls}>
-                      <option value="">— ninguno —</option>
-                      {leafEnvelopes.map(env => (
-                        <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={lbl}>Autopréstamo</label>
-                    <select value={loanMode} onChange={e => setLoanMode(e.target.value)} className={inputCls}>
-                      <option value="">— ninguno —</option>
-                      <option value="new">+ Crear nuevo</option>
-                      {loans.map(l => {
-                        const remaining = Number(l.original_amount) - Number(l.amount_repaid)
-                        return (
-                          <option key={l.id} value={l.id}>
-                            {l.description} · ₡{Math.round(remaining).toLocaleString('es-CR')} pendiente
-                          </option>
-                        )
-                      })}
-                    </select>
-                  </div>
-                  {loanMode === 'new' && (
-                    <div>
-                      <label className={lbl}>Nombre del nuevo autopréstamo</label>
-                      <input type="text" value={newLoanDesc} onChange={e => setNewLoanDesc(e.target.value)}
-                        placeholder="Dejar vacío para usar concepto/vendor…" className={inputCls} />
-                    </div>
-                  )}
-                  {mortgageLoans.length > 0 && (
-                    <div>
-                      <label className={lbl}>Préstamo bancario <span className="text-zinc-700 normal-case tracking-normal">(opcional — etiqueta la tx)</span></label>
-                      <select value={mortgageLoanId} onChange={e => setMortgageLoanId(e.target.value)} className={inputCls}>
-                        <option value="">— ninguno —</option>
-                        {mortgageLoans.map(l => (
-                          <option key={l.id} value={l.id}>
-                            {l.name} · {l.lender} · {l.currency_code === 'USD' ? '$' : '₡'}{Number(l.current_balance).toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                          </option>
-                        ))}
-                      </select>
+                <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+                  <button type="button" onClick={() => setShowOpcionales(v => !v)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-[9px] font-black text-zinc-500 uppercase tracking-[0.16em] hover:text-zinc-400 transition-colors">
+                    Opcionales
+                    <ChevronDown size={12} className={`transition-transform duration-150 ${showOpcionales ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showOpcionales && (
+                    <div className="px-3 pb-3 space-y-2 border-t border-white/[0.06]">
+                      <div className="pt-2">
+                        <label className={lbl}>Notas</label>
+                        <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+                          placeholder="Nota libre…" className={inputCls} />
+                      </div>
+                      <div>
+                        <label className={lbl}>Débito de sobre</label>
+                        <select value={debitEnvelopeId} onChange={e => setDebitEnvelope(e.target.value)} className={inputCls}>
+                          <option value="">— ninguno —</option>
+                          {leafEnvelopes.map(env => (
+                            <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={lbl}>Autopréstamo</label>
+                        <select value={loanMode} onChange={e => setLoanMode(e.target.value)} className={inputCls}>
+                          <option value="">— ninguno —</option>
+                          <option value="new">+ Crear nuevo</option>
+                          {loans.map(l => {
+                            const remaining = Number(l.original_amount) - Number(l.amount_repaid)
+                            return (
+                              <option key={l.id} value={l.id}>
+                                {l.description} · ₡{Math.round(remaining).toLocaleString('es-CR')} pendiente
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </div>
+                      {loanMode === 'new' && (
+                        <div>
+                          <label className={lbl}>Nombre del nuevo autopréstamo</label>
+                          <input type="text" value={newLoanDesc} onChange={e => setNewLoanDesc(e.target.value)}
+                            placeholder="Dejar vacío para usar concepto/vendor…" className={inputCls} />
+                        </div>
+                      )}
+                      {mortgageLoans.length > 0 && (
+                        <div>
+                          <label className={lbl}>Préstamo bancario <span className="text-zinc-700 normal-case tracking-normal">(etiqueta la tx)</span></label>
+                          <select value={mortgageLoanId} onChange={e => setMortgageLoanId(e.target.value)} className={inputCls}>
+                            <option value="">— ninguno —</option>
+                            {mortgageLoans.map(l => (
+                              <option key={l.id} value={l.id}>
+                                {l.name} · {l.lender} · {l.currency_code === 'USD' ? '$' : '₡'}{Number(l.current_balance).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -887,29 +902,36 @@ export function TransactionEntryFAB({
                 </div>
               )}
 
-              {/* ── Notes (all types) ── */}
-              <div>
-                <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
-                <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
-                  placeholder="Nota libre…" className={inputCls} />
-              </div>
+              {/* ── Notes (traslado / ahorro only — gasto/ingreso notes are in Opcionales) ── */}
+              {(type === 'traslado' || type === 'ahorro') && (
+                <div>
+                  <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                  <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+                    placeholder="Nota libre…" className={inputCls} />
+                </div>
+              )}
+            </form>}
+          </div>{/* end scrollable */}
 
+          {/* ── Sticky footer: error + submit buttons ── */}
+          {!aiMode && (
+            <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/[0.06] space-y-2">
               {error && (
                 <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>
               )}
-
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={submitNext} disabled={isPending}
                   className="py-3 rounded-xl bg-white/[0.06] border border-white/[0.10] text-white text-sm font-black tracking-wide hover:bg-white/[0.10] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                   {isPending ? '…' : 'Siguiente →'}
                 </button>
-                <button type="submit" disabled={isPending}
+                <button type="submit" form="tx-form" disabled={isPending}
                   className="py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black tracking-wide hover:bg-[#b4f040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                   {isPending ? 'Guardando…' : 'Guardar'}
                 </button>
               </div>
-            </form>}
-          </div>
+            </div>
+          )}
+          </div>{/* end panel */}
         </div>
       )}
     </>
