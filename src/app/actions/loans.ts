@@ -22,23 +22,53 @@ export async function recordLoanPayment(
   if (!user) return { error: 'No autenticado' }
 
   const admin = createAdminClient()
+
+  const { data: loanRow } = await admin
+    .from('loans')
+    .select('name, lender, currency_code')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .single()
+
   const principal = data.balance_before - data.balance_after
   const interest = Math.max(0, data.amount - principal)
 
+  // Auto-create the movimiento so the payment appears in resumen/movimientos too
+  let txId = data.transaction_id ?? null
+  if (!txId && loanRow) {
+    const { data: tx } = await admin.from('transactions').insert({
+      user_id:            user.id,
+      date:               data.payment_date,
+      amount:             data.amount,
+      currency_code:      loanRow.currency_code,
+      vendor:             loanRow.lender,
+      concept:            data.notes?.trim() || `Pago préstamo ${loanRow.name}`,
+      expense_group:      'necesario',
+      movement_type:      'expense',
+      is_passive_income:  false,
+      is_settlement:      false,
+      is_survival_expense: false,
+      loan_id:            loanId,
+      source:             'manual',
+      notes:              data.notes?.trim() || null,
+    }).select('id').single()
+    if (tx) txId = tx.id
+  }
+
   const { data: inserted, error: insertErr } = await admin.from('loan_payments').insert({
-    loan_id: loanId,
-    user_id: user.id,
-    payment_date: data.payment_date,
-    payment_type: data.payment_type,
-    amount: data.amount,
+    loan_id:        loanId,
+    user_id:        user.id,
+    payment_date:   data.payment_date,
+    payment_type:   data.payment_type,
+    amount:         data.amount,
     principal,
     interest,
-    insurance: 0,
+    insurance:      0,
     balance_before: data.balance_before,
-    balance_after: data.balance_after,
-    rate_applied: data.rate_applied,
-    notes: data.notes ?? null,
-    transaction_id: data.transaction_id ?? null,
+    balance_after:  data.balance_after,
+    rate_applied:   data.rate_applied,
+    notes:          data.notes ?? null,
+    transaction_id: txId,
   }).select('id').single()
 
   if (insertErr) return { error: insertErr.message }
@@ -53,6 +83,8 @@ export async function recordLoanPayment(
 
   revalidatePath('/prestamos')
   revalidatePath('/patrimonio')
+  revalidatePath('/resumen')
+  revalidatePath('/flujo')
   return { error: null, id: inserted.id }
 }
 
