@@ -255,6 +255,44 @@ export async function updateLoanPayment(
   return { error: null }
 }
 
+export async function deleteLoanPayment(
+  paymentId: string,
+  loanId: string,
+  restoreBalance: boolean,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+
+  if (restoreBalance) {
+    const { data: payment } = await admin
+      .from('loan_payments')
+      .select('balance_before')
+      .eq('id', paymentId)
+      .eq('user_id', user.id)
+      .single()
+    if (payment) {
+      await admin.from('loans')
+        .update({ current_balance: payment.balance_before })
+        .eq('id', loanId)
+        .eq('user_id', user.id)
+    }
+  }
+
+  const { error } = await admin
+    .from('loan_payments')
+    .delete()
+    .eq('id', paymentId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/prestamos')
+  revalidatePath('/patrimonio')
+  return { error: null }
+}
+
 export async function updateLoanSortOrder(
   loanId: string,
   sortOrder: number,

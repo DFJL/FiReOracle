@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { ChevronUp, ChevronDown, Plus, X, Loader2, Pencil } from 'lucide-react'
+import { ChevronUp, ChevronDown, Plus, X, Loader2, Pencil, Trash2 } from 'lucide-react'
 import {
   computeSchedule,
   simulateCombined,
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
-import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment, updateLoanPayment } from '@/app/actions/loans'
+import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment, updateLoanPayment, deleteLoanPayment } from '@/app/actions/loans'
 import { createTransaction } from '@/app/actions/transactions'
 
 type Payment = {
@@ -586,6 +586,8 @@ function LoanCard({ loan: initialLoan }: { loan: LoanData }) {
   const [isPendingBal, startBal]    = useTransition()
   const [showPayForm, setShowPayForm] = useState(false)
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null)
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null)
+  const [, startDelete] = useTransition()
 
   const schedule = computeSchedule(
     loan.currentBalance,
@@ -865,13 +867,52 @@ function LoanCard({ loan: initialLoan }: { loan: LoanData }) {
                         <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_after)}</td>
                         <td className="px-3 py-2 text-[10px] text-right text-zinc-600 tabular-nums">{p.rate_applied.toFixed(2)}%</td>
                         <td className="px-3 py-2">
-                          <button
-                            onClick={() => setEditingPaymentId(p.id)}
-                            className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
-                            title="Editar pago"
-                          >
-                            <Pencil size={12} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setEditingPaymentId(p.id)}
+                              className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+                              title="Editar pago"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            {deletingPaymentId === p.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => {
+                                    startDelete(async () => {
+                                      const isFirst = i === 0
+                                      const res = await deleteLoanPayment(p.id, loan.id, isFirst)
+                                      if (!res.error) {
+                                        setLoan(prev => ({
+                                          ...prev,
+                                          currentBalance: isFirst ? p.balance_before : prev.currentBalance,
+                                          payments: prev.payments.filter(x => x.id !== p.id),
+                                        }))
+                                      }
+                                      setDeletingPaymentId(null)
+                                    })
+                                  }}
+                                  className="text-[9px] font-black text-rose-400 hover:text-rose-300 px-1.5 py-0.5 rounded bg-rose-400/10 transition-colors"
+                                >
+                                  Confirmar
+                                </button>
+                                <button
+                                  onClick={() => setDeletingPaymentId(null)}
+                                  className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setDeletingPaymentId(p.id)}
+                                className="p-1 rounded text-zinc-700 hover:text-rose-400 transition-colors"
+                                title="Borrar pago"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
