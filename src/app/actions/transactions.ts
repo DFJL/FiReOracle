@@ -227,41 +227,6 @@ export async function createTransaction(input: CreateTransactionInput) {
       const sideErr = await applySideEffects(admin, user.id, input)
       if (sideErr) return { error: sideErr }
     }
-    if (input.mortgage_loan_id && txData?.id) {
-      const { data: loanRow } = await admin
-        .from('loans')
-        .select('current_balance, interest_rate, monthly_insurance, currency_code')
-        .eq('id', input.mortgage_loan_id)
-        .eq('user_id', user.id)
-        .single()
-      if (loanRow && loanRow.currency_code === (input.currency_code ?? 'CRC')) {
-        const monthlyRate  = loanRow.interest_rate / 100 / 12
-        const interestAmt  = loanRow.current_balance * monthlyRate
-        const principalAmt = Math.max(0, input.amount - interestAmt - loanRow.monthly_insurance)
-        const balanceAfter = Math.max(0, loanRow.current_balance - principalAmt)
-        await admin.from('loan_payments').insert({
-          loan_id:              input.mortgage_loan_id,
-          user_id:              user.id,
-          payment_date:         input.date,
-          payment_type:         'normal',
-          amount:               input.amount,
-          principal:            principalAmt,
-          interest:             interestAmt,
-          insurance:            loanRow.monthly_insurance,
-          balance_before:       loanRow.current_balance,
-          balance_after:        balanceAfter,
-          rate_applied:         loanRow.interest_rate,
-          notes:                input.notes?.trim() || null,
-          linked_transaction_id: txData.id,
-        })
-        await admin.from('loans')
-          .update({ current_balance: balanceAfter })
-          .eq('id', input.mortgage_loan_id)
-          .eq('user_id', user.id)
-        revalidatePath('/prestamos')
-        revalidatePath('/patrimonio')
-      }
-    }
   }
 
   else if (input.type === 'ingreso') {
