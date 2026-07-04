@@ -203,7 +203,7 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   if (input.type === 'gasto') {
     const isUSD = input.currency_code === 'USD'
-    const { error } = await admin.from('transactions').insert({
+    const { data: txData, error } = await admin.from('transactions').insert({
       user_id: user.id,
       date: input.date,
       amount: input.amount,
@@ -221,11 +221,46 @@ export async function createTransaction(input: CreateTransactionInput) {
       loan_id: input.mortgage_loan_id ?? null,
       source: 'manual',
       notes: input.notes?.trim() || null,
-    })
+    }).select('id').single()
     if (error) return { error: error.message }
     if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
       const sideErr = await applySideEffects(admin, user.id, input)
       if (sideErr) return { error: sideErr }
+    }
+    if (input.mortgage_loan_id && txData?.id) {
+      const { data: loanRow } = await admin
+        .from('loans')
+        .select('current_balance, interest_rate, monthly_insurance, currency_code')
+        .eq('id', input.mortgage_loan_id)
+        .eq('user_id', user.id)
+        .single()
+      if (loanRow && loanRow.currency_code === (input.currency_code ?? 'CRC')) {
+        const monthlyRate  = loanRow.interest_rate / 100 / 12
+        const interestAmt  = loanRow.current_balance * monthlyRate
+        const principalAmt = Math.max(0, input.amount - interestAmt - loanRow.monthly_insurance)
+        const balanceAfter = Math.max(0, loanRow.current_balance - principalAmt)
+        await admin.from('loan_payments').insert({
+          loan_id:              input.mortgage_loan_id,
+          user_id:              user.id,
+          payment_date:         input.date,
+          payment_type:         'normal',
+          amount:               input.amount,
+          principal:            principalAmt,
+          interest:             interestAmt,
+          insurance:            loanRow.monthly_insurance,
+          balance_before:       loanRow.current_balance,
+          balance_after:        balanceAfter,
+          rate_applied:         loanRow.interest_rate,
+          notes:                input.notes?.trim() || null,
+          linked_transaction_id: txData.id,
+        })
+        await admin.from('loans')
+          .update({ current_balance: balanceAfter })
+          .eq('id', input.mortgage_loan_id)
+          .eq('user_id', user.id)
+        revalidatePath('/prestamos')
+        revalidatePath('/patrimonio')
+      }
     }
   }
 

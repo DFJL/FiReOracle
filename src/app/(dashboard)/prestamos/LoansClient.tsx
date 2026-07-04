@@ -8,7 +8,7 @@ import {
   type AmortizationResult,
   type ScheduleRow,
 } from './amortization'
-import { createLoan, updateLoanSortOrder, updateLoanBalance } from '@/app/actions/loans'
+import { createLoan, updateLoanSortOrder, updateLoanBalance, recordLoanPayment } from '@/app/actions/loans'
 
 type Payment = {
   id: string
@@ -98,6 +98,18 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
   const [, startTransition]         = useTransition()
 
   const selectedLoan = loans.find(l => l.id === selectedId) ?? loans[0] ?? null
+
+  function handleBalanceUpdated(loanId: string, newBalance: number) {
+    setLoans(prev => prev.map(l => l.id === loanId ? { ...l, currentBalance: newBalance } : l))
+  }
+
+  function handlePaymentRecorded(loanId: string, payment: Payment, newBalance: number) {
+    setLoans(prev => prev.map(l =>
+      l.id === loanId
+        ? { ...l, currentBalance: newBalance, payments: [payment, ...l.payments] }
+        : l
+    ))
+  }
 
   function moveUp(index: number) {
     if (index === 0) return
@@ -214,7 +226,13 @@ export function LoansClient({ loans: initialLoans }: { loans: LoanData[] }) {
       )}
 
       {/* ── Selected loan detail ── */}
-      {selectedLoan && <LoanCard loan={selectedLoan} />}
+      {selectedLoan && (
+        <LoanCard
+          loan={selectedLoan}
+          onBalanceUpdated={newBal => handleBalanceUpdated(selectedLoan.id, newBal)}
+          onPaymentRecorded={(p, newBal) => handlePaymentRecorded(selectedLoan.id, p, newBal)}
+        />
+      )}
     </div>
   )
 }
@@ -401,13 +419,18 @@ function CreateLoanForm({
 
 // ── Per-loan card ────────────────────────────────────────────────────────────
 
-function LoanCard({ loan }: { loan: LoanData }) {
-  const [tab, setTab]           = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
-  const [showAll, setShowAll]   = useState(false)
+function LoanCard({ loan, onBalanceUpdated, onPaymentRecorded }: {
+  loan: LoanData
+  onBalanceUpdated: (newBalance: number) => void
+  onPaymentRecorded: (payment: Payment, newBalance: number) => void
+}) {
+  const [tab, setTab]               = useState<'proyeccion' | 'historial' | 'simulador'>('proyeccion')
+  const [showAll, setShowAll]       = useState(false)
   const [editingBal, setEditingBal] = useState(false)
   const [newBalStr, setNewBalStr]   = useState('')
   const [balErr, setBalErr]         = useState<string | null>(null)
   const [isPendingBal, startBal]    = useTransition()
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
 
   const schedule = computeSchedule(
     loan.currentBalance,
@@ -504,7 +527,7 @@ function LoanCard({ loan }: { loan: LoanData }) {
                     const res = await updateLoanBalance(loan.id, val)
                     if (res.error) { setBalErr(res.error); return }
                     setEditingBal(false)
-                    // optimistic: page will revalidate
+                    onBalanceUpdated(val)
                   })
                 }}
                 className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors"
@@ -604,52 +627,216 @@ function LoanCard({ loan }: { loan: LoanData }) {
 
       {/* Historial tab */}
       {tab === 'historial' && (
-        <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
-          {loan.payments.length === 0 ? (
-            <p className="text-xs text-zinc-600 text-center py-8">Sin pagos registrados.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-white/[0.06]">
-                    {['Fecha', 'Tipo', 'Saldo antes', 'Cancelado', 'Capital', 'Saldo después', 'Tasa'].map(h => (
-                      <th key={h} className={`px-3 py-2.5 text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap ${
-                        h === 'Fecha' || h === 'Tipo' ? 'text-left' : 'text-right'
-                      }`}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loan.payments.map((p, i) => {
-                    const col = PAYMENT_COLOR[p.payment_type] ?? '#818cf8'
-                    return (
-                      <tr key={p.id}
-                        className={`border-b border-white/[0.03] transition-colors hover:bg-white/[0.02] ${i % 2 !== 0 ? 'bg-white/[0.01]' : ''}`}>
-                        <td className="px-3 py-2 text-[10px] text-zinc-400 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
-                        <td className="px-3 py-2">
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md whitespace-nowrap"
-                            style={{ color: col, backgroundColor: col + '1a' }}>
-                            {paymentLabel(p.payment_type)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_before)}</td>
-                        <td className="px-3 py-2 text-[10px] text-right text-zinc-300 font-semibold tabular-nums">{fmt(p.amount)}</td>
-                        <td className="px-3 py-2 text-[10px] text-right text-[#a3e635]/70 tabular-nums">{fmt(p.balance_before - p.balance_after)}</td>
-                        <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_after)}</td>
-                        <td className="px-3 py-2 text-[10px] text-right text-zinc-600 tabular-nums">{p.rate_applied.toFixed(2)}%</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+        <div className="space-y-3">
+          {/* Header + register button */}
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
+              {loan.payments.length} PAGOS REGISTRADOS
+            </p>
+            <button
+              onClick={() => setShowPaymentForm(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#a3e635] text-black text-[10px] font-black hover:bg-[#b4f040] transition-colors"
+            >
+              <Plus size={11} strokeWidth={3} />
+              Registrar pago
+            </button>
+          </div>
+
+          {/* Payment form */}
+          {showPaymentForm && (
+            <RecordPaymentForm
+              loan={loan}
+              onSuccess={(payment, newBalance) => {
+                onPaymentRecorded(payment, newBalance)
+                setShowPaymentForm(false)
+              }}
+              onCancel={() => setShowPaymentForm(false)}
+            />
           )}
+
+          <div className="rounded-2xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
+            {loan.payments.length === 0 ? (
+              <p className="text-xs text-zinc-600 text-center py-8">Sin pagos registrados.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-white/[0.06]">
+                      {['Fecha', 'Tipo', 'Saldo antes', 'Cancelado', 'Capital', 'Saldo después', 'Tasa'].map(h => (
+                        <th key={h} className={`px-3 py-2.5 text-[9px] font-black text-zinc-500 uppercase tracking-wider whitespace-nowrap ${
+                          h === 'Fecha' || h === 'Tipo' ? 'text-left' : 'text-right'
+                        }`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loan.payments.map((p, i) => {
+                      const col = PAYMENT_COLOR[p.payment_type] ?? '#818cf8'
+                      return (
+                        <tr key={p.id}
+                          className={`border-b border-white/[0.03] transition-colors hover:bg-white/[0.02] ${i % 2 !== 0 ? 'bg-white/[0.01]' : ''}`}>
+                          <td className="px-3 py-2 text-[10px] text-zinc-400 whitespace-nowrap">{fmtDate(p.payment_date)}</td>
+                          <td className="px-3 py-2">
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md whitespace-nowrap"
+                              style={{ color: col, backgroundColor: col + '1a' }}>
+                              {paymentLabel(p.payment_type)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_before)}</td>
+                          <td className="px-3 py-2 text-[10px] text-right text-zinc-300 font-semibold tabular-nums">{fmt(p.amount)}</td>
+                          <td className="px-3 py-2 text-[10px] text-right text-[#a3e635]/70 tabular-nums">{fmt(p.balance_before - p.balance_after)}</td>
+                          <td className="px-3 py-2 text-[10px] text-right text-zinc-500 tabular-nums">{fmt(p.balance_after)}</td>
+                          <td className="px-3 py-2 text-[10px] text-right text-zinc-600 tabular-nums">{p.rate_applied.toFixed(2)}%</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Simulador tab */}
       {tab === 'simulador' && <SimuladorTab loan={loan} schedule={schedule} />}
     </div>
+  )
+}
+
+// ── Record payment form ───────────────────────────────────────────────────────
+
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function RecordPaymentForm({
+  loan,
+  onSuccess,
+  onCancel,
+}: {
+  loan: LoanData
+  onSuccess: (payment: Payment, newBalance: number) => void
+  onCancel: () => void
+}) {
+  const [date, setDate]             = useState(todayStr)
+  const [amount, setAmount]         = useState('')
+  const [balAfterStr, setBalAfter]  = useState('')
+  const [paymentType, setPayType]   = useState<'normal' | 'extra'>('normal')
+  const [notes, setNotes]           = useState('')
+  const [error, setError]           = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  const isUSD  = loan.currencyCode === 'USD'
+  const sym    = isUSD ? '$' : '₡'
+  const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+  const lbl    = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const amt      = parseFloat(amount)
+    const balAfter = parseFloat(balAfterStr)
+    if (!amt || amt <= 0)              { setError('Monto inválido'); return }
+    if (isNaN(balAfter) || balAfter < 0) { setError('Nuevo saldo inválido'); return }
+    if (balAfter >= loan.currentBalance) { setError('El nuevo saldo debe ser menor al actual'); return }
+
+    startTransition(async () => {
+      const res = await recordLoanPayment(loan.id, {
+        payment_date:   date,
+        payment_type:   paymentType,
+        amount:         amt,
+        balance_before: loan.currentBalance,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes || undefined,
+      })
+      if (res.error) { setError(res.error); return }
+
+      const principal = loan.currentBalance - balAfter
+      const interest  = Math.max(0, amt - principal)
+      const newPayment: Payment = {
+        id:             crypto.randomUUID(),
+        payment_date:   date,
+        payment_type:   paymentType,
+        amount:         amt,
+        principal,
+        interest,
+        insurance:      0,
+        balance_before: loan.currentBalance,
+        balance_after:  balAfter,
+        rate_applied:   loan.interestRate,
+        notes:          notes || null,
+      }
+      onSuccess(newPayment, balAfter)
+    })
+  }
+
+  return (
+    <form onSubmit={submit} className="rounded-2xl bg-white/[0.03] border border-[#a3e635]/20 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-[0.18em]">Registrar pago</p>
+        <button type="button" onClick={onCancel} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={lbl}>Fecha</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} required />
+        </div>
+        <div>
+          <label className={lbl}>Tipo</label>
+          <select value={paymentType} onChange={e => setPayType(e.target.value as 'normal' | 'extra')} className={inputCls}>
+            <option value="normal">Normal</option>
+            <option value="extra">Abono extra</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={lbl}>Total pagado ({sym})</label>
+          <input
+            type="number" min="0" step="any" value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder={isUSD ? '838.50' : '384872'}
+            className={inputCls} required
+          />
+        </div>
+        <div>
+          <label className={lbl}>Nuevo saldo ({sym})</label>
+          <input
+            type="number" min="0" step="any" value={balAfterStr}
+            onChange={e => setBalAfter(e.target.value)}
+            placeholder={isUSD ? '49172.64' : '0'}
+            className={inputCls} required
+          />
+          <p className="text-[9px] text-zinc-600 mt-1">Saldo actual: {isUSD ? fmtUSD(loan.currentBalance) : fmtCRC(loan.currentBalance)}</p>
+        </div>
+      </div>
+
+      <div>
+        <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal font-normal">(opcional)</span></label>
+        <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Referencia, banco…" className={inputCls} />
+      </div>
+
+      {error && <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="flex gap-2 justify-end">
+        <button type="button" onClick={onCancel}
+          className="px-4 py-2 rounded-xl border border-white/[0.08] text-zinc-400 text-xs font-black hover:text-zinc-200 transition-colors">
+          Cancelar
+        </button>
+        <button type="submit" disabled={isPending}
+          className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
+          {isPending ? <><Loader2 size={12} className="animate-spin" /> Guardando…</> : 'Guardar pago'}
+        </button>
+      </div>
+    </form>
   )
 }
 
