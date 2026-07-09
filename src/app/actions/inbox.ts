@@ -57,7 +57,10 @@ export async function confirmInboxItem(
     expense_group?: string
     is_passive_income?: boolean
     notes?: string
+    envelope_id?: string
+    loan_id?: string
   },
+  options?: { force?: boolean },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -65,9 +68,40 @@ export async function confirmInboxItem(
 
   const admin = createAdminClient()
 
+  if (!options?.force) {
+    const dayBefore = new Date(new Date(tx.date).getTime() - 86400000).toISOString().slice(0, 10)
+    const dayAfter  = new Date(new Date(tx.date).getTime() + 86400000).toISOString().slice(0, 10)
+    const { data: dupes } = await admin
+      .from('transactions')
+      .select('id, amount, date, vendor, concept')
+      .eq('user_id', user.id)
+      .eq('movement_type', tx.movement_type)
+      .gte('date', dayBefore)
+      .lte('date', dayAfter)
+      .gte('amount', tx.amount * 0.99)
+      .lte('amount', tx.amount * 1.01)
+      .limit(5)
+
+    const newVendor = tx.vendor?.trim().toLowerCase() ?? ''
+    const realDupe = (dupes ?? []).find(d => {
+      const existVendor = (d.vendor as string | null)?.trim().toLowerCase() ?? ''
+      if (newVendor.length >= 4 && existVendor.length >= 4) {
+        const overlap = newVendor.slice(0, 4) === existVendor.slice(0, 4)
+          || existVendor.includes(newVendor.slice(0, 6))
+          || newVendor.includes(existVendor.slice(0, 6))
+        if (!overlap) return false
+      }
+      return true
+    })
+
+    if (realDupe) {
+      return { error: `Posible duplicado: ya existe una tx similar del ${realDupe.date} por ${realDupe.amount}` }
+    }
+  }
+
   // Insert transaction
   const d = new Date(tx.date)
-  const { error: txErr } = await admin.from('transactions').insert({
+  const { data: insertedTx, error: txErr } = await admin.from('transactions').insert({
     user_id:          user.id,
     date:             tx.date,
     year:             d.getFullYear(),
@@ -86,9 +120,29 @@ export async function confirmInboxItem(
     is_survival_expense: false,
     notes:            tx.notes ?? null,
     source:           'email',
-  })
+    loan_id:          tx.loan_id ?? null,
+  }).select('id').single()
 
   if (txErr) return { error: txErr.message }
+
+  // Optionally link to a savings envelope
+  if (tx.envelope_id) {
+    const envMovType = tx.movement_type === 'income' ? 'deposito' : 'retiro'
+    const isDebit    = envMovType === 'retiro'
+    // Always use the CRC amount the user entered — do NOT multiply by exchange rate here,
+    // because tx.amount is already in CRC (or the user has manually converted it).
+    const crcAmount = tx.amount
+    await admin.from('envelope_movements').insert({
+      user_id:       user.id,
+      envelope_id:   tx.envelope_id,
+      date:          tx.date,
+      source_tx_id:  insertedTx.id,
+      amount:        isDebit ? -Math.abs(crcAmount) : Math.abs(crcAmount),
+      movement_type: envMovType,
+      notes:         tx.concept,
+    })
+    revalidatePath('/liquidez')
+  }
 
   // Mark confirmed
   const { error: updErr } = await admin
