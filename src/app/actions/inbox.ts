@@ -123,7 +123,7 @@ export async function confirmInboxItem(
   }
 
   // Insert transaction (year/month/day/weekday are generated columns — omit them)
-  const { error: txErr } = await admin.from('transactions').insert({
+  const { data: insertedTx, error: txErr } = await admin.from('transactions').insert({
     user_id:          user.id,
     date:             tx.date,
     vendor:           tx.vendor,
@@ -139,7 +139,7 @@ export async function confirmInboxItem(
     notes:            tx.notes ?? null,
     source:           'email',
     loan_id:          tx.loan_id ?? null,
-  })
+  }).select('id').single()
 
   if (txErr) return { error: txErr.message }
 
@@ -147,20 +147,19 @@ export async function confirmInboxItem(
   if (tx.envelope_id) {
     const envMovType = tx.movement_type === 'income' ? 'deposito' : 'retiro'
     const isDebit    = envMovType === 'retiro'
-    // Convert to CRC if the transaction is in a foreign currency
-    let crcAmount = tx.amount
-    if (tx.currency_code && tx.currency_code !== 'CRC') {
-      const rate = await fetchExchangeRate()
-      crcAmount  = tx.amount * rate.sell
-    }
+    // Always use the CRC amount the user entered — do NOT multiply by exchange rate here,
+    // because tx.amount is already in CRC (or the user has manually converted it).
+    const crcAmount = tx.amount
     await admin.from('envelope_movements').insert({
       user_id:       user.id,
       envelope_id:   tx.envelope_id,
       date:          tx.date,
+      source_tx_id:  insertedTx.id,
       amount:        isDebit ? -Math.abs(crcAmount) : Math.abs(crcAmount),
       movement_type: envMovType,
       notes:         tx.concept,
     })
+    revalidatePath('/liquidez')
   }
 
   // Mark confirmed
