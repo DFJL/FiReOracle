@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__c5cebf9d-6ab2-4627-9020-b5d8cabf7981__execute_sql",
+      "mcp__c5cebf9d-6ab2-4627-9020-b5d8cabf7981__list_projects",
+      "mcp__c5cebf9d-6ab2-4627-9020-b5d8cabf7981__apply_migration",
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__list_teams",
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__list_deployments",
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__list_projects",
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__get_deployment_build_logs",
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__get_deployment"
+    ]
+  }
+}
