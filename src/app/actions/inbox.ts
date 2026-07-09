@@ -140,7 +140,7 @@ export async function confirmInboxItem(
       amount:        isDebit ? -Math.abs(crcAmount) : Math.abs(crcAmount),
       movement_type: envMovType,
       notes:         tx.concept,
-    })
+    } as never)
     revalidatePath('/liquidez')
   }
 
