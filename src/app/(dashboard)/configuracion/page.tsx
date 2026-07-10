@@ -23,7 +23,7 @@ export default async function ConfiguracionPage() {
       .maybeSingle(),
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, annual_rate, sort_order')
+      .select('id, name, custodio, color, annual_rate, sort_order, envelope_type')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
