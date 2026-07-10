@@ -6,6 +6,8 @@ import { PortfolioView } from './PortfolioView'
 import { PortfolioHistory } from './PortfolioHistory'
 import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
 import { PortfolioYield } from './PortfolioYield'
+import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type EnvelopeCluster } from './PortfolioAnalysis'
+import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 const LIQUID_KEY = '__liquidez__'
@@ -31,6 +33,7 @@ export default async function InversionesPage() {
     { data: envelopes },
     { data: yieldRows },
     { data: fireConfig },
+    { data: incomeTxs },
   ] = await Promise.all([
     admin
       .from('user_investment_buckets')
@@ -49,7 +52,7 @@ export default async function InversionesPage() {
       .eq('user_id', user.id),
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, parent_envelope_id, sort_order')
+      .select('id, name, custodio, color, parent_envelope_id, sort_order, envelope_type')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -63,6 +66,12 @@ export default async function InversionesPage() {
       .select('preferred_currency')
       .eq('user_id', user.id)
       .maybeSingle(),
+    admin
+      .from('transactions')
+      .select('date, amount, movement_type')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .not('amount', 'is', null),
   ])
 
   // Fetch snapshot balances for snapshot_based buckets
@@ -340,6 +349,70 @@ export default async function InversionesPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
+  // ── Portfolio analysis data ─────────────────────────────────────────────────
+
+  // Monthly contributions per bucket (deposits only, not returns)
+  const contributions: MonthlyContribution[] = []
+  for (const def of bucketDefs) {
+    for (const tx of txs ?? []) {
+      if (!tx.date) continue
+      const amt = Number(tx.amount ?? 0)
+      let isDeposit = false
+      if (def.bucket_type === 'concept_based' && def.concept_map) {
+        const cm = def.concept_map as unknown as { depositConcepts: string[] }
+        const c = (tx.concept ?? '').toLowerCase()
+        if (
+          ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id &&
+            tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) ||
+          cm.depositConcepts.some(s => s.toLowerCase() === c)
+        ) isDeposit = true
+      } else if (def.bucket_type === 'vendor_based') {
+        const v = (tx.vendor ?? '').toLowerCase().trim()
+        const vs = (def.vendors ?? []).map((s: string) => s.toLowerCase())
+        if (vs.includes(v) && tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) isDeposit = true
+      }
+      if (isDeposit) {
+        contributions.push({ month: tx.date.slice(0, 7), bucketId: def.id, amount: amt })
+      }
+    }
+  }
+
+  // Monthly income
+  const incomeByMonth: Record<string, number> = {}
+  for (const tx of incomeTxs ?? []) {
+    if (!tx.date) continue
+    const m = tx.date.slice(0, 7)
+    incomeByMonth[m] = (incomeByMonth[m] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const monthlyIncome: MonthlyIncome[] = Object.entries(incomeByMonth).map(([month, amount]) => ({ month, amount }))
+
+  // Envelope clusters by envelope_type
+  type EnvRow = { id: string; name: string; custodio: string; color: string | null; parent_envelope_id: string | null; sort_order: number | null; envelope_type: string | null }
+  const envClusters: Record<string, EnvelopeCluster> = {
+    liquidez:        { type: 'liquidez',        label: 'Liquidez',        balance: 0, envelopes: [] },
+    emergencia:      { type: 'emergencia',       label: 'Emergencia',      balance: 0, envelopes: [] },
+    meta_especifica: { type: 'meta_especifica',  label: 'Metas',           balance: 0, envelopes: [] },
+    inversion:       { type: 'inversion',        label: 'Inversión',       balance: 0, envelopes: [] },
+    sin_tipo:        { type: 'sin_tipo',         label: 'Sin clasificar',  balance: 0, envelopes: [] },
+  }
+  for (const env of envelopes ?? []) {
+    if (parentEnvelopeIds.has(env.id)) continue
+    const balance = envelopeBalances[env.id] ?? 0
+    const eType = (env as EnvRow).envelope_type ?? 'sin_tipo'
+    const cluster = envClusters[eType] ?? envClusters.sin_tipo
+    cluster.balance += balance
+    cluster.envelopes.push({
+      id: env.id,
+      name: (env as EnvRow).name,
+      custodio: (env as EnvRow).custodio,
+      balance,
+    })
+  }
+  const clusters: EnvelopeCluster[] = Object.values(envClusters)
+
+  // Portfolio targets
+  const portfolioTargets = await getPortfolioTargets()
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PortfolioView
@@ -367,6 +440,15 @@ export default async function InversionesPage() {
         }))}
         exchangeRate={exchangeRate}
         defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
+      />
+      <PortfolioAnalysis
+        buckets={buckets.filter(b => b.key !== LIQUID_KEY)}
+        liquidBalance={liquidBalance}
+        totalPatrimony={totalPatrimony}
+        contributions={contributions}
+        income={monthlyIncome}
+        clusters={clusters}
+        targets={portfolioTargets}
       />
     </div>
   )

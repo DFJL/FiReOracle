@@ -1,7 +1,22 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { createEnvelope, updateEnvelope, deactivateEnvelope, renameCustodio } from '@/app/actions/envelopes'
+import { createEnvelope, updateEnvelope, deactivateEnvelope, renameCustodio, type EnvelopeType } from '@/app/actions/envelopes'
+
+const ENVELOPE_TYPES: { value: EnvelopeType | ''; label: string }[] = [
+  { value: '',               label: 'Sin clasificar' },
+  { value: 'liquidez',       label: 'Liquidez' },
+  { value: 'emergencia',     label: 'Emergencia' },
+  { value: 'meta_especifica', label: 'Meta específica' },
+  { value: 'inversion',      label: 'Inversión' },
+]
+
+const TYPE_BADGE: Record<EnvelopeType, { label: string; color: string }> = {
+  liquidez:       { label: 'Liquidez',   color: '#60a5fa' },
+  emergencia:     { label: 'Emergencia', color: '#fb923c' },
+  meta_especifica: { label: 'Meta',      color: '#a78bfa' },
+  inversion:      { label: 'Inversión',  color: '#34d399' },
+}
 
 type Envelope = {
   id: string
@@ -10,6 +25,7 @@ type Envelope = {
   color: string | null
   annual_rate: number | null
   sort_order: number | null
+  envelope_type: EnvelopeType | null
 }
 
 const PRESET_COLORS = [
@@ -23,7 +39,7 @@ const PRESET_COLORS = [
   '#f87171',
 ]
 
-type FormData = { name: string; custodio: string; color: string; annual_rate: number | null; initial_balance?: number | null }
+type FormData = { name: string; custodio: string; color: string; annual_rate: number | null; initial_balance?: number | null; envelope_type?: EnvelopeType | null }
 
 function EnvelopeForm({
   initial,
@@ -38,13 +54,14 @@ function EnvelopeForm({
   onSave: (data: FormData) => Promise<void>
   onCancel: () => void
 }) {
-  const [name, setName]       = useState(initial?.name ?? '')
-  const [custodio, setCust]   = useState(initial?.custodio ?? '')
-  const [color, setColor]     = useState(initial?.color ?? PRESET_COLORS[0])
-  const [rate, setRate]       = useState(initial?.annual_rate?.toString() ?? '')
-  const [balance, setBalance] = useState('')
-  const [error, setError]     = useState('')
-  const [isPending, start]    = useTransition()
+  const [name, setName]         = useState(initial?.name ?? '')
+  const [custodio, setCust]     = useState(initial?.custodio ?? '')
+  const [color, setColor]       = useState(initial?.color ?? PRESET_COLORS[0])
+  const [rate, setRate]         = useState(initial?.annual_rate?.toString() ?? '')
+  const [balance, setBalance]   = useState('')
+  const [envType, setEnvType]   = useState<EnvelopeType | ''>(initial?.envelope_type ?? '')
+  const [error, setError]       = useState('')
+  const [isPending, start]      = useTransition()
 
   function submit() {
     if (!name.trim())    { setError('Nombre requerido'); return }
@@ -55,6 +72,7 @@ function EnvelopeForm({
         name, custodio, color,
         annual_rate: rate ? parseFloat(rate) : null,
         initial_balance: showBalance && balance ? parseFloat(balance.replace(/,/g, '')) : null,
+        envelope_type: envType || null,
       })
     })
   }
@@ -112,6 +130,19 @@ function EnvelopeForm({
             className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
           />
         </div>
+      </div>
+
+      <div>
+        <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Tipo de sobre</p>
+        <select
+          value={envType}
+          onChange={e => setEnvType(e.target.value as EnvelopeType | '')}
+          className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
+        >
+          {ENVELOPE_TYPES.map(t => (
+            <option key={t.value} value={t.value} className="bg-[#111]">{t.label}</option>
+          ))}
+        </select>
       </div>
 
       {showBalance && (
@@ -288,7 +319,17 @@ export function EnvelopeManager({ envelopes: initial }: { envelopes: Envelope[] 
               <div className="flex items-center gap-3 px-4 py-3">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-zinc-200 font-semibold truncate">{env.name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs text-zinc-200 font-semibold truncate">{env.name}</p>
+                    {env.envelope_type && TYPE_BADGE[env.envelope_type] && (
+                      <span
+                        className="shrink-0 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider"
+                        style={{ color: TYPE_BADGE[env.envelope_type].color, background: TYPE_BADGE[env.envelope_type].color + '22' }}
+                      >
+                        {TYPE_BADGE[env.envelope_type].label}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-zinc-600">
                     {env.custodio}
                     {env.annual_rate ? ` · ${env.annual_rate}% anual` : ''}

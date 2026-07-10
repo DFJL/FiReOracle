@@ -46,7 +46,7 @@ export default async function ConfiguracionPage() {
       .eq('user_id', user.id)
       .maybeSingle(),
     admin.from('savings_envelopes')
-      .select('id, name, custodio, color, annual_rate, sort_order')
+      .select('id, name, custodio, color, annual_rate, sort_order, envelope_type')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     admin.from('user_investment_buckets')
       .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')

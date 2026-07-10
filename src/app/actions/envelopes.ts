@@ -4,12 +4,15 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 
+export type EnvelopeType = 'liquidez' | 'emergencia' | 'meta_especifica' | 'inversion'
+
 type EnvelopeData = {
   name: string
   custodio: string
   color: string
   annual_rate: number | null
   initial_balance?: number | null
+  envelope_type?: EnvelopeType | null
 }
 
 export async function createEnvelope(data: EnvelopeData) {
@@ -40,6 +43,7 @@ export async function createEnvelope(data: EnvelopeData) {
       interest_mode: 'manual',
       sort_order,
       is_active: true,
+      ...(data.envelope_type !== undefined && { envelope_type: data.envelope_type }),
     })
 
   if (error) return { error: error.message }
@@ -84,6 +88,7 @@ export async function updateEnvelope(id: string, data: Partial<EnvelopeData>) {
       ...(data.custodio !== undefined && { custodio: data.custodio.trim() }),
       ...(data.color !== undefined && { color: data.color }),
       ...(data.annual_rate !== undefined && { annual_rate: data.annual_rate }),
+      ...(data.envelope_type !== undefined && { envelope_type: data.envelope_type ?? null }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
