@@ -25,7 +25,7 @@ type Envelope = {
   color: string | null
   annual_rate: number | null
   sort_order: number | null
-  envelope_type: EnvelopeType | null
+  envelope_type: string | null
 }
 
 const PRESET_COLORS = [
@@ -54,14 +54,14 @@ function EnvelopeForm({
   onSave: (data: FormData) => Promise<void>
   onCancel: () => void
 }) {
-  const [name, setName]       = useState(initial?.name ?? '')
-  const [custodio, setCust]   = useState(initial?.custodio ?? '')
-  const [color, setColor]     = useState(initial?.color ?? PRESET_COLORS[0])
-  const [rate, setRate]       = useState(initial?.annual_rate?.toString() ?? '')
-  const [balance, setBalance] = useState('')
-  const [envType, setEnvType] = useState<EnvelopeType | ''>(initial?.envelope_type ?? '')
-  const [error, setError]     = useState('')
-  const [isPending, start]    = useTransition()
+  const [name, setName]         = useState(initial?.name ?? '')
+  const [custodio, setCust]     = useState(initial?.custodio ?? '')
+  const [color, setColor]       = useState(initial?.color ?? PRESET_COLORS[0])
+  const [rate, setRate]         = useState(initial?.annual_rate?.toString() ?? '')
+  const [balance, setBalance]   = useState('')
+  const [envType, setEnvType]   = useState<EnvelopeType | ''>((initial?.envelope_type ?? '') as EnvelopeType | '')
+  const [error, setError]       = useState('')
+  const [isPending, start]      = useTransition()
 
   function submit() {
     if (!name.trim())    { setError('Nombre requerido'); return }
@@ -321,12 +321,12 @@ export function EnvelopeManager({ envelopes: initial }: { envelopes: Envelope[] 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-xs text-zinc-200 font-semibold truncate">{env.name}</p>
-                    {env.envelope_type && TYPE_BADGE[env.envelope_type] && (
+                    {env.envelope_type && TYPE_BADGE[env.envelope_type as EnvelopeType] && (
                       <span
                         className="shrink-0 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider"
-                        style={{ color: TYPE_BADGE[env.envelope_type].color, background: TYPE_BADGE[env.envelope_type].color + '22' }}
+                        style={{ color: TYPE_BADGE[env.envelope_type as EnvelopeType].color, background: TYPE_BADGE[env.envelope_type as EnvelopeType].color + '22' }}
                       >
-                        {TYPE_BADGE[env.envelope_type].label}
+                        {TYPE_BADGE[env.envelope_type as EnvelopeType].label}
                       </span>
                     )}
                   </div>

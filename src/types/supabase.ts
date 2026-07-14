@@ -1420,6 +1420,7 @@ export type Database = {
           color: string | null
           created_at: string | null
           custodio: string
+          envelope_type: string | null
           id: string
           interest_mode: string | null
           is_active: boolean | null
@@ -1434,6 +1435,7 @@ export type Database = {
           color?: string | null
           created_at?: string | null
           custodio: string
+          envelope_type?: string | null
           id?: string
           interest_mode?: string | null
           is_active?: boolean | null
@@ -1448,6 +1450,7 @@ export type Database = {
           color?: string | null
           created_at?: string | null
           custodio?: string
+          envelope_type?: string | null
           id?: string
           interest_mode?: string | null
           is_active?: boolean | null
@@ -1466,6 +1469,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      portfolio_targets: {
+        Row: {
+          bucket_key: string
+          id: string
+          label: string
+          target_pct_income: number | null
+          target_pct_portfolio: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bucket_key: string
+          id?: string
+          label: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bucket_key?: string
+          id?: string
+          label?: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       self_loan_payments: {
         Row: {
