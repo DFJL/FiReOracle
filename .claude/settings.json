@@ -8,7 +8,13 @@
       "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__list_deployments",
       "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__list_projects",
       "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__get_deployment_build_logs",
-      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__get_deployment"
+      "mcp__3420d125-c8a9-4a0e-beac-6af75fef953a__get_deployment",
+      "mcp__Vercel__list_teams",
+      "mcp__Vercel__list_deployments",
+      "mcp__Vercel__list_projects",
+      "mcp__Vercel__get_deployment_build_logs",
+      "mcp__Vercel__get_deployment",
+      "mcp__Vercel__get_runtime_errors"
     ]
   }
 }
