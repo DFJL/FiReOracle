@@ -189,6 +189,15 @@ export function TransactionEntryFAB({
     return () => clearTimeout(timer)
   }, [date, amount, amountUSD, fxRate, vendor, concept, type, currency])
 
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [open])
+
   function reset() {
     setType('gasto'); setDate(today()); setAmount(''); setNotes('')
     setCurrency('CRC'); setAmountUSD(''); setFxRate('')
@@ -466,10 +475,10 @@ export function TransactionEntryFAB({
 
       {/* Backdrop + Panel */}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={close} />
 
-          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl flex flex-col max-h-[92vh]">
+          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl flex flex-col h-[90vh] md:h-auto md:max-h-[90vh]">
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
 
             {/* Header */}
