@@ -190,12 +190,23 @@ export function TransactionEntryFAB({
   }, [date, amount, amountUSD, fxRate, vendor, concept, type, currency])
 
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden'
-    } else {
+    if (!open) return
+    // iOS Safari ignores overflow:hidden on body for touch events.
+    // position:fixed + stored scrollY is the only reliable cross-browser lock.
+    const scrollY = window.scrollY
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.position = ''
+      document.body.style.top = ''
+      document.body.style.left = ''
+      document.body.style.right = ''
       document.body.style.overflow = ''
+      window.scrollTo(0, scrollY)
     }
-    return () => { document.body.style.overflow = '' }
   }, [open])
 
   function reset() {
@@ -475,11 +486,15 @@ export function TransactionEntryFAB({
 
       {/* Backdrop + Panel */}
       {open && (
-        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={close} />
+        <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center overflow-hidden">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={close}
+            onTouchMove={e => e.preventDefault()}
+          />
 
-          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl flex flex-col h-[90vh] md:h-auto md:max-h-[90vh]">
-          <div className="overflow-y-auto flex-1 p-5 space-y-4">
+          <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl flex flex-col h-[90dvh] md:h-auto md:max-h-[90vh]">
+          <div className="overflow-y-auto overscroll-contain flex-1 p-5 space-y-4">
 
             {/* Header */}
             <div className="flex items-center justify-between">
