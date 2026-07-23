@@ -544,10 +544,29 @@ function EditTransactionModal({ tx, categories, onClose }: {
   const inputCls = 'w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
   const lbl = 'block text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
 
+
+  useEffect(() => {
+    const y = window.scrollY
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${y}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.position = ''
+      document.body.style.top = ''
+      document.body.style.left = ''
+      document.body.style.right = ''
+      document.body.style.overflow = ''
+      window.scrollTo(0, y)
+    }
+  }, [])
+
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center overflow-hidden">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} onTouchMove={e => e.preventDefault()} />
+      <div className="relative w-full md:max-w-lg bg-[#0d120d] border border-[#a3e635]/[0.12] rounded-t-2xl md:rounded-2xl p-5 space-y-4 h-[90dvh] md:h-auto md:max-h-[90vh] overflow-y-auto overscroll-contain">
         <div className="flex items-center justify-between">
           <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Editar transacción</p>
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors"><X size={16} /></button>
