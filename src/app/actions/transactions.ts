@@ -94,6 +94,10 @@ export type CreateTransactionInput =
       is_passive_income: boolean
       is_settlement?: boolean    // true = liquidación de inversión (no cuenta como ingreso real)
       investment_bucket_id?: string  // optional: which bucket this liquidation reduces
+      // 'income' = cobrado (llegó a cuenta/billetera, cuenta para yield history)
+      // null     = valorización (se reinvirtió, solo ajusta balance del bucket)
+      // undefined defaults to 'income'
+      movement_type?: 'income' | null
       notes?: string
     } & CurrencyFields & SideEffects)
   | {
@@ -243,7 +247,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       expense_group: 'na',
       category_code: input.category_code ?? null,
       investment_bucket_id: input.investment_bucket_id ?? null,
-      movement_type: 'income',
+      movement_type: input.movement_type === undefined ? 'income' : input.movement_type,
       is_passive_income: input.is_passive_income,
       is_settlement: input.is_settlement ?? false,
       is_survival_expense: false,
@@ -339,6 +343,7 @@ export type UpdateTransactionInput = {
   is_settlement?: boolean
   is_survival_expense?: boolean
   investment_bucket_id?: string | null
+  movement_type?: string | null
 }
 
 export async function updateTransaction(id: string, input: UpdateTransactionInput) {

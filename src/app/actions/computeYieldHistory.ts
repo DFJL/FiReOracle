@@ -53,10 +53,16 @@ function toYearMonth(date: string): string {
   return date.slice(0, 7) + '-01'
 }
 
+// Strips stray punctuation (typos like a trailing backtick/quote) and collapses
+// whitespace so "TRANSCOMER`" still matches the bucket's "TRANSCOMER" vendor.
+function normalizeVendor(v: string): string {
+  return v.toLowerCase().replace(/[^a-z0-9áéíóúñ ]/g, '').trim().replace(/\s+/g, ' ')
+}
+
 function matchesVendor(vendor: string | null, vendors: string[]): boolean {
   if (!vendor) return false
-  const lower = vendor.toLowerCase()
-  return vendors.some((v) => v.toLowerCase() === lower)
+  const norm = normalizeVendor(vendor)
+  return vendors.some((v) => normalizeVendor(v) === norm)
 }
 
 function matchesConcept(concept: string | null, concepts: string[]): boolean {

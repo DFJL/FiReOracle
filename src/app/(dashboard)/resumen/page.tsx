@@ -13,7 +13,7 @@ export default async function ResumenPage() {
   const admin = createAdminClient()
 
   // Transactions — admin client bypasses PostgREST max_rows
-  const [{ data: rawTx }, { data: categories }] = await Promise.all([
+  const [{ data: rawTx }, { data: categories }, { data: buckets }] = await Promise.all([
     admin
       .from('transactions')
       .select('id, movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense, notes, investment_bucket_id, created_at')
@@ -24,6 +24,12 @@ export default async function ResumenPage() {
     admin
       .from('transaction_categories')
       .select('code, name, parent_code, category_type, group_gasto, is_passive_income, is_survival_expense, is_settlement')
+      .eq('is_active', true)
+      .order('sort_order'),
+    admin
+      .from('user_investment_buckets')
+      .select('id, name')
+      .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
   ])
@@ -115,6 +121,7 @@ export default async function ResumenPage() {
       <InteractiveSection
         transactions={(rawTx ?? []) as TxClient[]}
         categories={categories ?? []}
+        buckets={buckets ?? []}
         accounts={accounts}
         exchangeRate={exchangeRate}
         defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
