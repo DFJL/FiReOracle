@@ -1,6 +1,7 @@
 {
   "enableAllProjectMcpServers": true,
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "mcp__c5cebf9d-6ab2-4627-9020-b5d8cabf7981__execute_sql",
       "mcp__c5cebf9d-6ab2-4627-9020-b5d8cabf7981__list_projects",
