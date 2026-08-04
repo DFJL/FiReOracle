@@ -218,7 +218,7 @@ export function TransactionEntryFAB({
     setType('gasto'); setDate(today()); setAmount(''); setNotes('')
     setCurrency('CRC'); setAmountUSD(''); setFxRate('')
     setVendor(''); setConcept(''); setCategoryCode(''); setExpenseGroup('personal')
-    setIsPassive(false); setIsSettlement(false); setIsSurvival(false)
+    setIsPassive(false); setPassiveKind('cobrado'); setIsSettlement(false); setIsSurvival(false)
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setInvestmentBucketId('')
     setShowBucketWarning(false); setBucketWarningAcked(false)

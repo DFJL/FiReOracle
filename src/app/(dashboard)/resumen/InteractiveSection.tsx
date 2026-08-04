@@ -41,6 +41,8 @@ type Category = {
   is_passive_income: boolean; is_survival_expense: boolean; is_settlement: boolean
 }
 
+type InvestmentBucket = { id: string; name: string }
+
 export interface AccountSummary {
   liquidBalance: number   // checking + cash accounts
   savingsBalance: number  // savings + investment accounts
@@ -496,8 +498,8 @@ function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
 
 // ── edit modal ────────────────────────────────────────────────────────────────
 
-function EditTransactionModal({ tx, categories, onClose, onSaved }: {
-  tx: TxClient; categories: Category[]; onClose: () => void
+function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
+  tx: TxClient; categories: Category[]; buckets: InvestmentBucket[]; onClose: () => void
   onSaved?: (updated: TxClient) => void
 }) {
   const [date, setDate]               = useState(tx.date ?? '')
@@ -510,8 +512,12 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
   const [isPassive, setIsPassive]     = useState(tx.is_passive_income ?? false)
   const [isSettlement, setIsSettlement] = useState(tx.is_settlement ?? false)
   const [isSurvival, setIsSurvival]   = useState(tx.is_survival_expense ?? false)
+  // 'income' = cobrado (cash), null = valorización (reinvertido, no cash flow)
+  const [movementType, setMovementType] = useState<'income' | null>(tx.movement_type === 'expense' ? 'income' : (tx.movement_type as 'income' | null))
+  const [investmentBucketId, setInvestmentBucketId] = useState(tx.investment_bucket_id ?? '')
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
+  const isIncomeSide = tx.movement_type !== 'expense'
 
   // Envelope linkage
   type Envelope = { id: string; name: string; custodio: string | null; displayName: string }
@@ -596,6 +602,10 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
           is_passive_income: isPassive,
           is_settlement: isSettlement,
           is_survival_expense: isSurvival,
+          ...(isIncomeSide ? {
+            movement_type: movementType,
+            investment_bucket_id: investmentBucketId || null,
+          } : {}),
         } satisfies UpdateTransactionInput,
         loanChanged && selectedLoanId && balAfterNum !== undefined ? {
           loanId:         selectedLoanId,
@@ -630,6 +640,10 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
         is_passive_income:   isPassive,
         is_settlement:       isSettlement,
         is_survival_expense: isSurvival,
+        ...(isIncomeSide ? {
+          movement_type:        movementType,
+          investment_bucket_id: investmentBucketId || null,
+        } : {}),
       })
       onClose()
     })
@@ -722,6 +736,47 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
                 <option value="na">Sin categoría</option>
               </select>
             </div>
+          )}
+
+          {/* Income-only: cobrado/valorización + bucket — the exact fields that
+              caused the TRANSCOMER classification drift and were invisible here */}
+          {isIncomeSide && (
+            <>
+              {isPassive && (
+                <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-2.5 space-y-1.5">
+                  <span className="text-[10px] text-cyan-400 font-medium tracking-wide uppercase">¿Cómo se recibió este rendimiento?</span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={() => setMovementType('income')}
+                      className={`text-[10px] px-2 py-1.5 rounded-md border text-left transition-all ${
+                        movementType === 'income'
+                          ? 'bg-cyan-400/15 text-cyan-300 border-cyan-400/40'
+                          : 'bg-white/[0.03] text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                      }`}>
+                      <div className="font-medium">Cobrado</div>
+                      <div className="text-[9px] opacity-70 mt-0.5">llegó a tu cuenta/billetera</div>
+                    </button>
+                    <button type="button" onClick={() => setMovementType(null)}
+                      className={`text-[10px] px-2 py-1.5 rounded-md border text-left transition-all ${
+                        movementType === null
+                          ? 'bg-purple-400/15 text-purple-300 border-purple-400/40'
+                          : 'bg-white/[0.03] text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                      }`}>
+                      <div className="font-medium">Valorización</div>
+                      <div className="text-[9px] opacity-70 mt-0.5">se reinvirtió en el fondo</div>
+                    </button>
+                  </div>
+                </div>
+              )}
+              {buckets.length > 0 && (
+                <div>
+                  <label className={lbl}>¿Liquidación de inversión? Bucket origen <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                  <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
+                    <option value="">Sin bucket (solo liquidez)</option>
+                    {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </>
           )}
 
           {/* Envelope section — all transaction types; always rendered once ready */}
@@ -842,9 +897,9 @@ function EditTransactionModal({ tx, categories, onClose, onSaved }: {
 
 type TxSortKey = 'date' | 'amount' | 'vendor' | 'category' | 'created_at'
 
-function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, onTxUpdated, onTxDeleted }: {
+function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, buckets, onTxUpdated, onTxDeleted }: {
   rows: TxClient[]; title: string; vMap: CatMap; cMap: CatMap
-  currency: 'CRC' | 'USD'; tcSell: number; categories: Category[]
+  currency: 'CRC' | 'USD'; tcSell: number; categories: Category[]; buckets?: InvestmentBucket[]
   onTxUpdated?: (updated: TxClient) => void
   onTxDeleted?: (id: string) => void
 }) {
@@ -903,6 +958,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, onTxUp
       <EditTransactionModal
         tx={editingTx}
         categories={categories}
+        buckets={buckets ?? []}
         onClose={() => setEditingTx(null)}
         onSaved={(updated) => { onTxUpdated?.(updated); setEditingTx(null) }}
       />
@@ -1038,9 +1094,10 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, categories, accounts, exchangeRate, defaultCurrency }: {
+export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, defaultCurrency }: {
   transactions: TxClient[]
   categories: Category[]
+  buckets?: InvestmentBucket[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
   defaultCurrency?: 'CRC' | 'USD'
@@ -1519,7 +1576,7 @@ export function InteractiveSection({ transactions, categories, accounts, exchang
         )}
 
         {/* L3 — full width */}
-        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} onTxUpdated={handleTxUpdated} onTxDeleted={handleTxDeleted} />
+        <TxTable rows={tableTxs} title={tableTitle} vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell} categories={categories} buckets={buckets} onTxUpdated={handleTxUpdated} onTxDeleted={handleTxDeleted} />
       </>)}
     </div>
   )

@@ -361,6 +361,7 @@ export type UpdateTransactionInput = {
   is_settlement?: boolean
   is_survival_expense?: boolean
   investment_bucket_id?: string | null
+  movement_type?: string | null
 }
 
 export type LoanLinkInput = {

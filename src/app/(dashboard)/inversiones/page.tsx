@@ -12,6 +12,12 @@ import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 const LIQUID_KEY = '__liquidez__'
 
+// Strips stray punctuation (typos like a trailing backtick/quote) and collapses
+// whitespace so e.g. "TRANSCOMER`" still matches a bucket's "TRANSCOMER" vendor.
+function normalizeVendor(v: string): string {
+  return v.toLowerCase().replace(/[^a-z0-9áéíóúñ ]/g, '').trim().replace(/\s+/g, ' ')
+}
+
 type ConceptMap = {
   depositConcepts: string[]
   rendimientosConcepts: string[]
@@ -172,8 +178,8 @@ export default async function InversionesPage() {
         else if (ciIncludes(cm.valorizacionConcepts))    passiveValuation += amt
         else if (ciIncludes(cm.liquidacionConcepts))     liquidaciones += amt
       } else if (def.bucket_type === 'vendor_based') {
-        const txVendor = (tx.vendor ?? '').toLowerCase().trim()
-        const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
+        const txVendor = normalizeVendor(tx.vendor ?? '')
+        const vendors = (def.vendors ?? []).map((v: string) => normalizeVendor(v))
         if (!vendors.includes(txVendor)) continue
 
         if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
@@ -225,8 +231,8 @@ export default async function InversionesPage() {
         else if (ci(cm.valorizacionConcepts))    txType = 'valorizacion'
         else if (ci(cm.liquidacionConcepts))     txType = 'liquidacion'
       } else if (def.bucket_type === 'vendor_based') {
-        const v = (tx.vendor ?? '').toLowerCase().trim()
-        const vs = (def.vendors ?? []).map((s: string) => s.toLowerCase())
+        const v = normalizeVendor(tx.vendor ?? '')
+        const vs = (def.vendors ?? []).map((s: string) => normalizeVendor(s))
         if (vs.includes(v)) {
           if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement)  txType = 'deposit'
           else if (tx.is_settlement)                                               txType = 'liquidacion'
@@ -280,8 +286,8 @@ export default async function InversionesPage() {
         else if (ciIncludes(cm.valorizacionConcepts))    delta = amt
         else if (ciIncludes(cm.liquidacionConcepts))     delta = -amt
       } else if (def.bucket_type === 'vendor_based') {
-        const txVendor = (tx.vendor ?? '').toLowerCase().trim()
-        const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
+        const txVendor = normalizeVendor(tx.vendor ?? '')
+        const vendors = (def.vendors ?? []).map((v: string) => normalizeVendor(v))
         if (!vendors.includes(txVendor)) continue
 
         if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) delta = amt
@@ -367,8 +373,8 @@ export default async function InversionesPage() {
           cm.depositConcepts.some(s => s.toLowerCase() === c)
         ) isDeposit = true
       } else if (def.bucket_type === 'vendor_based') {
-        const v = (tx.vendor ?? '').toLowerCase().trim()
-        const vs = (def.vendors ?? []).map((s: string) => s.toLowerCase())
+        const v = normalizeVendor(tx.vendor ?? '')
+        const vs = (def.vendors ?? []).map((s: string) => normalizeVendor(s))
         if (vs.includes(v) && tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) isDeposit = true
       }
       if (isDeposit) {
