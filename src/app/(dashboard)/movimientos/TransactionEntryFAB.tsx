@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2, ChevronDown } from 'lucide-react'
 import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
+import { linkTransactionToLoan } from '@/app/actions/loans'
 import { CONCEPT_CATALOG, lookupConcept } from '@/lib/concept-catalog'
 
 // Persistent concept→category memory (localStorage).
@@ -85,7 +86,7 @@ const TYPE_OPTIONS: { value: TxEntryType; label: string; desc: string; color: st
 ]
 
 type Loan = { id: string; description: string; original_amount: number | string; amount_repaid: number | string; status: string }
-type MortgageLoan = { id: string; name: string; lender: string | null; currency_code: string; current_balance: number | string }
+type MortgageLoan = { id: string; name: string; lender: string | null; currency_code: string; current_balance: number | string; interest_rate: number | string }
 
 export function TransactionEntryFAB({
   envelopes, categories, buckets, loans, mortgageLoans,
@@ -134,6 +135,7 @@ export function TransactionEntryFAB({
   const [loanMode, setLoanMode]             = useState<'' | 'new' | string>('')  // '' | 'new' | <loanId>
   const [newLoanDesc, setNewLoanDesc]       = useState('')
   const [mortgageLoanId, setMortgageLoanId] = useState('')
+  const [loanBalAfter, setLoanBalAfter]     = useState('')
 
   // ── Duplicate detection ──────────────────────────────────────────────────────
   const [dupHits, setDupHits]         = useState<DuplicateHit[]>([])
@@ -221,7 +223,7 @@ export function TransactionEntryFAB({
     setInvestmentBucketId('')
     setShowBucketWarning(false); setBucketWarningAcked(false)
     setAhorroVendor(''); setAhorroConcepto('')
-    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId('')
+    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId(''); setLoanBalAfter('')
     setError(null)
     // reset AI state
     setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
@@ -342,6 +344,31 @@ export function TransactionEntryFAB({
     ? (parseFloat(amountUSD) * parseFloat(fxRate)).toFixed(0)
     : ''
 
+  // Mirrors the same balance debit the /prestamos "Registrar pago" flow does —
+  // selecting a préstamo bancario used to only tag the tx (loan_id), never
+  // actually debiting loans.current_balance.
+  async function linkLoanIfNeeded(txId: string | undefined, amtCRC: number) {
+    if (!txId || !mortgageLoanId) return
+    const loan = mortgageLoans.find(l => l.id === mortgageLoanId)
+    if (!loan) return
+    const loanAmount = loan.currency_code === 'USD' && currency === 'USD'
+      ? parseFloat(amountUSD || '0')
+      : amtCRC
+    const balanceBefore = Number(loan.current_balance)
+    const balanceAfter = loanBalAfter.trim()
+      ? parseFloat(loanBalAfter)
+      : Math.max(0, balanceBefore - loanAmount)
+    await linkTransactionToLoan(txId, mortgageLoanId, {
+      payment_date: date,
+      payment_type: 'normal',
+      amount: loanAmount,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+      rate_applied: Number(loan.interest_rate ?? 0),
+      notes: notes || undefined,
+    })
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -351,7 +378,7 @@ export function TransactionEntryFAB({
     if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
-      let result: { error: string | null } | undefined
+      let result: { error: string | null; id?: string } | undefined
 
       if (type === 'gasto') {
         result = await createTransaction({
@@ -370,6 +397,7 @@ export function TransactionEntryFAB({
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
         })
+        if (!result.error) await linkLoanIfNeeded(result.id, amtCRC)
       } else if (type === 'ingreso') {
         result = await createTransaction({
           type: 'ingreso', date, amount: amtCRC,
@@ -420,7 +448,7 @@ export function TransactionEntryFAB({
     if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
-      let result: { error: string | null } | undefined
+      let result: { error: string | null; id?: string } | undefined
 
       if (type === 'gasto') {
         result = await createTransaction({
@@ -439,6 +467,7 @@ export function TransactionEntryFAB({
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
         })
+        if (!result.error) await linkLoanIfNeeded(result.id, amtCRC)
       } else if (type === 'ingreso') {
         result = await createTransaction({
           type: 'ingreso', date, amount: amtCRC,
@@ -902,7 +931,7 @@ export function TransactionEntryFAB({
                       )}
                       {mortgageLoans.length > 0 && (
                         <div>
-                          <label className={lbl}>Préstamo bancario <span className="text-zinc-700 normal-case tracking-normal">(etiqueta la tx)</span></label>
+                          <label className={lbl}>Préstamo bancario <span className="text-zinc-700 normal-case tracking-normal">(debita el saldo)</span></label>
                           <select value={mortgageLoanId} onChange={e => setMortgageLoanId(e.target.value)} className={inputCls}>
                             <option value="">— ninguno —</option>
                             {mortgageLoans.map(l => (
@@ -911,6 +940,20 @@ export function TransactionEntryFAB({
                               </option>
                             ))}
                           </select>
+                          {mortgageLoanId && type === 'gasto' && (
+                            <div className="mt-2">
+                              <label className={lbl}>Saldo del préstamo después de este pago <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                              <input type="number" min="0" step="any" value={loanBalAfter}
+                                onChange={e => setLoanBalAfter(e.target.value)}
+                                placeholder="Dejar vacío para estimar automáticamente"
+                                className={inputCls} />
+                            </div>
+                          )}
+                          {mortgageLoanId && type !== 'gasto' && (
+                            <p className="text-[9px] text-amber-400/80 mt-1">
+                              Solo debita el saldo en tipo &quot;Gasto&quot; — en otros tipos solo etiqueta la tx.
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

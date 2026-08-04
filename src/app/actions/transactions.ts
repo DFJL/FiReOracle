@@ -204,6 +204,7 @@ export async function createTransaction(input: CreateTransactionInput) {
   if (!user) return { error: 'No autenticado' }
 
   const admin = createAdminClient()
+  let createdId: string | undefined
 
   if (input.type === 'gasto') {
     const isUSD = input.currency_code === 'USD'
@@ -227,6 +228,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       notes: input.notes?.trim() || null,
     }).select('id').single()
     if (error) return { error: error.message }
+    createdId = txData?.id as string | undefined
     if (input.debit_envelope_id || input.loan_id || input.new_loan_description) {
       const sideErr = await applySideEffects(admin, user.id, input)
       if (sideErr) return { error: sideErr }
@@ -328,7 +330,7 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   revalidatePath('/resumen')
   revalidatePath('/flujo')
-  return { error: null }
+  return { error: null, id: createdId }
 }
 
 export type UpdateTransactionInput = {

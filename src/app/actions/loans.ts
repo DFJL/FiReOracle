@@ -14,6 +14,7 @@ export async function recordLoanPayment(
     balance_after: number
     rate_applied: number
     notes?: string
+    transaction_id?: string
   },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
@@ -37,7 +38,8 @@ export async function recordLoanPayment(
     balance_after: data.balance_after,
     rate_applied: data.rate_applied,
     notes: data.notes ?? null,
-  })
+    transaction_id: data.transaction_id ?? null,
+  } as never)
 
   if (insertErr) return { error: insertErr.message }
 
@@ -52,6 +54,25 @@ export async function recordLoanPayment(
   revalidatePath('/prestamos')
   revalidatePath('/patrimonio')
   return { error: null }
+}
+
+// Links an already-created transaction (e.g. from the FAB) to a loan payment,
+// so selecting a préstamo bancario actually debits loans.current_balance
+// instead of only tagging the transaction.
+export async function linkTransactionToLoan(
+  txId: string,
+  loanId: string,
+  data: {
+    payment_date: string
+    payment_type: 'normal' | 'extra' | 'partial'
+    amount: number
+    balance_before: number
+    balance_after: number
+    rate_applied: number
+    notes?: string
+  },
+): Promise<{ error: string | null }> {
+  return recordLoanPayment(loanId, { ...data, transaction_id: txId })
 }
 
 export async function updateLoanBalance(

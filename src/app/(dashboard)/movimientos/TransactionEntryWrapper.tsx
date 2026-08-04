@@ -35,7 +35,7 @@ export async function TransactionEntryWrapper() {
       .order('loan_date', { ascending: false }),
     admin
       .from('loans')
-      .select('id, name, lender, currency_code, current_balance')
+      .select('id, name, lender, currency_code, current_balance, interest_rate')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
