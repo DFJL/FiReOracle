@@ -120,6 +120,9 @@ export function TransactionEntryFAB({
   const [toEnvelopeId, setToEnvelopeId]           = useState('')
   // investment bucket for liquidation income
   const [investmentBucketId, setInvestmentBucketId] = useState('')
+  const [showBucketWarning, setShowBucketWarning] = useState(false)
+  const [bucketWarningAcked, setBucketWarningAcked] = useState(false)
+  const bucketSelectRef = useRef<HTMLSelectElement>(null)
   // ahorro extras
   const [ahorroVendor, setAhorroVendor] = useState('')
   const [ahorroConcepto, setAhorroConcepto] = useState('')
@@ -218,6 +221,7 @@ export function TransactionEntryFAB({
     setIsPassive(false); setIsSettlement(false); setIsSurvival(false)
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setInvestmentBucketId('')
+    setShowBucketWarning(false); setBucketWarningAcked(false)
     setAhorroVendor(''); setAhorroConcepto('')
     setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId('')
     setError(null)
@@ -331,6 +335,10 @@ export function TransactionEntryFAB({
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
+  function needsBucketConfirmation() {
+    return type === 'ingreso' && !investmentBucketId && !bucketWarningAcked
+  }
+
   // Compute CRC amount when user enters USD amount + rate
   const crcFromUSD = amountUSD && fxRate
     ? (parseFloat(amountUSD) * parseFloat(fxRate)).toFixed(0)
@@ -342,6 +350,7 @@ export function TransactionEntryFAB({
 
     const amtCRC = currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount)
     if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
+    if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
       let result: { error: string | null } | undefined
@@ -374,7 +383,7 @@ export function TransactionEntryFAB({
           is_passive_income: isPassive,
           is_valorizacion: isPassive && passiveKind === 'valorizacion',
           is_settlement: isSettlement,
-          investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
+          investment_bucket_id: investmentBucketId || undefined,
           notes: notes || undefined,
           credit_envelope_id: creditEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
@@ -411,6 +420,7 @@ export function TransactionEntryFAB({
 
     const amtCRC = currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount)
     if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
+    if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
       let result: { error: string | null } | undefined
@@ -443,7 +453,7 @@ export function TransactionEntryFAB({
           is_passive_income: isPassive,
           is_valorizacion: isPassive && passiveKind === 'valorizacion',
           is_settlement: isSettlement,
-          investment_bucket_id: isSettlement && investmentBucketId ? investmentBucketId : undefined,
+          investment_bucket_id: investmentBucketId || undefined,
           notes: notes || undefined,
           credit_envelope_id: creditEnvelopeId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
@@ -779,10 +789,18 @@ export function TransactionEntryFAB({
                       onChange={v => { setCategoryCode(v); saveMem(concept, v) }}
                       typeFilter="income" className={inputCls} />
                   </div>
-                  {isSettlement && buckets.length > 0 && (
+                  {buckets.length > 0 && (
                     <div>
-                      <label className={lbl}>¿Reduce bucket de inversión? <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
-                      <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
+                      <label className={lbl}>¿Liquidación de inversión? Bucket origen <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                      <select
+                        ref={bucketSelectRef}
+                        value={investmentBucketId}
+                        onChange={e => {
+                          const v = e.target.value
+                          setInvestmentBucketId(v)
+                          if (v) setIsSettlement(true)
+                        }}
+                        className={inputCls}>
                         <option value="">Sin bucket (solo liquidez)</option>
                         {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
@@ -986,6 +1004,28 @@ export function TransactionEntryFAB({
           {/* ── Sticky footer: error + submit buttons ── */}
           {!aiMode && (
             <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/[0.06] space-y-2">
+              {showBucketWarning && !investmentBucketId && (
+                <div className="bg-blue-400/[0.08] border border-blue-400/25 rounded-xl px-3 py-2.5 space-y-2">
+                  <p className="text-[11px] text-blue-300/90 leading-snug">
+                    ¿Es una liquidación de inversión? Si no asignás un bucket, el patrimonio invertido no se va a debitar automáticamente.
+                  </p>
+                  <div className="flex gap-2">
+                    <button type="button"
+                      onClick={() => {
+                        bucketSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                        bucketSelectRef.current?.focus()
+                      }}
+                      className="flex-1 py-1.5 rounded-lg bg-blue-400/15 text-blue-300 text-[11px] font-bold hover:bg-blue-400/25 transition-colors">
+                      Asignar bucket
+                    </button>
+                    <button type="button"
+                      onClick={() => { setBucketWarningAcked(true); setShowBucketWarning(false) }}
+                      className="flex-1 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
+                      No, es ingreso externo
+                    </button>
+                  </div>
+                </div>
+              )}
               {error && (
                 <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>
               )}
