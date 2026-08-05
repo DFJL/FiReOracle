@@ -32,7 +32,7 @@ export default async function PatrimonioPage() {
     { data: itemRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
-      .select('id, name, bucket_type, vendors, concept_map, account_id')
+      .select('id, name, bucket_type, vendors, concept_map, account_id, display_category')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('transactions')
@@ -95,11 +95,16 @@ export default async function PatrimonioPage() {
     .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
 
-  // Investment total across all bucket types
+  // Investment total across all bucket types — split by display_category so
+  // pension/severance funds (ROP & FCL, Pensión Voluntaria) land under
+  // "Fondos & Pensiones" instead of "Inversiones"
   let totalInvested = 0
+  let totalPensiones = 0
   for (const def of bucketRows ?? []) {
+    const isPension = def.display_category === 'invertido'
     if (def.bucket_type === 'snapshot_based') {
-      totalInvested += snapshotBalances[def.id] ?? 0
+      const bal = snapshotBalances[def.id] ?? 0
+      if (isPension) totalPensiones += bal; else totalInvested += bal
       continue
     }
     let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0
@@ -127,7 +132,8 @@ export default async function PatrimonioPage() {
         else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
       }
     }
-    totalInvested += deposits + passiveValuation + rendimientos - liquidaciones
+    const bal = deposits + passiveValuation + rendimientos - liquidaciones
+    if (isPension) totalPensiones += bal; else totalInvested += bal
   }
 
   // Asset/liability aggregates
@@ -135,7 +141,7 @@ export default async function PatrimonioPage() {
   const activeLiabilities  = liabilityRows ?? []
   const iliquidTotal       = activeAssets.reduce((s, a) => s + Number(a.value_crc), 0)
   const iliquidInvestable  = activeAssets.filter(a => a.is_investable).reduce((s, a) => s + Number(a.value_crc), 0)
-  const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
+  const activosInvertibles = liquidBalance + totalInvested + totalPensiones + iliquidInvestable
 
   // Per-envelope balance breakdown (for Liquidez drilldown)
   const envelopeBalanceMap: Record<string, number> = {}
@@ -149,8 +155,9 @@ export default async function PatrimonioPage() {
     .filter(e => Math.abs(e.balance) > 0.01)
     .sort((a, b) => b.balance - a.balance)
 
-  // Per-bucket balance breakdown (for Inversiones drilldown)
+  // Per-bucket balance breakdown (for Inversiones / Fondos & Pensiones drilldown)
   const bucketBreakdown: { name: string; balance: number }[] = []
+  const pensionesBreakdown: { name: string; balance: number }[] = []
   for (const def of bucketRows ?? []) {
     let balance = 0
     if (def.bucket_type === 'snapshot_based') {
@@ -184,7 +191,10 @@ export default async function PatrimonioPage() {
       balance = deposits + passiveValuation + rendimientos - liquidaciones
     }
     const defWithName = def as typeof def & { name?: string }
-    if (defWithName.name) bucketBreakdown.push({ name: defWithName.name, balance })
+    if (defWithName.name) {
+      if (def.display_category === 'invertido') pensionesBreakdown.push({ name: defWithName.name, balance })
+      else bucketBreakdown.push({ name: defWithName.name, balance })
+    }
   }
 
   // Monthly trend: liquid + non-snapshot invested running totals
@@ -271,7 +281,7 @@ export default async function PatrimonioPage() {
     s + (l.currencyCode === 'USD' ? l.currentBalance * exchangeRate.sell : l.currentBalance), 0)
   const manualLiabTotal   = activeLiabilities.reduce((s, l) => s + Number(l.current_balance), 0)
   const totalLiabilities  = loansCRCTotal + manualLiabTotal
-  const totalActivos      = liquidBalance + totalInvested + iliquidTotal
+  const totalActivos      = liquidBalance + totalInvested + totalPensiones + iliquidTotal
   const patrimonioNeto    = totalActivos - totalLiabilities
 
   // Deduplicate by item_name: take the most recent entry per item (rows are already DESC by date)
@@ -306,6 +316,8 @@ export default async function PatrimonioPage() {
         netWorthItems={netWorthItems}
         envelopeBreakdown={envelopeBreakdown}
         bucketBreakdown={bucketBreakdown}
+        pensionesBreakdown={pensionesBreakdown}
+        totalPensiones={totalPensiones}
       />
     </div>
   )

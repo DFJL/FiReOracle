@@ -544,6 +544,7 @@ export type Database = {
           created_at: string | null
           email: string
           id: string
+          last_synced_at: string | null
           provider: string
           refresh_token: string
           user_id: string
@@ -553,6 +554,7 @@ export type Database = {
           created_at?: string | null
           email: string
           id?: string
+          last_synced_at?: string | null
           provider?: string
           refresh_token: string
           user_id: string
@@ -562,6 +564,7 @@ export type Database = {
           created_at?: string | null
           email?: string
           id?: string
+          last_synced_at?: string | null
           provider?: string
           refresh_token?: string
           user_id?: string
@@ -601,6 +604,8 @@ export type Database = {
           id: string
           movement_type: string
           notes: string | null
+          self_loan_payment_id: string | null
+          source_tx_id: string | null
           user_id: string
         }
         Insert: {
@@ -611,6 +616,8 @@ export type Database = {
           id?: string
           movement_type: string
           notes?: string | null
+          self_loan_payment_id?: string | null
+          source_tx_id?: string | null
           user_id: string
         }
         Update: {
@@ -621,6 +628,8 @@ export type Database = {
           id?: string
           movement_type?: string
           notes?: string | null
+          self_loan_payment_id?: string | null
+          source_tx_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -629,6 +638,20 @@ export type Database = {
             columns: ["envelope_id"]
             isOneToOne: false
             referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envelope_movements_self_loan_payment_id_fkey"
+            columns: ["self_loan_payment_id"]
+            isOneToOne: false
+            referencedRelation: "self_loan_payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envelope_movements_source_tx_id_fkey"
+            columns: ["source_tx_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -950,6 +973,7 @@ export type Database = {
           payment_type: string
           principal: number
           rate_applied: number
+          transaction_id: string | null
           user_id: string
         }
         Insert: {
@@ -967,6 +991,7 @@ export type Database = {
           payment_type?: string
           principal?: number
           rate_applied?: number
+          transaction_id?: string | null
           user_id: string
         }
         Update: {
@@ -984,6 +1009,7 @@ export type Database = {
           payment_type?: string
           principal?: number
           rate_applied?: number
+          transaction_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -992,6 +1018,13 @@ export type Database = {
             columns: ["loan_id"]
             isOneToOne: false
             referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loan_payments_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
@@ -1272,6 +1305,42 @@ export type Database = {
           },
         ]
       }
+      payment_reminders: {
+        Row: {
+          amount: number | null
+          created_at: string
+          currency_code: string
+          due_day: number
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          user_id: string
+        }
+        Insert: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          due_day: number
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          due_day?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       payment_sources: {
         Row: {
           bank_name: string | null
@@ -1296,6 +1365,36 @@ export type Database = {
           is_active?: boolean
           name?: string
           source_type?: string
+        }
+        Relationships: []
+      }
+      portfolio_targets: {
+        Row: {
+          bucket_key: string
+          id: string
+          label: string
+          target_pct_income: number | null
+          target_pct_portfolio: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bucket_key: string
+          id?: string
+          label: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bucket_key?: string
+          id?: string
+          label?: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -1470,40 +1569,11 @@ export type Database = {
           },
         ]
       }
-      portfolio_targets: {
-        Row: {
-          bucket_key: string
-          id: string
-          label: string
-          target_pct_income: number | null
-          target_pct_portfolio: number | null
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          bucket_key: string
-          id?: string
-          label: string
-          target_pct_income?: number | null
-          target_pct_portfolio?: number | null
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          bucket_key?: string
-          id?: string
-          label?: string
-          target_pct_income?: number | null
-          target_pct_portfolio?: number | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
       self_loan_payments: {
         Row: {
           amount: number
           created_at: string
+          from_envelope_id: string | null
           id: string
           linked_transaction_id: string | null
           notes: string | null
@@ -1513,6 +1583,7 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string
+          from_envelope_id?: string | null
           id?: string
           linked_transaction_id?: string | null
           notes?: string | null
@@ -1522,6 +1593,7 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string
+          from_envelope_id?: string | null
           id?: string
           linked_transaction_id?: string | null
           notes?: string | null
@@ -1529,6 +1601,13 @@ export type Database = {
           self_loan_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "self_loan_payments_from_envelope_id_fkey"
+            columns: ["from_envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "self_loan_payments_linked_transaction_id_fkey"
             columns: ["linked_transaction_id"]
@@ -1817,6 +1896,7 @@ export type Database = {
       }
       transaction_inbox: {
         Row: {
+          account_id: string | null
           created_at: string
           email_date: string | null
           email_id: string
@@ -1828,6 +1908,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          account_id?: string | null
           created_at?: string
           email_date?: string | null
           email_id: string
@@ -1839,6 +1920,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          account_id?: string | null
           created_at?: string
           email_date?: string | null
           email_id?: string
@@ -1849,7 +1931,15 @@ export type Database = {
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "transaction_inbox_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "connected_email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       transactions: {
         Row: {
@@ -2009,6 +2099,7 @@ export type Database = {
           gmail_email: string | null
           gmail_refresh_token: string | null
           goal_funding_alert_ratio: number
+          lifestyle_exclude_categories: string[] | null
           preferred_currency: string | null
           runway_green_months: number
           runway_yellow_months: number
@@ -2030,6 +2121,7 @@ export type Database = {
           gmail_email?: string | null
           gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
+          lifestyle_exclude_categories?: string[] | null
           preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
@@ -2051,6 +2143,7 @@ export type Database = {
           gmail_email?: string | null
           gmail_refresh_token?: string | null
           goal_funding_alert_ratio?: number
+          lifestyle_exclude_categories?: string[] | null
           preferred_currency?: string | null
           runway_green_months?: number
           runway_yellow_months?: number
@@ -2068,6 +2161,7 @@ export type Database = {
           color: string | null
           concept_map: Json | null
           created_at: string | null
+          display_category: string
           id: string
           industry: string | null
           is_active: boolean | null
@@ -2083,6 +2177,7 @@ export type Database = {
           color?: string | null
           concept_map?: Json | null
           created_at?: string | null
+          display_category?: string
           id?: string
           industry?: string | null
           is_active?: boolean | null
@@ -2098,6 +2193,7 @@ export type Database = {
           color?: string | null
           concept_map?: Json | null
           created_at?: string | null
+          display_category?: string
           id?: string
           industry?: string | null
           is_active?: boolean | null
@@ -2155,6 +2251,27 @@ export type Database = {
           onboarding_done?: boolean
           savings_goal_pct?: number
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_telegram_config: {
+        Row: {
+          chat_id: string
+          created_at: string
+          is_active: boolean
+          user_id: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          is_active?: boolean
+          user_id: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          is_active?: boolean
           user_id?: string
         }
         Relationships: []

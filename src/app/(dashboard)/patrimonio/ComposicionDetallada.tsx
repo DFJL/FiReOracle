@@ -42,6 +42,7 @@ export function ComposicionDetallada({
   computedValues = {},
   liquidezBreakdown = [],
   inversionesBreakdown = [],
+  pensionesBreakdown = [],
   loansBreakdown = [],
 }: {
   items: NetWorthItem[]
@@ -49,6 +50,7 @@ export function ComposicionDetallada({
   computedValues?: Record<string, number>
   liquidezBreakdown?: Breakdown
   inversionesBreakdown?: Breakdown
+  pensionesBreakdown?: Breakdown
   loansBreakdown?: Breakdown
 }) {
   const [items, setItems]       = useState<NetWorthItem[]>(initialItems)
@@ -147,7 +149,7 @@ export function ComposicionDetallada({
   const portfolioTotal = (() => {
     let total = 0
     for (const cat of [...PORTFOLIO_CATS, ...STANDALONE_CATS.filter(c => c !== 'pasivo')]) {
-      const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : null
+      const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : cat === 'invertido' ? 'invertido' : null
       if (ck !== null && ck in computedValues) {
         total += computedValues[ck]
       } else {
@@ -178,7 +180,8 @@ export function ComposicionDetallada({
     const isOpen = expanded.has(cat)
     const drillRows: Breakdown =
       cat === 'liquido'     ? liquidezBreakdown :
-      cat === 'inversiones' ? inversionesBreakdown : []
+      cat === 'inversiones' ? inversionesBreakdown :
+      cat === 'invertido'   ? pensionesBreakdown : []
 
     return (
       <div key={cat} className={`rounded-xl border ${m.border} overflow-hidden`}>
