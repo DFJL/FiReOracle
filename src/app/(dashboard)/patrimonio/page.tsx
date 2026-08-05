@@ -111,6 +111,8 @@ export default async function PatrimonioPage() {
         if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
           if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
           else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
+          else if (tx.is_passive_income && tx.movement_type === 'income') rendimientos += amt
+          else if (tx.is_passive_income && !tx.movement_type)             passiveValuation += amt
         } else if (cm.depositConcepts.includes(c))           deposits += amt
         else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
         else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
@@ -163,6 +165,8 @@ export default async function PatrimonioPage() {
           if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
             if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
             else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
+            else if (tx.is_passive_income && tx.movement_type === 'income') rendimientos += amt
+            else if (tx.is_passive_income && !tx.movement_type)             passiveValuation += amt
           } else if (cm.depositConcepts.includes(c))           deposits += amt
           else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
           else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
@@ -198,7 +202,11 @@ export default async function PatrimonioPage() {
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
         const c = tx.concept ?? ''
-        if (cm.depositConcepts.includes(c))           delta = amt
+        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
+          if (tx.movement_type === 'income' && tx.is_settlement) delta = -amt
+          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) delta = amt
+          else if (tx.is_passive_income) delta = amt
+        } else if (cm.depositConcepts.includes(c))           delta = amt
         else if (cm.rendimientosConcepts.includes(c))  delta = amt
         else if (cm.valorizacionConcepts.includes(c))  delta = amt
         else if (cm.liquidacionConcepts.includes(c))   delta = -amt
