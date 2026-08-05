@@ -641,6 +641,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "envelope_movements_self_loan_payment_id_fkey"
+            columns: ["self_loan_payment_id"]
+            isOneToOne: false
+            referencedRelation: "self_loan_payments"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "envelope_movements_source_tx_id_fkey"
             columns: ["source_tx_id"]
             isOneToOne: false
@@ -1361,6 +1368,36 @@ export type Database = {
         }
         Relationships: []
       }
+      portfolio_targets: {
+        Row: {
+          bucket_key: string
+          id: string
+          label: string
+          target_pct_income: number | null
+          target_pct_portfolio: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bucket_key: string
+          id?: string
+          label: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bucket_key?: string
+          id?: string
+          label?: string
+          target_pct_income?: number | null
+          target_pct_portfolio?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       savings_buckets: {
         Row: {
           bucket_type: string
@@ -1531,36 +1568,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      portfolio_targets: {
-        Row: {
-          bucket_key: string
-          id: string
-          label: string
-          target_pct_income: number | null
-          target_pct_portfolio: number | null
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          bucket_key: string
-          id?: string
-          label: string
-          target_pct_income?: number | null
-          target_pct_portfolio?: number | null
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          bucket_key?: string
-          id?: string
-          label?: string
-          target_pct_income?: number | null
-          target_pct_portfolio?: number | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
       }
       self_loan_payments: {
         Row: {
@@ -2154,6 +2161,7 @@ export type Database = {
           color: string | null
           concept_map: Json | null
           created_at: string | null
+          display_category: string
           id: string
           industry: string | null
           is_active: boolean | null
@@ -2169,6 +2177,7 @@ export type Database = {
           color?: string | null
           concept_map?: Json | null
           created_at?: string | null
+          display_category?: string
           id?: string
           industry?: string | null
           is_active?: boolean | null
@@ -2184,6 +2193,7 @@ export type Database = {
           color?: string | null
           concept_map?: Json | null
           created_at?: string | null
+          display_category?: string
           id?: string
           industry?: string | null
           is_active?: boolean | null

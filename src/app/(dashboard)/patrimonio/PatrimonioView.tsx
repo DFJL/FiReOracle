@@ -57,6 +57,8 @@ type Props = {
   netWorthItems: NetWorthItem[]
   envelopeBreakdown: { name: string; balance: number }[]
   bucketBreakdown: { name: string; balance: number }[]
+  pensionesBreakdown: { name: string; balance: number }[]
+  totalPensiones: number
 }
 
 const ASSET_TYPES = [
@@ -568,7 +570,7 @@ export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
   assets, liabilities, loans, monthlyTrend, snapshots, exchangeRate, netWorthItems,
-  envelopeBreakdown, bucketBreakdown,
+  envelopeBreakdown, bucketBreakdown, pensionesBreakdown, totalPensiones,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -829,9 +831,10 @@ export function PatrimonioView({
           <ComposicionDetallada
             items={netWorthItems}
             fmt={fmt}
-            computedValues={{ liquidez: liquidBalance, inversiones: totalInvested }}
+            computedValues={{ liquidez: liquidBalance, inversiones: totalInvested, invertido: totalPensiones }}
             liquidezBreakdown={envelopeBreakdown}
             inversionesBreakdown={bucketBreakdown}
+            pensionesBreakdown={pensionesBreakdown}
             loansBreakdown={loans.map(l => ({
               name: `${l.name} (${l.lender})`,
               balance: l.currencyCode === 'USD' ? l.currentBalance * rate : l.currentBalance,
