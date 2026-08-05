@@ -18,7 +18,7 @@ export const CONCEPT_CATALOG: CatalogEntry[] = [
   { concepto: 'Entrada extra efectivo',                           categoryCode: 'MISC_INCOME',              type: 'income' },  // I-7
   { concepto: 'Otros pagos laborales',                            categoryCode: 'WORK_OTHER',               type: 'income' },  // I-8
   { concepto: 'Préstamo',                                         categoryCode: 'LOAN_RECEIVED',            type: 'income' },  // I-9
-  { concepto: 'Retiro FCL',                                       categoryCode: 'WORK_OTHER',               type: 'income' },  // I-10
+  { concepto: 'Retiro FCL',                                       categoryCode: 'INVESTMENT_LIQUIDATION',   type: 'income' },  // I-10
   { concepto: 'Pago viáticos',                                    categoryCode: 'WORK_OTHER',               type: 'income' },  // I-11
   { concepto: 'Salario UNED',                                     categoryCode: 'SALARY',                   type: 'income' },  // I-12
   { concepto: 'Ingreso no identificado',                          categoryCode: 'MISC_INCOME',              type: 'income' },  // I-13
@@ -79,6 +79,14 @@ export const CONCEPT_CATALOG: CatalogEntry[] = [
   // Extra income entries in bucket concept_maps or common user usage (not in original I-* list)
   { concepto: 'Bono',                                             categoryCode: 'WORK_OTHER',               type: 'income' },
   { concepto: 'Venta de crypto',                                  categoryCode: 'INVESTMENT_LIQUIDATION',   type: 'income' },
+
+  // ROP & FCL / Pensión Voluntaria buckets (concept_based)
+  { concepto: 'Ajuste de valor ROP & FCL',                        categoryCode: 'APPRECIATION',             type: 'income' },
+  { concepto: 'Rendimientos ROP & FCL',                           categoryCode: 'INVESTMENT_RETURN',        type: 'income' },
+  { concepto: 'Liquidación ROP & FCL',                            categoryCode: 'INVESTMENT_LIQUIDATION',   type: 'income' },
+  { concepto: 'Ajuste de valor Pensión Voluntaria',                categoryCode: 'APPRECIATION',             type: 'income' },
+  { concepto: 'Rendimientos Pensión Voluntaria',                  categoryCode: 'INVESTMENT_RETURN',        type: 'income' },
+  { concepto: 'Liquidación Pensión Voluntaria',                   categoryCode: 'INVESTMENT_LIQUIDATION',   type: 'income' },
 
   // ── EGRESOS (E-1..E-158) ──────────────────────────────────────────────────
   // Transporte
