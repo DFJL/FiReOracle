@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useEffect, useRef } from 'react'
 import type { Envelope } from './page'
 import type { SelfLoan } from './page'
 import {
@@ -272,11 +272,19 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
   const [amount, setAmount]           = useState('')
   const [date, setDate]               = useState(new Date().toISOString().slice(0, 10))
   const [notes, setNotes]             = useState('')
-  const [fromEnvelopeId, setFromEnvelopeId] = useState(
-    loan.source_envelope_id ?? (loan.envelope_split?.[0]?.envelope_id ?? '')
-  )
+  // No default here on purpose: the loan's own origin envelope(s) already get
+  // credited back via envelope_split — defaulting this to the same envelope
+  // silently debits the wrong pot instead of where the repayment cash came from.
+  const [fromEnvelopeId, setFromEnvelopeId] = useState('')
+  const [showFromWarning, setShowFromWarning] = useState(false)
+  const [fromWarningAcked, setFromWarningAcked] = useState(false)
   const [error, setError]   = useState('')
   const [isPending, start]  = useTransition()
+  const fromSelectRef = useRef<HTMLSelectElement>(null)
+
+  function needsFromConfirmation() {
+    return !fromEnvelopeId && !fromWarningAcked
+  }
 
   const remaining = loan.original_amount - loan.amount_repaid
 
@@ -306,6 +314,7 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
     const amt = parseFloat(amount.replace(/,/g, ''))
     if (!amt || amt <= 0)       { setError('Monto inválido'); return }
     if (amt > remaining + 0.01) { setError(`Máximo ₡${Math.round(remaining).toLocaleString('es-CR')}`); return }
+    if (needsFromConfirmation()) { setShowFromWarning(true); return }
     setError('')
     start(async () => {
       const res = await recordSelfLoanPayment(loan.id, {
@@ -320,6 +329,7 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
   }
 
   function settle() {
+    if (needsFromConfirmation()) { setShowFromWarning(true); return }
     setError('')
     start(async () => {
       const res = await recordSelfLoanPayment(loan.id, {
@@ -352,18 +362,39 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
       )}
 
       <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Sobre a debitar</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">¿De dónde sale esta plata? Sobre a debitar</p>
         <select
+          ref={fromSelectRef}
           value={fromEnvelopeId}
           onChange={e => setFromEnvelopeId(e.target.value)}
           className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
         >
-          <option value="">— sin debitar sobre —</option>
+          <option value="">— seleccioná un sobre —</option>
           {envelopes.map(e => (
             <option key={e.id} value={e.id}>{e.name}</option>
           ))}
         </select>
       </div>
+
+      {showFromWarning && !fromEnvelopeId && (
+        <div className="rounded-lg border border-blue-400/20 bg-blue-400/5 p-2.5 space-y-2">
+          <p className="text-[11px] text-blue-300/90 leading-snug">
+            Si no elegís de qué sobre sale esta plata, el abono se acredita a {loan.envelope_split && loan.envelope_split.length > 1 ? 'los sobres de origen' : 'el sobre de origen'} pero no se debita de ningún lado — el saldo va a quedar inflado.
+          </p>
+          <div className="flex gap-2">
+            <button type="button"
+              onClick={() => { fromSelectRef.current?.focus() }}
+              className="flex-1 py-1.5 rounded-lg bg-blue-400/15 text-blue-300 text-[11px] font-bold hover:bg-blue-400/25 transition-colors">
+              Elegir sobre
+            </button>
+            <button type="button"
+              onClick={() => { setFromWarningAcked(true); setShowFromWarning(false) }}
+              className="flex-1 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
+              Fue efectivo / externo
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -444,10 +475,13 @@ function EditPaymentForm({
   const [fromId, setFromId]         = useState(payment.from_envelope_id ?? '')
   const [error, setError]           = useState('')
   const [isPending, start]          = useTransition()
+  const [showFromWarning, setShowFromWarning] = useState(false)
+  const [fromWarningAcked, setFromWarningAcked] = useState(false)
 
   function save() {
     const amt = parseFloat(amount.replace(/,/g, ''))
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    if (!fromId && !fromWarningAcked) { setShowFromWarning(true); return }
     setError('')
     start(async () => {
       const res = await updateSelfLoanPayment(payment.id, loanId, {
@@ -477,13 +511,25 @@ function EditPaymentForm({
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="..." className={inp} />
         </div>
         <div className="col-span-2">
-          <p className={lbl}>Sobre debitado</p>
+          <p className={lbl}>¿De dónde sale esta plata? Sobre debitado</p>
           <select value={fromId} onChange={e => setFromId(e.target.value)} className={inp}>
-            <option value="">— sin sobre —</option>
+            <option value="">— seleccioná un sobre —</option>
             {envelopes.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         </div>
       </div>
+      {showFromWarning && !fromId && (
+        <div className="rounded-lg border border-blue-400/20 bg-blue-400/5 p-2.5 space-y-2">
+          <p className="text-[11px] text-blue-300/90 leading-snug">
+            Sin sobre elegido, este abono se acredita al sobre de origen pero no se debita de ningún lado.
+          </p>
+          <button type="button"
+            onClick={() => { setFromWarningAcked(true); setShowFromWarning(false) }}
+            className="w-full py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
+            Fue efectivo / externo
+          </button>
+        </div>
+      )}
       {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="flex gap-2">
         <button onClick={save} disabled={isPending}
