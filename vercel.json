@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/monthly-net-worth-snapshot",
-      "schedule": "0 6 1 * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
