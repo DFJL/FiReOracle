@@ -604,6 +604,7 @@ export type Database = {
           id: string
           movement_type: string
           notes: string | null
+          self_loan_id: string | null
           self_loan_payment_id: string | null
           source_tx_id: string | null
           user_id: string
@@ -616,6 +617,7 @@ export type Database = {
           id?: string
           movement_type: string
           notes?: string | null
+          self_loan_id?: string | null
           self_loan_payment_id?: string | null
           source_tx_id?: string | null
           user_id: string
@@ -628,6 +630,7 @@ export type Database = {
           id?: string
           movement_type?: string
           notes?: string | null
+          self_loan_id?: string | null
           self_loan_payment_id?: string | null
           source_tx_id?: string | null
           user_id?: string
@@ -638,6 +641,13 @@ export type Database = {
             columns: ["envelope_id"]
             isOneToOne: false
             referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envelope_movements_self_loan_id_fkey"
+            columns: ["self_loan_id"]
+            isOneToOne: false
+            referencedRelation: "self_loans"
             referencedColumns: ["id"]
           },
           {

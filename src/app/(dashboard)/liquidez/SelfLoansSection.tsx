@@ -5,7 +5,7 @@ import type { Envelope } from './page'
 import type { SelfLoan } from './page'
 import {
   createSelfLoan, recordSelfLoanPayment, updateLoanSources,
-  getSelfLoanHistory, updateSelfLoanPayment, deleteSelfLoanPayment,
+  getSelfLoanHistory, updateSelfLoanPayment, deleteSelfLoanPayment, deleteSelfLoan,
 } from '@/app/actions/selfLoans'
 import type { SelfLoanPayment } from '@/app/actions/selfLoans'
 
@@ -656,6 +656,21 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
   const [openId, setOpenId]         = useState<string | null>(null)
   const [openPanel, setOpenPanel]   = useState<ActivePanel | null>(null)
   const [showPaid, setShowPaid]     = useState(false)
+  const [deletingLoanId, setDeletingLoanId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [, startDeleteLoan]         = useTransition()
+
+  function handleDeleteLoan(loan: SelfLoan) {
+    if (!window.confirm(`¿Eliminar el autopréstamo "${loan.description}" (${fmtCRC(loan.original_amount)})? Se revertirán todos los movimientos de sobre asociados, incluyendo abonos ya registrados. Esto no se puede deshacer.`)) return
+    setDeletingLoanId(loan.id)
+    setDeleteError('')
+    startDeleteLoan(async () => {
+      const res = await deleteSelfLoan(loan.id)
+      if (res?.error) { setDeleteError(res.error); setDeletingLoanId(null); return }
+      setDeletingLoanId(null)
+      closePanel()
+    })
+  }
 
   const active       = loans.filter(l => l.status !== 'paid')
   const paid         = loans.filter(l => l.status === 'paid')
@@ -755,7 +770,15 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                       >
                         Editar fuentes
                       </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleDeleteLoan(loan) }}
+                        disabled={deletingLoanId === loan.id}
+                        className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] hover:text-rose-400 transition-colors disabled:opacity-40"
+                      >
+                        {deletingLoanId === loan.id ? 'Borrando…' : 'Borrar autopréstamo'}
+                      </button>
                     </div>
+                    {deleteError && <p className="px-4 pb-2 text-[10px] text-rose-400">{deleteError}</p>}
                     <HistoryPanel
                       loan={loan}
                       envelopes={envelopes}

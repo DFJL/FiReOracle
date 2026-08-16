@@ -28,17 +28,7 @@ export async function createAutoprestamo(data: AutoprestamoInput) {
 
   if (!acct) return { error: 'No hay cuentas financieras configuradas' }
 
-  const { error: movErr } = await admin.from('envelope_movements').insert({
-    user_id: user.id,
-    envelope_id: data.envelope_id,
-    date: data.date,
-    amount: -Math.abs(data.amount),
-    movement_type: 'retiro',
-    notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
-  })
-  if (movErr) return { error: movErr.message }
-
-  const { error: loanErr } = await admin.from('self_loans').insert({
+  const { data: loanRow, error: loanErr } = await admin.from('self_loans').insert({
     user_id: user.id,
     description: data.description,
     original_amount: Math.abs(data.amount),
@@ -48,8 +38,19 @@ export async function createAutoprestamo(data: AutoprestamoInput) {
     currency_code: 'CRC',
     status: 'pending',
     notes: data.notes || null,
+  }).select('id').single()
+  if (loanErr || !loanRow) return { error: loanErr?.message ?? 'Error al crear autopréstamo' }
+
+  const { error: movErr } = await admin.from('envelope_movements').insert({
+    user_id: user.id,
+    envelope_id: data.envelope_id,
+    date: data.date,
+    amount: -Math.abs(data.amount),
+    movement_type: 'retiro',
+    notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
+    self_loan_id: loanRow.id,
   })
-  if (loanErr) return { error: loanErr.message }
+  if (movErr) return { error: movErr.message }
 
   revalidatePath('/liquidez')
   return { ok: true }
@@ -87,22 +88,10 @@ export async function createSelfLoan(data: SelfLoanFormData) {
 
   if (originalAmount <= 0) return { error: 'Monto inválido' }
 
-  for (const src of validSources) {
-    const { error: movErr } = await admin.from('envelope_movements').insert({
-      user_id: user.id,
-      envelope_id: src.envelope_id,
-      date: data.loan_date,
-      amount: -Math.abs(src.amount),
-      movement_type: 'retiro',
-      notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
-    })
-    if (movErr) return { error: movErr.message }
-  }
-
   const primaryEnvelopeId = validSources.length > 0 ? validSources[0].envelope_id : null
   const envelopeSplit = validSources.length > 1 ? validSources : null
 
-  const { error } = await admin.from('self_loans').insert({
+  const { data: loanRow, error } = await admin.from('self_loans').insert({
     user_id: user.id,
     description: data.description,
     original_amount: originalAmount,
@@ -113,9 +102,23 @@ export async function createSelfLoan(data: SelfLoanFormData) {
     currency_code: 'CRC',
     status: 'pending',
     notes: data.notes || null,
-  })
+  }).select('id').single()
 
-  if (error) return { error: error.message }
+  if (error || !loanRow) return { error: error?.message ?? 'Error al crear autopréstamo' }
+
+  for (const src of validSources) {
+    const { error: movErr } = await admin.from('envelope_movements').insert({
+      user_id: user.id,
+      envelope_id: src.envelope_id,
+      date: data.loan_date,
+      amount: -Math.abs(src.amount),
+      movement_type: 'retiro',
+      notes: `Autopréstamo: ${data.description}${data.notes ? ` · ${data.notes}` : ''}`,
+      self_loan_id: loanRow.id,
+    })
+    if (movErr) return { error: movErr.message }
+  }
+
   revalidatePath('/liquidez')
   return { ok: true }
 }
@@ -380,6 +383,59 @@ export async function deleteSelfLoanPayment(paymentId: string, loanId: string) {
   if (error) return { error: error.message }
 
   await recalcLoan(admin, loanId)
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
+export async function deleteSelfLoan(loanId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+
+  const { data: loan } = await admin
+    .from('self_loans')
+    .select('id, description, loan_date, source_envelope_id, envelope_split')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!loan) return { error: 'No autorizado' }
+
+  // Delete payments and their linked envelope movements
+  const { data: payments } = await admin
+    .from('self_loan_payments')
+    .select('id')
+    .eq('self_loan_id', loanId)
+
+  if (payments && payments.length > 0) {
+    const paymentIds = payments.map(p => p.id)
+    await admin.from('envelope_movements').delete().in('self_loan_payment_id' as never, paymentIds)
+    await admin.from('self_loan_payments').delete().in('id', paymentIds)
+  }
+
+  // Delete the original withdrawal movement(s) — linked by self_loan_id when present
+  await admin.from('envelope_movements').delete().eq('self_loan_id', loanId)
+
+  // Fallback for loans created before self_loan_id existed: match by envelope + date + note prefix
+  const split = loan.envelope_split as { envelope_id: string; amount: number }[] | null
+  const envelopeIds = split && split.length > 0
+    ? split.map(s => s.envelope_id)
+    : loan.source_envelope_id ? [loan.source_envelope_id] : []
+
+  if (envelopeIds.length > 0) {
+    await admin.from('envelope_movements')
+      .delete()
+      .in('envelope_id', envelopeIds)
+      .eq('date', loan.loan_date)
+      .eq('movement_type', 'retiro')
+      .is('self_loan_id', null)
+      .like('notes', `Autopréstamo: ${loan.description}%`)
+  }
+
+  const { error } = await admin.from('self_loans').delete().eq('id', loanId)
+  if (error) return { error: error.message }
 
   revalidatePath('/liquidez')
   return { ok: true }
