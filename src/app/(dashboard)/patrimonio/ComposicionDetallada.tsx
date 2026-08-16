@@ -167,7 +167,7 @@ export function ComposicionDetallada({
   function renderCatCard(cat: Category) {
     const isPasivo = cat === 'pasivo'
     const catItems = isPasivo ? [] : [...items.filter(i => i.category === cat)].sort((a, b) => a.sort_order - b.sort_order)
-    const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : null
+    const ck = cat === 'liquido' ? 'liquidez' : cat === 'inversiones' ? 'inversiones' : cat === 'invertido' ? 'invertido' : null
     const total = isPasivo
       ? loansBreakdown.reduce((s, l) => s + l.balance, 0)
       : (ck !== null && ck in computedValues)
