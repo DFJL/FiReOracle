@@ -43,6 +43,7 @@ export type SelfLoan = {
   source_envelope_name: string | null
   envelope_split: { envelope_id: string; name: string; amount: number }[] | null
   notes: string | null
+  linked_transaction: { concept: string | null; vendor: string | null; date: string } | null
 }
 
 export default async function LiquidezPage() {
@@ -69,10 +70,22 @@ export default async function LiquidezPage() {
       .eq('user_id', user.id),
     admin
       .from('self_loans')
-      .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, envelope_split, notes')
+      .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, envelope_split, notes, linked_transaction_id')
       .eq('user_id', user.id)
       .order('loan_date', { ascending: false }),
   ])
+
+  const linkedTxIds = [...new Set((loans ?? []).map(l => l.linked_transaction_id).filter((id): id is string => !!id))]
+  const linkedTxMap: Record<string, { concept: string | null; vendor: string | null; date: string }> = {}
+  if (linkedTxIds.length > 0) {
+    const { data: linkedTxs } = await admin
+      .from('transactions')
+      .select('id, concept, vendor, date')
+      .in('id', linkedTxIds)
+    for (const t of linkedTxs ?? []) {
+      linkedTxMap[t.id] = { concept: t.concept, vendor: t.vendor, date: t.date ?? '' }
+    }
+  }
 
   // Own balance from movements — exclude interes type (reference only)
   const ownBalance: Record<string, number> = {}
@@ -175,6 +188,7 @@ export default async function LiquidezPage() {
       source_envelope_name: l.source_envelope_id ? (envelopeNameMap[l.source_envelope_id] ?? null) : null,
       envelope_split: split,
       notes: l.notes,
+      linked_transaction: l.linked_transaction_id ? (linkedTxMap[l.linked_transaction_id] ?? null) : null,
     }
   })
 

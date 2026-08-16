@@ -749,6 +749,11 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                     {srcLabel && (
                       <p className="text-[9px] text-zinc-600 truncate">{srcLabel}</p>
                     )}
+                    {loan.linked_transaction && (
+                      <p className="text-[9px] text-[#a3e635]/50 truncate">
+                        ↳ {loan.linked_transaction.concept || loan.linked_transaction.vendor || 'tx vinculada'}
+                      </p>
+                    )}
                     <div className="mt-1 h-1 bg-white/[0.04] rounded-full overflow-hidden w-24">
                       <div className="h-full rounded-full bg-[#a3e635]" style={{ width: `${pct}%`, opacity: 0.6 }} />
                     </div>
