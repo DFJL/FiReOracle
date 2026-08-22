@@ -769,7 +769,12 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
               )}
               {buckets.length > 0 && (
                 <div>
-                  <label className={lbl}>¿Liquidación de inversión? Bucket origen <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                  <label className={lbl}>
+                    {isPassive ? 'Bucket de la inversión' : '¿Liquidación de inversión? Bucket origen'}
+                    <span className="text-zinc-700 normal-case tracking-normal">
+                      {isPassive ? ' (sin bucket no suma a ninguna inversión)' : ' (opcional)'}
+                    </span>
+                  </label>
                   <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
                     <option value="">Sin bucket (solo liquidez)</option>
                     {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}

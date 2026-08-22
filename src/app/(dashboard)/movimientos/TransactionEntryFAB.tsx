@@ -820,14 +820,22 @@ export function TransactionEntryFAB({
                   </div>
                   {buckets.length > 0 && (
                     <div>
-                      <label className={lbl}>¿Liquidación de inversión? Bucket origen <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                      <label className={lbl}>
+                        {isPassive ? 'Bucket de la inversión' : '¿Liquidación de inversión? Bucket origen'}
+                        <span className="text-zinc-700 normal-case tracking-normal">
+                          {isPassive ? ' (sin bucket no suma a ninguna inversión)' : ' (opcional)'}
+                        </span>
+                      </label>
                       <select
                         ref={bucketSelectRef}
                         value={investmentBucketId}
                         onChange={e => {
                           const v = e.target.value
                           setInvestmentBucketId(v)
-                          if (v) setIsSettlement(true)
+                          // Picking a bucket only implies a liquidación for plain income.
+                          // A rendimiento/valorización belongs TO the bucket — flagging it
+                          // as settlement would debit the very bucket it should credit.
+                          if (v && !isPassive) setIsSettlement(true)
                         }}
                         className={inputCls}>
                         <option value="">Sin bucket (solo liquidez)</option>

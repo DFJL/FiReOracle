@@ -248,6 +248,9 @@ export async function createTransaction(input: CreateTransactionInput) {
     }
     revalidatePath('/resumen')
     revalidatePath('/flujo')
+    revalidatePath('/progreso')
+    revalidatePath('/inversiones')
+    revalidatePath('/patrimonio')
     return { error: null, id: txId }
   }
 
@@ -346,6 +349,9 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   revalidatePath('/resumen')
   revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
   return { error: null }
 }
 
