@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { EnvelopeSection } from './EnvelopeSection'
 import { SelfLoansSection } from './SelfLoansSection'
+import { computeEnvelopeBalances, rollupBalance } from '@/lib/envelopeBalances'
 
 export type SubEnvelope = {
   id: string
@@ -87,15 +88,16 @@ export default async function LiquidezPage() {
     }
   }
 
-  // Own balance from movements — exclude interes type (reference only)
-  const ownBalance: Record<string, number> = {}
-  const ownInterest: Record<string, number> = {}
-  for (const m of movements ?? []) {
-    if (m.movement_type === 'interes') {
-      ownInterest[m.envelope_id] = (ownInterest[m.envelope_id] ?? 0) + Number(m.amount)
-    } else {
-      ownBalance[m.envelope_id] = (ownBalance[m.envelope_id] ?? 0) + Number(m.amount)
-    }
+  // Canonical envelope rule, shared with /auditoria and /patrimonio
+  const { ownBalance, ownInterest, countableIds } =
+    computeEnvelopeBalances(envelopes ?? [], movements ?? [])
+
+  // Children by parent, used to roll balances up through every level
+  const childrenByParent: Record<string, { id: string; parent_envelope_id: string | null }[]> = {}
+  for (const e of envelopes ?? []) {
+    if (!e.parent_envelope_id) continue
+    if (!childrenByParent[e.parent_envelope_id]) childrenByParent[e.parent_envelope_id] = []
+    childrenByParent[e.parent_envelope_id].push(e)
   }
 
   // Group children by parent
@@ -112,7 +114,8 @@ export default async function LiquidezPage() {
       interest_mode: e.interest_mode,
       annual_rate: e.annual_rate,
       parent_envelope_id: e.parent_envelope_id,
-      balance: ownBalance[e.id] ?? 0,
+      // rolled up: an intermediate parent's balance includes its grandchildren
+      balance: rollupBalance(e.id, childrenByParent, ownBalance, countableIds),
       interest: ownInterest[e.id] ?? 0,
       grandchildren: [],
     })
@@ -131,9 +134,9 @@ export default async function LiquidezPage() {
     .filter(e => !e.parent_envelope_id)
     .map(e => {
       const children = childMap[e.id] ?? []
-      const balance = children.length > 0
-        ? children.reduce((s, c) => s + c.balance, 0)
-        : (ownBalance[e.id] ?? 0)
+      // Rolls up the whole subtree (children + grandchildren); a root container's
+      // own structural movements are excluded via countableIds.
+      const balance = rollupBalance(e.id, childrenByParent, ownBalance, countableIds)
       const interest = children.length > 0
         ? children.reduce((s, c) => s + c.interest, 0)
         : (ownInterest[e.id] ?? 0)

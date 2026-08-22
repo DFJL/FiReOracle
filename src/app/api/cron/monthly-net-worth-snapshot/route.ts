@@ -39,10 +39,28 @@ export async function GET(req: Request) {
     monthTargets.push({ snapshotDate: monthEnd, cutoff })
   }
 
-  const results: { user_id: string; snapshot_date: string; error?: string }[] = []
+  const results: { user_id: string; snapshot_date: string; skipped?: string; error?: string }[] = []
 
   for (const { user_id } of users) {
+    // Never overwrite a snapshot a human entered or imported: back-computing a
+    // month can differ legitimately from what was recorded at the time (e.g. a
+    // bucket seeded with a single dated adjustment doesn't exist before that
+    // date), so an auto value would silently replace better data.
+    const { data: existing } = await admin
+      .from('net_worth_snapshots')
+      .select('snapshot_date, source')
+      .eq('user_id', user_id)
+      .in('snapshot_date', monthTargets.map(t => t.snapshotDate))
+
+    const protectedDates = new Set(
+      (existing ?? []).filter(r => r.source !== 'auto').map(r => r.snapshot_date)
+    )
+
     for (const { snapshotDate, cutoff } of monthTargets) {
+      if (protectedDates.has(snapshotDate)) {
+        results.push({ user_id, snapshot_date: snapshotDate, skipped: 'manual/import snapshot preserved' })
+        continue
+      }
       try {
         const totals = await computeNetWorthTotals(admin, user_id, cutoff)
         const { error } = await admin.from('net_worth_snapshots').upsert(

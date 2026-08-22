@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { AuditView } from './AuditView'
+import { computeEnvelopeBalances } from '@/lib/envelopeBalances'
 
 export type RecentIncome = {
   id: string
@@ -61,32 +62,14 @@ export default async function AuditoriaPage() {
       .limit(30),
   ])
 
-  // Per-envelope balance
-  const ownBalance: Record<string, number> = {}
-  const ownInterest: Record<string, number> = {}
-  for (const m of movements ?? []) {
-    if (m.movement_type === 'interes') {
-      ownInterest[m.envelope_id] = (ownInterest[m.envelope_id] ?? 0) + Number(m.amount)
-    } else {
-      ownBalance[m.envelope_id] = (ownBalance[m.envelope_id] ?? 0) + Number(m.amount)
-    }
-  }
-
-  // parentIds = envelopes that have at least one child
-  const parentIds = new Set(
-    (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
-  )
-  // rootParentIds = root-level parents only (no parent themselves, but have children)
-  // These are container envelopes like "Transitorio" whose own movements shouldn't be counted
-  const rootParentIds = new Set(
-    (envelopes ?? []).filter(e => !e.parent_envelope_id && parentIds.has(e.id)).map(e => e.id)
-  )
-  const activeEnvelopeIds = new Set((envelopes ?? []).map(e => e.id))
+  // Canonical envelope rule, shared with /liquidez and /patrimonio
+  const { ownBalance, countableIds, liquidTotal } =
+    computeEnvelopeBalances(envelopes ?? [], movements ?? [])
 
   // Build custodio totals — skip only root-level parents; include intermediate parents (they hold real money)
   const custodioMap = new Map<string, CustodioInfo>()
   for (const e of envelopes ?? []) {
-    if (rootParentIds.has(e.id)) continue
+    if (!countableIds.has(e.id)) continue
     if (!custodioMap.has(e.custodio)) {
       custodioMap.set(e.custodio, { name: e.custodio, systemTotal: 0, leafEnvelopes: [] })
     }
@@ -111,13 +94,7 @@ export default async function AuditoriaPage() {
   }
 
   // envelopeTotal: principal only, all active envelopes except root-level parents
-  const envelopeTotal = (movements ?? [])
-    .filter(m =>
-      m.movement_type !== 'interes' &&
-      activeEnvelopeIds.has(m.envelope_id) &&
-      !rootParentIds.has(m.envelope_id)
-    )
-    .reduce((s, m) => s + Number(m.amount), 0)
+  const envelopeTotal = liquidTotal
 
   const flowData: FlowData = {
     incomeRegular,

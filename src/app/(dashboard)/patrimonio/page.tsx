@@ -5,6 +5,7 @@ import { PatrimonioView } from './PatrimonioView'
 import type { SnapshotRow } from '@/app/actions/netWorthSnapshot'
 import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -87,13 +88,9 @@ export default async function PatrimonioPage() {
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
 
-  // Liquid balance (leaf envelopes only, no interes)
-  const parentEnvelopeIds = new Set(
-    (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
-  )
-  const liquidBalance = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
-    .reduce((s, m) => s + Number(m.amount), 0)
+  // Liquid balance — canonical rule shared with /auditoria and /liquidez
+  const countableIds = countableEnvelopeIds(envelopes ?? [])
+  const liquidBalance = sumLiquid(movements ?? [], countableIds)
 
   // Investment total across all bucket types — split by display_category so
   // pension/severance funds (ROP & FCL, Pensión Voluntaria) land under
@@ -146,11 +143,11 @@ export default async function PatrimonioPage() {
   // Per-envelope balance breakdown (for Liquidez drilldown)
   const envelopeBalanceMap: Record<string, number> = {}
   for (const m of movements ?? []) {
-    if (m.movement_type === 'interes' || parentEnvelopeIds.has(m.envelope_id)) continue
+    if (m.movement_type === 'interes' || !countableIds.has(m.envelope_id)) continue
     envelopeBalanceMap[m.envelope_id] = (envelopeBalanceMap[m.envelope_id] ?? 0) + Number(m.amount)
   }
   const envelopeBreakdown = (envelopes ?? [])
-    .filter(e => !parentEnvelopeIds.has(e.id))
+    .filter(e => countableIds.has(e.id))
     .map(e => ({ name: (e as { id: string; name: string; parent_envelope_id: string | null }).name ?? e.id, balance: envelopeBalanceMap[e.id] ?? 0 }))
     .filter(e => Math.abs(e.balance) > 0.01)
     .sort((a, b) => b.balance - a.balance)
@@ -234,7 +231,7 @@ export default async function PatrimonioPage() {
 
   const liquidezDeltas: Record<string, number> = {}
   for (const m of movements ?? []) {
-    if (!m.date || m.movement_type === 'interes' || parentEnvelopeIds.has(m.envelope_id)) continue
+    if (!m.date || m.movement_type === 'interes' || !countableIds.has(m.envelope_id)) continue
     const month = m.date.slice(0, 7)
     liquidezDeltas[month] = (liquidezDeltas[month] ?? 0) + Number(m.amount)
   }

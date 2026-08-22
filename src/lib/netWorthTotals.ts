@@ -1,4 +1,5 @@
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -84,12 +85,7 @@ export async function computeNetWorthTotals(
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
 
-  const parentEnvelopeIds = new Set(
-    (envelopes ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
-  )
-  const liquidBalance = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
-    .reduce((s, m) => s + Number(m.amount), 0)
+  const liquidBalance = sumLiquid(movements ?? [], countableEnvelopeIds(envelopes ?? []))
 
   let totalInvested = 0
   for (const def of bucketRows ?? []) {
