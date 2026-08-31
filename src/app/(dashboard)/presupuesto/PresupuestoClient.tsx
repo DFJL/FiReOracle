@@ -87,6 +87,9 @@ function CustodioRow({
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
   const [isPending, start] = useTransition()
+  const [showFromWarning, setShowFromWarning] = useState(false)
+  const [fromWarningAcked, setFromWarningAcked] = useState(false)
+  const fromSelectRef = useRef<HTMLSelectElement>(null)
 
   const allCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -117,6 +120,7 @@ function CustodioRow({
 
   function register() {
     if (checkedItems.length === 0) { setErr('Seleccioná al menos una línea'); return }
+    if (!fromId && !fromWarningAcked) { setShowFromWarning(true); return }
     setErr('')
 
     const savings = checkedItems.filter(i => i.budgetType === 'savings' || i.budgetType === 'income')
@@ -138,10 +142,12 @@ function CustodioRow({
         await bulkMarkDone(newSavings.map(i => i.id), q, year, month)
       }
 
-      // Optional source debit (traslado_out from source envelope) for savings total
-      if (fromId && savings.length > 0) {
-        const savingsTotal = savings.reduce((s, i) => s + getAmt(i.id), 0)
-        const res2 = await recordTransferFromSource(fromId, savingsTotal, custodio, date)
+      // Source debit: every selected line moves cash out of the source envelope,
+      // not just the savings ones — an expense line funded from the plan leaves
+      // the source account exactly the same way a savings line does. Debiting
+      // only the savings subtotal left the difference sitting in both envelopes.
+      if (fromId && subtotal > 0) {
+        const res2 = await recordTransferFromSource(fromId, subtotal, custodio, date)
         if (res2.error) { setErr(res2.error); return }
       }
 
@@ -213,9 +219,9 @@ function CustodioRow({
             </span>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <select value={fromId} onChange={e => setFromId(e.target.value)}
+              <select ref={fromSelectRef} value={fromId} onChange={e => setFromId(e.target.value)}
                 className="bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1 text-[11px] text-zinc-400 focus:outline-none focus:border-[#a3e635]/40">
-                <option value="">Débito desde sobre… (opcional)</option>
+                <option value="">¿De dónde sale? Sobre a debitar…</option>
                 {envelopes.map(e => (
                   <option key={e.id} value={e.id}>{e.name}{e.custodio ? ` (${e.custodio})` : ''}</option>
                 ))}
@@ -227,6 +233,25 @@ function CustodioRow({
                 {isPending ? '...' : `Registrar${checkedItems.length > 0 ? ` (${checkedItems.length})` : ''}`}
               </button>
               {err && <span className="text-[10px] text-rose-400">{err}</span>}
+              {showFromWarning && !fromId && (
+                <div className="w-full rounded-lg border border-blue-400/20 bg-blue-400/5 p-2.5 space-y-2">
+                  <p className="text-[11px] text-blue-300/90 leading-snug">
+                    Sin sobre de origen, los ₡{Math.round(subtotal).toLocaleString('es-CR')} se acreditan a los sobres destino
+                    pero no se debitan de ningún lado — la plata va a quedar contada dos veces.
+                  </p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => fromSelectRef.current?.focus()}
+                      className="flex-1 py-1.5 rounded-lg bg-blue-400/15 text-blue-300 text-[11px] font-bold hover:bg-blue-400/25 transition-colors">
+                      Elegir sobre
+                    </button>
+                    <button type="button"
+                      onClick={() => { setFromWarningAcked(true); setShowFromWarning(false) }}
+                      className="flex-1 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
+                      Fue efectivo / externo
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </td>
