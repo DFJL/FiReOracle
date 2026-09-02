@@ -39,6 +39,7 @@ type Breakdown = { name: string; balance: number }[]
 export function ComposicionDetallada({
   items: initialItems,
   fmt,
+  fmtFull,
   computedValues = {},
   liquidezBreakdown = [],
   inversionesBreakdown = [],
@@ -47,6 +48,8 @@ export function ComposicionDetallada({
 }: {
   items: NetWorthItem[]
   fmt: (v: number) => string
+  /** Exact, non-abbreviated formatter for per-item lines (reconciliation). */
+  fmtFull?: (v: number) => string
   computedValues?: Record<string, number>
   liquidezBreakdown?: Breakdown
   inversionesBreakdown?: Breakdown
@@ -58,6 +61,7 @@ export function ComposicionDetallada({
   const [addSheet, setAdd]      = useState<AddSheet>(null)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<Category>>(new Set(['liquido', 'inversiones', 'invertido']))
+  const fmtLine = fmtFull ?? fmt
   const [isPending, startTransition] = useTransition()
 
   function toggleExpand(cat: Category) {
@@ -218,7 +222,7 @@ export function ComposicionDetallada({
                     <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">auto</span>
                   </div>
                   <span className="text-xs font-bold tabular-nums shrink-0" style={{ color: m.color }}>
-                    {fmt(loan.balance)}
+                    {fmtLine(loan.balance)}
                   </span>
                 </div>
               )) : (
@@ -251,7 +255,7 @@ export function ComposicionDetallada({
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs font-bold tabular-nums" style={{ color: m.color }}>
-                          {fmt(displayValue)}
+                          {fmtLine(displayValue)}
                         </span>
                         {!isComputed && (
                           <button
@@ -276,7 +280,7 @@ export function ComposicionDetallada({
                     {drillRows.map((row, i) => (
                       <div key={i} className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.02] last:border-0">
                         <p className="text-[11px] text-zinc-500 truncate pr-2">{row.name}</p>
-                        <p className="text-[11px] tabular-nums text-zinc-400 shrink-0">{fmt(row.balance)}</p>
+                        <p className="text-[11px] tabular-nums text-zinc-400 shrink-0">{fmtLine(row.balance)}</p>
                       </div>
                     ))}
                   </div>

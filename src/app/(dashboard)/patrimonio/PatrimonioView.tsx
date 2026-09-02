@@ -97,6 +97,15 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
   return `${sym}${Math.round(val).toLocaleString('es-CR')}`
 }
 
+// Full precision, never abbreviated — used on per-item lines so a bucket can be
+// reconciled digit-for-digit against a real account statement. Abbreviating to
+// "₡33.31M" hides up to ₡5,000 and makes a month-over-month delta unreadable.
+function fmtAmtFull(v: number, curr: 'CRC' | 'USD', rate: number) {
+  const val = curr === 'CRC' ? v : v / rate
+  const sym = curr === 'CRC' ? '₡' : '$'
+  return `${sym}${val.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function today() { return new Date().toISOString().slice(0, 10) }
 
 function monthLabel(m: string) {
@@ -578,6 +587,7 @@ export function PatrimonioView({
 
   const rate = exchangeRate.sell
   const fmt = (v: number) => fmtAmt(v, currency, rate)
+  const fmtFull = (v: number) => fmtAmtFull(v, currency, rate)
 
   // Asset CRUD state
   const [showAddAsset, setShowAddAsset]       = useState(false)
@@ -831,6 +841,7 @@ export function PatrimonioView({
           <ComposicionDetallada
             items={netWorthItems}
             fmt={fmt}
+            fmtFull={fmtFull}
             computedValues={{ liquidez: liquidBalance, inversiones: totalInvested, invertido: totalPensiones }}
             liquidezBreakdown={envelopeBreakdown}
             inversionesBreakdown={bucketBreakdown}
