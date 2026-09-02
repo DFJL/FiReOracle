@@ -14,6 +14,17 @@ function fmtUSD(n: number) {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Full precision, never abbreviated — for the lines that get reconciled against
+// a real account statement. "₡33.31M" hides up to ₡5,000, more than the
+// month-over-month movement being compared.
+function fmtCRCFull(n: number) {
+  return `₡${n.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function fmtUSDFull(n: number) {
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function fmtPct(n: number) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
@@ -115,6 +126,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate
   const fmt    = (crc: number) => currency === 'CRC' ? fmtCRC(crc) : fmtUSD(toUSD(crc))
+  const fmtFull = (crc: number) => currency === 'CRC' ? fmtCRCFull(crc) : fmtUSDFull(toUSD(crc))
 
   // Synthetic liquidez entry appended to bucket list
   const liquidItem: BucketData = {
@@ -207,7 +219,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-black tabular-nums text-zinc-100">{fmt(b.balance)}</p>
+                      <p className="text-xs font-black tabular-nums text-zinc-100">{fmtFull(b.balance)}</p>
                       <p className="text-[9px] tabular-nums" style={{ color: b.color }}>{pct.toFixed(1)}%</p>
                     </div>
                   </div>
@@ -246,7 +258,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs font-bold text-zinc-300 truncate">{group.name}</p>
                         <div className="text-right shrink-0">
-                          <p className="text-sm font-black tabular-nums text-amber-400">{fmt(group.total)}</p>
+                          <p className="text-sm font-black tabular-nums text-amber-400">{fmtFull(group.total)}</p>
                           {currency === 'CRC' && (
                             <p className="text-[9px] tabular-nums text-zinc-600">{fmtUSD(toUSD(group.total))}</p>
                           )}
@@ -267,7 +279,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                                 <div className="w-16 h-1 bg-white/[0.04] rounded-full overflow-hidden">
                                   <div className="h-full rounded-full" style={{ width: `${envPct}%`, background: dotColor, opacity: 0.7 }} />
                                 </div>
-                                <span className="text-[10px] font-semibold tabular-nums text-zinc-300 w-16 text-right">{fmt(env.balance)}</span>
+                                <span className="text-[11px] font-semibold tabular-nums text-zinc-300 text-right">{fmtFull(env.balance)}</span>
                               </div>
                             </div>
                           )
@@ -288,7 +300,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                   { label: 'Rendimientos',  crc: sel.passiveValuation + sel.rendimientos, color: 'text-[#a3e635]', sub: 'NAV + efectivo' },
                 ].map(k => (
                   <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
-                    <p className={`text-base font-black tabular-nums ${k.color}`}>{fmt(k.crc)}</p>
+                    <p className={`text-base font-black tabular-nums ${k.color}`}>{fmtFull(k.crc)}</p>
                     {currency === 'CRC' && (
                       <p className="text-[9px] tabular-nums text-zinc-700">{fmtUSD(toUSD(k.crc))}</p>
                     )}
@@ -302,7 +314,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
                   <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pérdida valor</span>
                   <span className="text-sm font-black tabular-nums ml-auto text-rose-400">
-                    -{fmt(sel.markToMarketLoss)}
+                    -{fmtFull(sel.markToMarketLoss)}
                   </span>
                   <span className="text-[9px] text-zinc-700">mark-to-market · no cash</span>
                 </div>
@@ -343,7 +355,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                           </span>
                           <span className="text-[10px] font-black tabular-nums shrink-0"
                             style={{ color: meta.sign === -1 ? '#f87171' : '#d4d4d8' }}>
-                            {meta.sign === -1 ? '-' : '+'}{fmt(tx.amount)}
+                            {meta.sign === -1 ? '-' : '+'}{fmtFull(tx.amount)}
                           </span>
                         </div>
                       )
