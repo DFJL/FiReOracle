@@ -6,6 +6,11 @@ import type { ExchangeRate } from '@/lib/exchange-rate'
 export type HistoryPoint = {
   month: string  // "YYYY-MM"
   balances: Record<string, number>  // series key → CRC balance
+  /** Snapshot-backed patrimonio (liquidez + invertido). Preferred over summing
+   *  `balances`, which cannot know what a bucket held before it existed. */
+  total?: number
+  /** Snapshot-backed invested total, excluding liquidez. */
+  invested?: number
 }
 
 export type HistorySeries = {
@@ -16,10 +21,10 @@ export type HistorySeries = {
 
 const TOTAL_KEY   = '__total__'
 const TOTAL_COLOR = '#a3e635'
-// Historical invested total from net_worth_snapshots. It is a standalone
-// reference line, not a component of the portfolio, so it must never be folded
-// into TOTAL_KEY — that would double-count everything it already covers.
-const SNAPSHOT_KEY = '__snapshot_invertido__'
+// Invested total (patrimonio minus liquidez), snapshot-backed like TOTAL_KEY.
+// Both are aggregates, never components — they must not be summed into anything.
+const INVESTED_KEY   = '__invertido__'
+const INVESTED_COLOR = '#38bdf8'
 
 function fmtV(n: number, currency: 'CRC' | 'USD', rate: number) {
   const v = currency === 'CRC' ? n : n / rate
@@ -52,13 +57,7 @@ export function PortfolioHistory({
   exchangeRate: ExchangeRate
 }) {
   const [rangeMonths, setRangeMonths] = useState<number>(12)
-  const [visible, setVisible]         = useState<Set<string>>(() => {
-    const keys = new Set<string>([TOTAL_KEY])
-    // Show the snapshot-backed history alongside the transaction-derived total,
-    // so the seeded-bucket step in the latter is obvious rather than misleading.
-    if (series.some(s => s.key === SNAPSHOT_KEY)) keys.add(SNAPSHOT_KEY)
-    return keys
-  })
+  const [visible, setVisible]         = useState<Set<string>>(new Set([TOTAL_KEY, INVESTED_KEY]))
   const [currency, setCurrency]       = useState<'CRC' | 'USD'>('USD')
   const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
   const svgRef                        = useRef<SVGSVGElement>(null)
@@ -75,15 +74,22 @@ export function PortfolioHistory({
 
   // Augment each point with a __total__ key
   const data: { month: string; balances: Record<string, number> }[] = filtered.map(p => {
-    const total = Object.entries(p.balances)
-      .filter(([k]) => k !== SNAPSHOT_KEY)
-      .reduce((s, [, v]) => s + Math.max(v, 0), 0)
-    const balances: Record<string, number> = { ...p.balances, [TOTAL_KEY]: total }
+    // Prefer the snapshot: replaying transactions cannot know what a bucket held
+    // before it existed, so the summed fallback understates the early history.
+    const replayed = Object.values(p.balances).reduce((s, v) => s + Math.max(v, 0), 0)
+    const balances: Record<string, number> = {
+      ...p.balances,
+      [TOTAL_KEY]: p.total ?? replayed,
+      ...(p.invested !== undefined ? { [INVESTED_KEY]: p.invested } : {}),
+    }
     return { month: p.month, balances }
   })
 
+  const hasInvested = data.some(p => p.balances[INVESTED_KEY] !== undefined)
+
   const allSeries: HistorySeries[] = [
     { key: TOTAL_KEY, name: 'Total patrimonio', color: TOTAL_COLOR },
+    ...(hasInvested ? [{ key: INVESTED_KEY, name: 'Invertido', color: INVESTED_COLOR }] : []),
     ...series,
   ]
 
