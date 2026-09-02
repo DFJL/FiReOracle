@@ -11,6 +11,8 @@ import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 const LIQUID_KEY = '__liquidez__'
+// Keep in sync with SNAPSHOT_KEY in PortfolioHistory, which excludes it from the total
+const SNAPSHOT_KEY = '__snapshot_invertido__'
 
 // Strips stray punctuation (typos like a trailing backtick/quote) and collapses
 // whitespace so e.g. "TRANSCOMER`" still matches a bucket's "TRANSCOMER" vendor.
@@ -79,6 +81,24 @@ export default async function InversionesPage() {
       .eq('movement_type', 'income')
       .not('amount', 'is', null),
   ])
+
+  // Historical invested totals. The per-bucket series is rebuilt from transaction
+  // deltas, so buckets seeded with a single dated adjustment (ROP & FCL and
+  // Pensión Voluntaria, both seeded 2026-07-01) show a step instead of the value
+  // they actually held for years. net_worth_snapshots carries the real monthly
+  // series back to 2018 and always included those funds, so plot it as its own line.
+  const { data: nwSnapshots } = await admin
+    .from('net_worth_snapshots')
+    .select('snapshot_date, invested_crc')
+    .eq('user_id', user.id)
+    .order('snapshot_date', { ascending: true })
+
+  const snapshotInvestedByMonth: Record<string, number> = {}
+  for (const s of nwSnapshots ?? []) {
+    if (!s.snapshot_date) continue
+    // Later snapshot within a month wins (a month-end cut supersedes an earlier one)
+    snapshotInvestedByMonth[s.snapshot_date.slice(0, 7)] = Number(s.invested_crc ?? 0)
+  }
 
   // Fetch snapshot balances for snapshot_based buckets
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
@@ -314,6 +334,8 @@ export default async function InversionesPage() {
   const allMonthsSet = new Set<string>()
   for (const deltas of Object.values(bucketDeltas)) Object.keys(deltas).forEach(m => allMonthsSet.add(m))
   Object.keys(liquidezDeltas).forEach(m => allMonthsSet.add(m))
+  // Snapshots reach further back than any transaction, so let them set the start
+  Object.keys(snapshotInvestedByMonth).forEach(m => allMonthsSet.add(m))
 
   const historyPoints: HistoryPoint[] = []
 
@@ -329,18 +351,23 @@ export default async function InversionesPage() {
 
     const running: Record<string, number> = {}
     let runningLiquidez = 0
+    // Snapshots are monthly but not guaranteed to exist for every month; carry
+    // the last known value forward so the line has no phantom drops to zero.
+    let lastSnapshot: number | null = null
 
     for (const month of months) {
       for (const def of bucketDefs) {
         running[def.id] = (running[def.id] ?? 0) + (bucketDeltas[def.id]?.[month] ?? 0)
       }
       runningLiquidez += (liquidezDeltas[month] ?? 0)
+      if (snapshotInvestedByMonth[month] !== undefined) lastSnapshot = snapshotInvestedByMonth[month]
 
       historyPoints.push({
         month,
         balances: {
           ...Object.fromEntries(bucketDefs.map(d => [d.id, running[d.id] ?? 0])),
           [LIQUID_KEY]: runningLiquidez,
+          ...(lastSnapshot !== null ? { [SNAPSHOT_KEY]: lastSnapshot } : {}),
         },
       })
     }
@@ -351,6 +378,9 @@ export default async function InversionesPage() {
       .filter(b => b.key !== LIQUID_KEY)
       .map(b => ({ key: b.key, name: b.name, color: b.color })),
     { key: LIQUID_KEY, name: 'Liquidez', color: '#f59e0b' },
+    ...(Object.keys(snapshotInvestedByMonth).length > 0
+      ? [{ key: SNAPSHOT_KEY, name: 'Invertido (histórico)', color: '#38bdf8' }]
+      : []),
   ]
 
   const exchangeRate = await fetchExchangeRate()
