@@ -9,6 +9,7 @@ import { PortfolioYield } from './PortfolioYield'
 import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type EnvelopeCluster } from './PortfolioAnalysis'
 import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 
 const LIQUID_KEY = '__liquidez__'
 
@@ -94,12 +95,14 @@ export default async function InversionesPage() {
     .order('snapshot_date', { ascending: true })
 
   const snapshotInvestedByMonth: Record<string, number> = {}
+  const snapshotLiquidByMonth: Record<string, number> = {}
   const snapshotTotalByMonth: Record<string, number> = {}
   for (const s of nwSnapshots ?? []) {
     if (!s.snapshot_date) continue
     // Later snapshot within a month wins (a month-end cut supersedes an earlier one)
     const m = s.snapshot_date.slice(0, 7)
     snapshotInvestedByMonth[m] = Number(s.invested_crc ?? 0)
+    snapshotLiquidByMonth[m]   = Number(s.liquid_crc ?? 0)
     snapshotTotalByMonth[m]    = Number(s.invested_crc ?? 0) + Number(s.liquid_crc ?? 0)
   }
 
@@ -119,22 +122,15 @@ export default async function InversionesPage() {
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
 
-  // Mirror Liquidez page logic exactly: parent envelopes that have children are ignored
-  // (their balance = sum of children). Only leaf-envelope movements count.
-  const parentEnvelopeIds = new Set(
-    (envelopes ?? [])
-      .filter(e => e.parent_envelope_id !== null)
-      .map(e => e.parent_envelope_id as string)
-  )
-  const liquidBalance = (movements ?? [])
-    .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
-    .reduce((s, m) => s + Number(m.amount), 0)
+  // Canonical envelope rule, shared with /liquidez, /patrimonio and /auditoria
+  const countableIds = countableEnvelopeIds(envelopes ?? [])
+  const liquidBalance = sumLiquid(movements ?? [], countableIds)
 
   // Per-leaf envelope balances for drilldown
   const envelopeBalances: Record<string, number> = {}
   for (const m of movements ?? []) {
     if (m.movement_type === 'interes') continue
-    if (parentEnvelopeIds.has(m.envelope_id)) continue
+    if (!countableIds.has(m.envelope_id)) continue
     envelopeBalances[m.envelope_id] = (envelopeBalances[m.envelope_id] ?? 0) + Number(m.amount)
   }
 
@@ -142,7 +138,7 @@ export default async function InversionesPage() {
   type CustodioGroup = { name: string; total: number; envelopes: EnvEntry[] }
   const custodioMap: Record<string, CustodioGroup> = {}
   for (const env of envelopes ?? []) {
-    if (parentEnvelopeIds.has(env.id)) continue
+    if (!countableIds.has(env.id)) continue
     const cust = (env as { id: string; name: string; custodio: string; color: string | null; parent_envelope_id: string | null; sort_order: number | null }).custodio
     if (!custodioMap[cust]) custodioMap[cust] = { name: cust, total: 0, envelopes: [] }
     const balance = envelopeBalances[env.id] ?? 0
@@ -328,7 +324,7 @@ export default async function InversionesPage() {
   for (const m of movements ?? []) {
     if (!m.date) continue
     if (m.movement_type === 'interes') continue
-    if (parentEnvelopeIds.has(m.envelope_id)) continue
+    if (!countableIds.has(m.envelope_id)) continue
     const month = m.date.slice(0, 7)
     liquidezDeltas[month] = (liquidezDeltas[month] ?? 0) + Number(m.amount)
   }
@@ -357,6 +353,7 @@ export default async function InversionesPage() {
     // Snapshots are monthly but not guaranteed for every month; carry the last
     // known values forward so the lines have no phantom drops to zero.
     let lastInvested: number | null = null
+    let lastLiquid: number | null = null
     let lastTotal: number | null = null
 
     for (const month of months) {
@@ -365,13 +362,17 @@ export default async function InversionesPage() {
       }
       runningLiquidez += (liquidezDeltas[month] ?? 0)
       if (snapshotInvestedByMonth[month] !== undefined) lastInvested = snapshotInvestedByMonth[month]
+      if (snapshotLiquidByMonth[month] !== undefined)   lastLiquid   = snapshotLiquidByMonth[month]
       if (snapshotTotalByMonth[month] !== undefined)    lastTotal    = snapshotTotalByMonth[month]
 
       historyPoints.push({
         month,
         balances: {
           ...Object.fromEntries(bucketDefs.map(d => [d.id, running[d.id] ?? 0])),
-          [LIQUID_KEY]: runningLiquidez,
+          // envelope_movements only start 2025-01, so replaying them leaves the
+          // liquidez line flat at zero for 2018-2024. Snapshots know the real
+          // position; fall back to the replay only where no snapshot exists.
+          [LIQUID_KEY]: lastLiquid ?? runningLiquidez,
         },
         // Authoritative values; the chart falls back to the replayed sum only
         // for months with no snapshot at all.
@@ -437,7 +438,7 @@ export default async function InversionesPage() {
     sin_tipo:        { type: 'sin_tipo',         label: 'Sin clasificar',  balance: 0, envelopes: [] },
   }
   for (const env of envelopes ?? []) {
-    if (parentEnvelopeIds.has(env.id)) continue
+    if (!countableIds.has(env.id)) continue
     const balance = envelopeBalances[env.id] ?? 0
     const eType = (env as EnvRow).envelope_type ?? 'sin_tipo'
     const cluster = envClusters[eType] ?? envClusters.sin_tipo
