@@ -8,7 +8,7 @@ import {
   getEnvelopeMovements, deleteEnvelopeMovement, updateEnvelopeMovement,
 } from './actions'
 import type { MovType, EnvelopeMovement } from './actions'
-import { createEnvelope, createSubEnvelope, deleteSubEnvelope } from '@/app/actions/envelopes'
+import { createEnvelope, createSubEnvelope, deleteSubEnvelope, updateEnvelope } from '@/app/actions/envelopes'
 
 function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
@@ -37,6 +37,59 @@ const TYPE_STYLE: Record<MovType, string> = {
 const TYPE_LABEL: Record<MovType, string> = {
   deposito: 'Dep', retiro: 'Ret', interes: 'Int',
   traslado_in: 'Trásl ↓', traslado_out: 'Trásl ↑',
+}
+
+// ─── EnvelopeName ──────────────────────────────────────────────────────────────
+// Inline rename, shared by root/sub/grandchild rows. These rows are themselves
+// <button> toggles, so every click here must stopPropagation or it also fires
+// the row's expand/collapse.
+
+function EnvelopeName({ id, name, className }: { id: string; name: string; className: string }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue]     = useState(name)
+  const [isPending, start]    = useTransition()
+
+  function save() {
+    const trimmed = value.trim()
+    if (!trimmed || trimmed === name) { setEditing(false); setValue(name); return }
+    start(async () => {
+      const res = await updateEnvelope(id, { name: trimmed })
+      if (res?.error) { setValue(name); }
+      setEditing(false)
+    })
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        disabled={isPending}
+        onChange={e => setValue(e.target.value)}
+        onClick={e => e.stopPropagation()}
+        onKeyDown={e => {
+          e.stopPropagation()
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') { setValue(name); setEditing(false) }
+        }}
+        onBlur={save}
+        className={`${className} bg-white/[0.08] border border-[#a3e635]/30 rounded px-1 outline-none min-w-0`}
+      />
+    )
+  }
+
+  return (
+    <span className={`${className} group/name flex items-center gap-1 min-w-0`}>
+      <span className="truncate">{name}</span>
+      <button
+        onClick={e => { e.stopPropagation(); setValue(name); setEditing(true) }}
+        className="opacity-0 group-hover/name:opacity-100 text-zinc-600 hover:text-zinc-300 transition-opacity shrink-0"
+        title="Renombrar"
+      >
+        <Pencil size={10} />
+      </button>
+    </span>
+  )
 }
 
 // ─── AddMovementPanel ──────────────────────────────────────────────────────────
@@ -491,7 +544,7 @@ function GrandchildRow({ gc }: {
   return (
     <div className="flex items-center gap-2 py-0.5">
       <span className="w-1 h-1 rounded-full bg-zinc-700 shrink-0" />
-      <span className="flex-1 text-[10px] text-zinc-600 truncate min-w-0">{gc.name}</span>
+      <EnvelopeName id={gc.id} name={gc.name} className="flex-1 text-[10px] text-zinc-600" />
       <span className="text-[10px] tabular-nums text-zinc-600 shrink-0">
         {fmtCRC(gc.balance + gc.interest)}
       </span>
@@ -530,7 +583,7 @@ function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
           isOpen ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
         }`}>
         <span className="w-1.5 h-1.5 rounded-full shrink-0 opacity-70" style={{ background: sub.color ?? '#888' }} />
-        <span className="flex-1 text-[11px] text-zinc-400 truncate min-w-0">{sub.name}</span>
+        <EnvelopeName id={sub.id} name={sub.name} className="flex-1 text-[11px] text-zinc-400" />
         <div className="shrink-0 flex flex-col items-end gap-0.5">
           <span className={`text-[11px] font-black tabular-nums ${
             (sub.balance + sub.interest) > 0 ? 'text-zinc-300' : 'text-zinc-600'
@@ -847,7 +900,7 @@ export function EnvelopeSection({
                 {hasChildren && (
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
                 )}
-                <span className="flex-1 text-xs text-zinc-300 truncate min-w-0">{env.name}</span>
+                <EnvelopeName id={env.id} name={env.name} className="flex-1 text-xs text-zinc-300" />
                 <span className="text-[9px] font-bold text-zinc-600 px-1.5 py-0.5 rounded bg-white/[0.04] shrink-0">
                   {env.custodio}
                 </span>
