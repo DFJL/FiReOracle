@@ -204,6 +204,71 @@ export async function updateBudgetActual(
   revalidatePath('/presupuesto')
 }
 
+/**
+ * Renames a budget line, everywhere the old name is the de-facto key:
+ *  - budgets is versioned by effective_from (a line can have several rows, and
+ *    past months read the older ones), so every row of the category moves, not
+ *    just the id passed in — otherwise the line splits in two.
+ *  - budget_monthly_done keys its per-quincena history by the category TEXT,
+ *    so leaving it behind would orphan every past "hecho" mark and manual Real.
+ */
+export async function renameBudgetCategory(
+  id: string, newCategory: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const name = newCategory.trim()
+  if (!name) return { error: 'El nombre no puede estar vacío' }
+
+  const admin = createAdminClient()
+
+  const { data: current } = await admin
+    .from('budgets')
+    .select('category')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (!current) return { error: 'Línea no encontrada' }
+  const oldCategory = current.category as string
+  if (oldCategory === name) return { error: null }
+
+  // Category is the de-facto key, so a duplicate would merge two lines' history
+  const { data: clash } = await admin
+    .from('budgets')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .eq('category', name)
+    .neq('id', id)
+    .limit(1)
+    .maybeSingle()
+
+  if (clash) return { error: `Ya existe una línea llamada "${name}"` }
+
+  const { error: budErr } = await admin
+    .from('budgets')
+    .update({ category: name })
+    .eq('user_id', user.id)
+    .eq('category', oldCategory)
+
+  if (budErr) return { error: budErr.message }
+
+  const { error: doneErr } = await admin
+    .from('budget_monthly_done')
+    .update({ category: name })
+    .eq('user_id', user.id)
+    .eq('category', oldCategory)
+
+  if (doneErr) return { error: doneErr.message }
+
+  revalidatePath('/presupuesto')
+  revalidatePath('/flujo')
+  return { error: null }
+}
+
 export async function deleteBudget(id: string): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowUpDown, ArrowUp, ArrowDown, Link2, Receipt,
 } from 'lucide-react'
-import { upsertBudget, deleteBudget, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements, bulkMarkDone } from '@/app/actions/budgets'
+import { upsertBudget, deleteBudget, renameBudgetCategory, toggleQuincena, bulkToggleQuincena, updateBudgetActual, recordTransferFromSource, recordBatchEnvelopeMovements, bulkMarkDone } from '@/app/actions/budgets'
 import type { Budget } from '@/app/actions/budgets'
 import { getGroupLabel } from '@/app/(dashboard)/resumen/categoryUtils'
 
@@ -593,6 +593,13 @@ export function PresupuestoClient({
     const name = editName.trim() || b.category
     setEditError(null)
     startTransition(async () => {
+      // Rename in place first. Recreating under a new name and deleting the old
+      // row stranded the per-quincena history, which budget_monthly_done keys by
+      // category, and split the line's older effective_from versions.
+      if (name !== b.category) {
+        const { error: renameErr } = await renameBudgetCategory(b.id, name)
+        if (renameErr) { setEditError(renameErr); return }
+      }
       const { error } = await upsertBudget(name, q1, q2, editBudgetType,
         editEnvelopeId || null,
         editAutoTxCat || null,
@@ -600,7 +607,6 @@ export function PresupuestoClient({
         effectiveFrom,
       )
       if (error) { setEditError(error); return }
-      if (name !== b.category) await deleteBudget(b.id)
       setEditId(null)
     })
   }
