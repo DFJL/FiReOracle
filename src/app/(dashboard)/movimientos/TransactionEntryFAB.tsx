@@ -338,7 +338,7 @@ export function TransactionEntryFAB({
   }, [open])
 
   function needsBucketConfirmation() {
-    return type === 'ingreso' && !investmentBucketId && !bucketWarningAcked
+    return type === 'ingreso' && isSettlement && !investmentBucketId && !bucketWarningAcked
   }
 
   // Compute CRC amount when user enters USD amount + rate
@@ -1058,7 +1058,7 @@ export function TransactionEntryFAB({
               {showBucketWarning && !investmentBucketId && (
                 <div className="bg-blue-400/[0.08] border border-blue-400/25 rounded-xl px-3 py-2.5 space-y-2">
                   <p className="text-[11px] text-blue-300/90 leading-snug">
-                    ¿Es una liquidación de inversión? Si no asignás un bucket, el patrimonio invertido no se va a debitar automáticamente.
+                    Marcaste esto como liquidación de inversión pero no asignaste bucket — el patrimonio invertido NO se va a debitar automáticamente.
                   </p>
                   <div className="flex gap-2">
                     <button type="button"
@@ -1072,7 +1072,7 @@ export function TransactionEntryFAB({
                     <button type="button"
                       onClick={() => { setBucketWarningAcked(true); setShowBucketWarning(false) }}
                       className="flex-1 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
-                      No, es ingreso externo
+                      No vincular a ningún bucket
                     </button>
                   </div>
                 </div>
