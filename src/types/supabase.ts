@@ -108,6 +108,41 @@ export type Database = {
           },
         ]
       }
+      account_wallets: {
+        Row: {
+          account_id: string
+          address: string
+          created_at: string
+          id: string
+          label: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          address: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          address?: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_wallets_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "financial_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           created_at: string
@@ -2146,6 +2181,7 @@ export type Database = {
         Row: {
           allocation_targets: Json | null
           created_at: string
+          debank_access_key: string | null
           fcf_target_ratio: number
           fire_date_slip_alert_months: number
           fire_expected_return: number
@@ -2168,6 +2204,7 @@ export type Database = {
         Insert: {
           allocation_targets?: Json | null
           created_at?: string
+          debank_access_key?: string | null
           fcf_target_ratio?: number
           fire_date_slip_alert_months?: number
           fire_expected_return?: number
@@ -2190,6 +2227,7 @@ export type Database = {
         Update: {
           allocation_targets?: Json | null
           created_at?: string
+          debank_access_key?: string | null
           fcf_target_ratio?: number
           fire_date_slip_alert_months?: number
           fire_expected_return?: number
@@ -2214,6 +2252,8 @@ export type Database = {
       user_investment_buckets: {
         Row: {
           account_id: string | null
+          baseline_date: string | null
+          baseline_value_crc: number | null
           bucket_type: string
           color: string | null
           concept_map: Json | null
@@ -2230,6 +2270,8 @@ export type Database = {
         }
         Insert: {
           account_id?: string | null
+          baseline_date?: string | null
+          baseline_value_crc?: number | null
           bucket_type: string
           color?: string | null
           concept_map?: Json | null
@@ -2246,6 +2288,8 @@ export type Database = {
         }
         Update: {
           account_id?: string | null
+          baseline_date?: string | null
+          baseline_value_crc?: number | null
           bucket_type?: string
           color?: string | null
           concept_map?: Json | null

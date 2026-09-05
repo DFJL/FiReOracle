@@ -6,13 +6,7 @@ import type { SnapshotRow } from '@/app/actions/netWorthSnapshot'
 import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
-
-type ConceptMap = {
-  depositConcepts: string[]
-  rendimientosConcepts: string[]
-  valorizacionConcepts: string[]
-  liquidacionConcepts: string[]
-}
+import { computeBucketTotals, type ConceptMap } from '@/lib/bucketBalance'
 
 export default async function PatrimonioPage() {
   const supabase = await createClient()
@@ -33,7 +27,7 @@ export default async function PatrimonioPage() {
     { data: itemRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
-      .select('id, name, bucket_type, vendors, concept_map, account_id, display_category')
+      .select('id, name, bucket_type, vendors, concept_map, account_id, display_category, baseline_date, baseline_value_crc')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('transactions')
@@ -95,41 +89,22 @@ export default async function PatrimonioPage() {
   // Investment total across all bucket types — split by display_category so
   // pension/severance funds (ROP & FCL, Pensión Voluntaria) land under
   // "Fondos & Pensiones" instead of "Inversiones"
+  // Single pass per bucket — feeds both the aggregate totals and the
+  // per-bucket breakdown below, instead of two independently-drifting copies
+  // of the same formula (patrimonio used to compare concepts case-sensitively
+  // while inversiones didn't — same bug class as everything else fixed today).
+  const bucketBalances: Record<string, number> = {}
+  for (const def of bucketRows ?? []) {
+    bucketBalances[def.id] = def.bucket_type === 'snapshot_based'
+      ? (snapshotBalances[def.id] ?? 0)
+      : computeBucketTotals({ ...def, concept_map: def.concept_map as unknown as ConceptMap | null }, txs ?? []).balance
+  }
+
   let totalInvested = 0
   let totalPensiones = 0
   for (const def of bucketRows ?? []) {
     const isPension = def.display_category === 'invertido'
-    if (def.bucket_type === 'snapshot_based') {
-      const bal = snapshotBalances[def.id] ?? 0
-      if (isPension) totalPensiones += bal; else totalInvested += bal
-      continue
-    }
-    let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0
-    for (const tx of txs ?? []) {
-      const amt = Number(tx.amount ?? 0)
-      if (def.bucket_type === 'concept_based' && def.concept_map) {
-        const cm = def.concept_map as unknown as ConceptMap
-        const c = tx.concept ?? ''
-        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
-          if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
-          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-          else if (tx.is_passive_income && tx.movement_type === 'income') rendimientos += amt
-          else if (tx.is_passive_income && !tx.movement_type)             passiveValuation += amt
-        } else if (cm.depositConcepts.includes(c))           deposits += amt
-        else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
-        else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
-        else if (cm.liquidacionConcepts.includes(c))   liquidaciones += amt
-      } else if (def.bucket_type === 'vendor_based') {
-        const txVendor = (tx.vendor ?? '').toLowerCase().trim()
-        const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
-        if (!vendors.includes(txVendor)) continue
-        if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-        else if (tx.is_settlement)                                               liquidaciones += amt
-        else if (tx.is_passive_income && tx.movement_type === 'income')          rendimientos += amt
-        else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
-      }
-    }
-    const bal = deposits + passiveValuation + rendimientos - liquidaciones
+    const bal = bucketBalances[def.id] ?? 0
     if (isPension) totalPensiones += bal; else totalInvested += bal
   }
 
@@ -156,37 +131,7 @@ export default async function PatrimonioPage() {
   const bucketBreakdown: { name: string; balance: number }[] = []
   const pensionesBreakdown: { name: string; balance: number }[] = []
   for (const def of bucketRows ?? []) {
-    let balance = 0
-    if (def.bucket_type === 'snapshot_based') {
-      balance = snapshotBalances[def.id] ?? 0
-    } else {
-      let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0
-      for (const tx of txs ?? []) {
-        const amt = Number(tx.amount ?? 0)
-        if (def.bucket_type === 'concept_based' && def.concept_map) {
-          const cm = def.concept_map as unknown as ConceptMap
-          const c = tx.concept ?? ''
-          if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
-            if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
-            else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-            else if (tx.is_passive_income && tx.movement_type === 'income') rendimientos += amt
-            else if (tx.is_passive_income && !tx.movement_type)             passiveValuation += amt
-          } else if (cm.depositConcepts.includes(c))           deposits += amt
-          else if (cm.rendimientosConcepts.includes(c))  rendimientos += amt
-          else if (cm.valorizacionConcepts.includes(c))  passiveValuation += amt
-          else if (cm.liquidacionConcepts.includes(c))   liquidaciones += amt
-        } else if (def.bucket_type === 'vendor_based') {
-          const txVendor = (tx.vendor ?? '').toLowerCase().trim()
-          const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())
-          if (!vendors.includes(txVendor)) continue
-          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-          else if (tx.is_settlement)                                               liquidaciones += amt
-          else if (tx.is_passive_income && tx.movement_type === 'income')          rendimientos += amt
-          else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
-        }
-      }
-      balance = deposits + passiveValuation + rendimientos - liquidaciones
-    }
+    const balance = bucketBalances[def.id] ?? 0
     const defWithName = def as typeof def & { name?: string }
     if (defWithName.name) {
       if (def.display_category === 'invertido') pensionesBreakdown.push({ name: defWithName.name, balance })
@@ -208,15 +153,16 @@ export default async function PatrimonioPage() {
       let delta = 0
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
-        const c = tx.concept ?? ''
+        const c = (tx.concept ?? '').toLowerCase()
+        const ci = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
         if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
           if (tx.movement_type === 'income' && tx.is_settlement) delta = -amt
           else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) delta = amt
           else if (tx.is_passive_income) delta = amt
-        } else if (cm.depositConcepts.includes(c))           delta = amt
-        else if (cm.rendimientosConcepts.includes(c))  delta = amt
-        else if (cm.valorizacionConcepts.includes(c))  delta = amt
-        else if (cm.liquidacionConcepts.includes(c))   delta = -amt
+        } else if (ci(cm.depositConcepts))           delta = amt
+        else if (ci(cm.rendimientosConcepts))  delta = amt
+        else if (ci(cm.valorizacionConcepts))  delta = amt
+        else if (ci(cm.liquidacionConcepts))   delta = -amt
       } else if (def.bucket_type === 'vendor_based') {
         const txVendor = (tx.vendor ?? '').toLowerCase().trim()
         const vendors = (def.vendors ?? []).map((v: string) => v.toLowerCase())

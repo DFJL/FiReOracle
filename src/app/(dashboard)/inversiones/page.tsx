@@ -10,21 +10,9 @@ import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type E
 import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
+import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 
 const LIQUID_KEY = '__liquidez__'
-
-// Strips stray punctuation (typos like a trailing backtick/quote) and collapses
-// whitespace so e.g. "TRANSCOMER`" still matches a bucket's "TRANSCOMER" vendor.
-function normalizeVendor(v: string): string {
-  return v.toLowerCase().replace(/[^a-z0-9áéíóúñ ]/g, '').trim().replace(/\s+/g, ' ')
-}
-
-type ConceptMap = {
-  depositConcepts: string[]
-  rendimientosConcepts: string[]
-  valorizacionConcepts: string[]
-  liquidacionConcepts: string[]
-}
 
 export default async function InversionesPage() {
   const supabase = await createClient()
@@ -44,7 +32,7 @@ export default async function InversionesPage() {
   ] = await Promise.all([
     admin
       .from('user_investment_buckets')
-      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')
+      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order, baseline_date, baseline_value_crc')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -212,41 +200,8 @@ export default async function InversionesPage() {
       }
     }
 
-    let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0, markToMarketLoss = 0
-
-    for (const tx of txs ?? []) {
-      const amt = Number(tx.amount ?? 0)
-
-      if (def.bucket_type === 'concept_based' && def.concept_map) {
-        const cm = def.concept_map as unknown as ConceptMap
-        const c = (tx.concept ?? '').toLowerCase()
-        const ciIncludes = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
-        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
-          if (tx.movement_type === 'income' && tx.is_settlement) liquidaciones += amt
-          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-          else if (tx.is_passive_income && tx.movement_type === 'income') {
-            if (tx.category_code === 'APPRECIATION') passiveValuation += amt
-            else rendimientos += amt
-          }
-          else if (tx.is_passive_income && !tx.movement_type) passiveValuation += amt
-        } else if (ciIncludes(cm.depositConcepts))       deposits += amt
-        else if (ciIncludes(cm.rendimientosConcepts))    rendimientos += amt
-        else if (ciIncludes(cm.valorizacionConcepts))    passiveValuation += amt
-        else if (ciIncludes(cm.liquidacionConcepts))     liquidaciones += amt
-      } else if (def.bucket_type === 'vendor_based') {
-        const txVendor = normalizeVendor(tx.vendor ?? '')
-        const vendors = (def.vendors ?? []).map((v: string) => normalizeVendor(v))
-        if (!vendors.includes(txVendor)) continue
-
-        if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) deposits += amt
-        else if (tx.is_settlement)                                               liquidaciones += amt
-        else if (tx.is_passive_income && tx.movement_type === 'income')          rendimientos += amt
-        else if (tx.is_passive_income && !tx.movement_type)                      passiveValuation += amt
-        else if (tx.movement_type === 'expense' && tx.expense_group === 'na' && !tx.is_passive_income) markToMarketLoss += amt
-      }
-    }
-
-    const balance = deposits + passiveValuation + rendimientos - liquidaciones
+    const { deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, balance } =
+      computeBucketTotals({ ...def, concept_map: def.concept_map as unknown as ConceptMap | null }, txs ?? [])
     return {
       key: def.id,
       name: def.name,
@@ -274,46 +229,7 @@ export default async function InversionesPage() {
     if (!tx.date) continue
     const amt = Number(tx.amount ?? 0)
     for (const def of bucketRows ?? []) {
-      let txType: BucketTxType | null = null
-      if (def.bucket_type === 'snapshot_based') {
-        const v = normalizeVendor(tx.vendor ?? '')
-        const linked = (tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id
-          || v === normalizeVendor(def.name)
-        if (linked) {
-          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement)  txType = 'deposit'
-          else if (tx.is_settlement)                                               txType = 'liquidacion'
-          else if (tx.is_passive_income && tx.movement_type === 'income')         txType = 'rendimiento'
-          else if (tx.is_passive_income)                                           txType = 'valorizacion'
-          else if (tx.movement_type === 'expense')                                 txType = 'otro'
-          else if (tx.movement_type === 'income')                                  txType = 'otro'
-        }
-      } else
-      if (def.bucket_type === 'concept_based' && def.concept_map) {
-        const cm = def.concept_map as unknown as ConceptMap
-        const c = (tx.concept ?? '').toLowerCase()
-        const ci = (arr: string[]) => arr.some(s => s.toLowerCase() === c)
-        if ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id) {
-          if (tx.movement_type === 'income' && tx.is_settlement)                      txType = 'liquidacion'
-          else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) txType = 'deposit'
-          else if (tx.is_passive_income && tx.movement_type === 'income')             txType = 'rendimiento'
-          else if (tx.is_passive_income)                                              txType = 'valorizacion'
-          else if (tx.movement_type === 'income')                                     txType = 'rendimiento'
-          else if (tx.movement_type === 'expense')                                    txType = 'perdida'
-        } else if (ci(cm.depositConcepts))       txType = 'deposit'
-        else if (ci(cm.rendimientosConcepts))    txType = 'rendimiento'
-        else if (ci(cm.valorizacionConcepts))    txType = 'valorizacion'
-        else if (ci(cm.liquidacionConcepts))     txType = 'liquidacion'
-      } else if (def.bucket_type === 'vendor_based') {
-        const v = normalizeVendor(tx.vendor ?? '')
-        const vs = (def.vendors ?? []).map((s: string) => normalizeVendor(s))
-        if (vs.includes(v)) {
-          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement)  txType = 'deposit'
-          else if (tx.is_settlement)                                               txType = 'liquidacion'
-          else if (tx.is_passive_income && tx.movement_type === 'income')         txType = 'rendimiento'
-          else if (tx.is_passive_income)                                           txType = 'valorizacion'
-          else if (tx.movement_type === 'expense' && !tx.is_passive_income)       txType = 'perdida'
-        }
-      }
+      const txType = classifyBucketTx({ ...def, concept_map: def.concept_map as unknown as ConceptMap | null }, tx) as BucketTxType | null
       if (txType) {
         bucketTransactions[def.id].push({
           id: tx.id,
