@@ -1,3 +1,10 @@
+export interface BucketPosition {
+  symbol: string
+  quantity: number
+  market_value_usd: number
+  avg_cost_usd: number | null
+}
+
 export interface BucketData {
   key: string
   name: string
@@ -11,6 +18,7 @@ export interface BucketData {
   markToMarketLoss: number
   balance: number
   valorizationNet: number
+  positions?: BucketPosition[]
 }
 
 export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida'

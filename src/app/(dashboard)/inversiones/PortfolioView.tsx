@@ -310,6 +310,25 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                 ))}
               </div>
 
+              {!!sel.positions?.length && (
+                <div className="rounded-xl bg-white/[0.02] border border-white/[0.05] overflow-hidden">
+                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] px-3 pt-2.5">
+                    Posiciones
+                  </p>
+                  <div className="divide-y divide-white/[0.04]">
+                    {sel.positions.map(p => (
+                      <div key={p.symbol} className="flex items-center gap-3 px-3 py-2">
+                        <span className="text-xs font-bold text-zinc-200 w-16 shrink-0">{p.symbol}</span>
+                        <span className="text-[10px] text-zinc-600 flex-1">{p.quantity} u.</span>
+                        <span className="text-xs font-black tabular-nums text-zinc-100">
+                          {currency === 'CRC' ? fmtCRCFull(p.market_value_usd * rate) : fmtUSDFull(p.market_value_usd)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {sel.markToMarketLoss > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
                   <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Pérdida valor</span>

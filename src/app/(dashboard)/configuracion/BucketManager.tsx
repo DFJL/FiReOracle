@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { createBucket, updateBucket, deactivateBucket, type BucketFormData } from '@/app/actions/investmentBuckets'
+import { AccountSyncPanel } from './AccountSyncPanel'
 
 type Bucket = {
   id: string
@@ -15,7 +16,7 @@ type Bucket = {
   sort_order: number | null
 }
 
-type Account = { id: string; name: string; account_type: string }
+type Account = { id: string; name: string; account_type: string; currency_code?: string }
 
 const PRESET_COLORS = [
   '#f59e0b', '#3b82f6', '#a855f7', '#22d3ee',
@@ -187,7 +188,9 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
   const [showAdd, setShowAdd]   = useState(false)
   const [editId, setEditId]     = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [syncId, setSyncId]     = useState<string | null>(null)
   const [isPending, start]      = useTransition()
+  const accountById = Object.fromEntries(accounts.map(a => [a.id, a]))
 
   async function handleCreate(data: BucketFormData) {
     const res = await createBucket(data)
@@ -251,6 +254,12 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
                   onCancel={() => setEditId(null)}
                 />
               </div>
+            ) : syncId === b.id && b.account_id ? (
+              <AccountSyncPanel
+                accountId={b.account_id}
+                currencyCode={accountById[b.account_id]?.currency_code ?? 'CRC'}
+                onClose={() => setSyncId(null)}
+              />
             ) : (
               <div className="flex items-center gap-3 px-4 py-3">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: b.color ?? '#888' }} />
@@ -262,6 +271,12 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  {b.bucket_type === 'snapshot_based' && b.account_id && (
+                    <button onClick={() => { setSyncId(b.id); setEditId(null) }}
+                      className="px-2.5 py-1 rounded-lg bg-blue-400/10 text-blue-300 text-[10px] font-bold hover:bg-blue-400/20 transition-colors">
+                      Sincronizar
+                    </button>
+                  )}
                   <button onClick={() => { setEditId(b.id); setShowAdd(false) }}
                     className="px-2.5 py-1 rounded-lg bg-white/[0.04] text-zinc-500 text-[10px] hover:text-zinc-200 transition-colors">
                     Editar

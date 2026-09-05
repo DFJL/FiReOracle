@@ -106,21 +106,38 @@ export default async function InversionesPage() {
     snapshotTotalByMonth[m]    = Number(s.invested_crc ?? 0) + Number(s.liquid_crc ?? 0)
   }
 
-  // Fetch snapshot balances for snapshot_based buckets
+  // Fetch snapshot balances + positions for snapshot_based buckets
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
   const snapshotResults = await Promise.all(
     snapshotBuckets.map(async b => {
-      const { data } = await admin
-        .from('account_balance_snapshots')
-        .select('real_balance')
-        .eq('account_id', b.account_id!)
-        .order('snapshot_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      return { id: b.id, balance: data?.real_balance ? Number(data.real_balance) : 0 }
+      const [{ data }, { data: positions }] = await Promise.all([
+        admin
+          .from('account_balance_snapshots')
+          .select('real_balance')
+          .eq('account_id', b.account_id!)
+          .order('snapshot_date', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from('account_positions')
+          .select('symbol, quantity, market_value_usd, avg_cost_usd')
+          .eq('account_id', b.account_id!)
+          .order('market_value_usd', { ascending: false }),
+      ])
+      return {
+        id: b.id,
+        balance: data?.real_balance ? Number(data.real_balance) : 0,
+        positions: (positions ?? []).map(p => ({
+          symbol: p.symbol,
+          quantity: Number(p.quantity),
+          market_value_usd: Number(p.market_value_usd),
+          avg_cost_usd: p.avg_cost_usd != null ? Number(p.avg_cost_usd) : null,
+        })),
+      }
     })
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
+  const snapshotPositions: Record<string, typeof snapshotResults[number]['positions']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.positions]))
 
   // Canonical envelope rule, shared with /liquidez, /patrimonio and /auditoria
   const countableIds = countableEnvelopeIds(envelopes ?? [])
@@ -172,6 +189,7 @@ export default async function InversionesPage() {
         deposits: 0, liquidaciones: 0, rendimientos: 0,
         passiveValuation: 0, markToMarketLoss: 0,
         balance, valorizationNet: 0,
+        positions: snapshotPositions[def.id] ?? [],
       }
     }
 
