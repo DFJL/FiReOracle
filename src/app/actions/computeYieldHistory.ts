@@ -221,6 +221,9 @@ export async function computeYieldHistory(): Promise<{
     .eq('user_id', user.id)
     .not('date', 'is', null)
     .not('amount', 'is', null)
+    // PostgREST caps unpaginated selects at 1000 rows silently — this user
+    // has ~8,800 transactions, so this was quietly truncating.
+    .range(0, 49999)
 
   if (txErr) return { error: txErr.message, rows: 0 }
 

@@ -37,6 +37,9 @@ export async function computeNetWorthTotals(
         .select('date, vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, investment_bucket_id')
         .eq('user_id', userId)
         .not('amount', 'is', null)
+        // PostgREST caps unpaginated selects at 1000 rows silently — this user
+        // has ~8,800 transactions, so this was quietly truncating.
+        .range(0, 49999)
       if (asOfDate) q = q.lte('date', asOfDate)
       return q
     })(),

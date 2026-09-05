@@ -40,7 +40,12 @@ export default async function InversionesPage() {
       .from('transactions')
       .select('id, vendor, concept, category_code, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
       .eq('user_id', user.id)
-      .not('amount', 'is', null),
+      .not('amount', 'is', null)
+      // Supabase/PostgREST caps unpaginated selects at 1000 rows by default —
+      // silently, with no error. A single user here already has ~8,800
+      // transactions, so every unpatched call like this one was quietly
+      // replaying on <12% of the real ledger.
+      .range(0, 49999),
     admin
       .from('envelope_movements')
       .select('amount, date, movement_type, envelope_id')
@@ -66,7 +71,8 @@ export default async function InversionesPage() {
       .select('date, amount, movement_type')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
-      .not('amount', 'is', null),
+      .not('amount', 'is', null)
+      .range(0, 49999),
   ])
 
   // Authoritative history. Replaying transaction deltas cannot reconstruct what

@@ -33,7 +33,10 @@ export default async function PatrimonioPage() {
     admin.from('transactions')
       .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
       .eq('user_id', user.id)
-      .not('amount', 'is', null),
+      .not('amount', 'is', null)
+      // PostgREST caps unpaginated selects at 1000 rows silently — this user
+      // has ~8,800 transactions, so this was quietly truncating.
+      .range(0, 49999),
     admin.from('envelope_movements')
       .select('amount, date, movement_type, envelope_id')
       .eq('user_id', user.id),
