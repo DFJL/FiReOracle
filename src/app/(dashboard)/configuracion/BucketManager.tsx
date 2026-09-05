@@ -274,7 +274,7 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
                   {b.bucket_type === 'snapshot_based' && b.account_id && (
                     <button onClick={() => { setSyncId(b.id); setEditId(null) }}
                       className="px-2.5 py-1 rounded-lg bg-blue-400/10 text-blue-300 text-[10px] font-bold hover:bg-blue-400/20 transition-colors">
-                      Sincronizar
+                      Actualizar
                     </button>
                   )}
                   <button onClick={() => { setEditId(b.id); setShowAdd(false) }}

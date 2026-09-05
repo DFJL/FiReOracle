@@ -97,7 +97,12 @@ export function AccountSyncPanel({ accountId, currencyCode, onClose }: {
 
   return (
     <div className="p-4 space-y-3">
-      <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest">Sincronizar balance real</p>
+      <p className="text-[9px] font-black text-[#a3e635]/60 uppercase tracking-widest">Actualizar balance manual</p>
+      <p className="text-[9px] text-zinc-600 leading-relaxed">
+        Esta app todavía no está conectada a tu bróker — no hay forma de que este formulario
+        jale el dato solo. Si querés que se actualice sin escribir nada, pedíselo a Claude en
+        el chat; usá esto solo para cargarlo vos mismo.
+      </p>
       {lastSync.date && (
         <p className="text-[9px] text-zinc-600">
           Último registrado: {lastSync.date}{lastSync.balanceNative != null ? ` · ${lastSync.balanceNative.toFixed(2)} ${currencyCode}` : ''}
@@ -156,7 +161,7 @@ export function AccountSyncPanel({ accountId, currencyCode, onClose }: {
       <div className="flex gap-2">
         <button onClick={submit} disabled={isPending}
           className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50 transition-opacity">
-          {isPending ? '...' : 'Sincronizar'}
+          {isPending ? '...' : 'Guardar'}
         </button>
         <button onClick={onClose}
           className="px-4 py-2 rounded-lg bg-white/[0.06] text-zinc-400 text-xs hover:text-zinc-200 transition-colors">
