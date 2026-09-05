@@ -53,7 +53,7 @@ export default async function InversionesPage() {
       .order('sort_order'),
     admin
       .from('investment_yield_history')
-      .select('product_name, year_month, yield_usd, invested_usd, yield_pct, exchange_rate')
+      .select('product_name, year_month, yield_usd, invested_usd, yield_pct, exchange_rate, source, bucket_id')
       .eq('user_id', user.id)
       .order('year_month', { ascending: true }),
     admin
@@ -92,6 +92,19 @@ export default async function InversionesPage() {
     snapshotInvestedByMonth[m] = Number(s.invested_crc ?? 0)
     snapshotLiquidByMonth[m]   = Number(s.liquid_crc ?? 0)
     snapshotTotalByMonth[m]    = Number(s.invested_crc ?? 0) + Number(s.liquid_crc ?? 0)
+  }
+
+  // Real, manually-verified per-bucket monthly values (source: 'imported') —
+  // preferred over the transaction replay for any month they cover, same
+  // principle as snapshotInvestedByMonth above but per bucket instead of
+  // portfolio-wide. A 'computed' row (written by computeYieldHistory) never
+  // overrides anything; only a human-verified 'imported' one does.
+  const realBucketMonthByBucket: Record<string, Record<string, number>> = {}
+  for (const r of yieldRows ?? []) {
+    if (r.source !== 'imported' || !r.bucket_id || !r.year_month) continue
+    const m = String(r.year_month).slice(0, 7)
+    const crc = Number(r.invested_usd) * Number(r.exchange_rate)
+    ;(realBucketMonthByBucket[r.bucket_id] ??= {})[m] = crc
   }
 
   // Fetch snapshot balances + positions + history for snapshot_based buckets
@@ -326,6 +339,13 @@ export default async function InversionesPage() {
     let lastLiquid: number | null = null
     let lastTotal: number | null = null
 
+    // Per-bucket real-value anchor: once a month has a verified real value,
+    // later un-verified months show `real anchor + replay delta since then`
+    // instead of the raw (possibly drifted) cumulative replay — same idea as
+    // the baseline on the current total, applied month by month for the chart.
+    const bucketLastReal: Record<string, number> = {}
+    const bucketReplayAtLastReal: Record<string, number> = {}
+
     for (const month of months) {
       for (const def of bucketDefs) {
         running[def.id] = (running[def.id] ?? 0) + (bucketDeltas[def.id]?.[month] ?? 0)
@@ -335,10 +355,24 @@ export default async function InversionesPage() {
       if (snapshotLiquidByMonth[month] !== undefined)   lastLiquid   = snapshotLiquidByMonth[month]
       if (snapshotTotalByMonth[month] !== undefined)    lastTotal    = snapshotTotalByMonth[month]
 
+      const bucketBalances: Record<string, number> = {}
+      for (const def of bucketDefs) {
+        const real = realBucketMonthByBucket[def.id]?.[month]
+        if (real !== undefined) {
+          bucketLastReal[def.id] = real
+          bucketReplayAtLastReal[def.id] = running[def.id] ?? 0
+          bucketBalances[def.id] = real
+        } else if (def.id in bucketLastReal) {
+          bucketBalances[def.id] = bucketLastReal[def.id] + ((running[def.id] ?? 0) - bucketReplayAtLastReal[def.id])
+        } else {
+          bucketBalances[def.id] = running[def.id] ?? 0
+        }
+      }
+
       historyPoints.push({
         month,
         balances: {
-          ...Object.fromEntries(bucketDefs.map(d => [d.id, running[d.id] ?? 0])),
+          ...bucketBalances,
           // envelope_movements only start 2025-01, so replaying them leaves the
           // liquidez line flat at zero for 2018-2024. Snapshots know the real
           // position; fall back to the replay only where no snapshot exists.
