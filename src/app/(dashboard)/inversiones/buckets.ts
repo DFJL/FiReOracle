@@ -25,7 +25,7 @@ export interface BucketData {
   balanceHistory?: { date: string; balance: number; balanceNative: number | null }[]
 }
 
-export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida'
+export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida' | 'otro'
 
 export interface BucketTx {
   id: string

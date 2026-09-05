@@ -262,15 +262,32 @@ export default async function InversionesPage() {
   const totalPatrimony = totalInvested + liquidBalance
 
   // ── Per-bucket transaction history ──────────────────────────────────────────
+  // Snapshot-based buckets don't derive their BALANCE from these — that comes
+  // from account_balance_snapshots — but the underlying transactions (a deposit,
+  // a wire fee) are still real records worth showing, matched by vendor name
+  // or an explicit investment_bucket_id link.
   const bucketTransactions: Record<string, BucketTx[]> = {}
   for (const def of bucketRows ?? []) {
-    if (def.bucket_type !== 'snapshot_based') bucketTransactions[def.id] = []
+    bucketTransactions[def.id] = []
   }
   for (const tx of txs ?? []) {
     if (!tx.date) continue
     const amt = Number(tx.amount ?? 0)
-    for (const def of (bucketRows ?? []).filter(b => b.bucket_type !== 'snapshot_based')) {
+    for (const def of bucketRows ?? []) {
       let txType: BucketTxType | null = null
+      if (def.bucket_type === 'snapshot_based') {
+        const v = normalizeVendor(tx.vendor ?? '')
+        const linked = (tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id
+          || v === normalizeVendor(def.name)
+        if (linked) {
+          if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement)  txType = 'deposit'
+          else if (tx.is_settlement)                                               txType = 'liquidacion'
+          else if (tx.is_passive_income && tx.movement_type === 'income')         txType = 'rendimiento'
+          else if (tx.is_passive_income)                                           txType = 'valorizacion'
+          else if (tx.movement_type === 'expense')                                 txType = 'otro'
+          else if (tx.movement_type === 'income')                                  txType = 'otro'
+        }
+      } else
       if (def.bucket_type === 'concept_based' && def.concept_map) {
         const cm = def.concept_map as unknown as ConceptMap
         const c = (tx.concept ?? '').toLowerCase()

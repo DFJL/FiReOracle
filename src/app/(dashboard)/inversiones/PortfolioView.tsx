@@ -109,6 +109,7 @@ const TX_META: Record<string, { label: string; color: string; sign: 1 | -1 }> = 
   rendimiento:  { label: 'Rendimiento', color: '#a3e635', sign:  1 },
   valorizacion: { label: 'Valoriz.',    color: '#86efac', sign:  1 },
   perdida:      { label: 'Pérdida',     color: '#fb923c', sign: -1 },
+  otro:         { label: 'Otro',        color: '#a1a1aa', sign: -1 },
 }
 
 export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions }: {
