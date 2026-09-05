@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useTransition, useEffect } from 'react'
+import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
@@ -515,6 +515,9 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
   // 'income' = cobrado (cash), null = valorización (reinvertido, no cash flow)
   const [movementType, setMovementType] = useState<'income' | null>(tx.movement_type === 'expense' ? 'income' : (tx.movement_type as 'income' | null))
   const [investmentBucketId, setInvestmentBucketId] = useState(tx.investment_bucket_id ?? '')
+  const [showBucketWarning, setShowBucketWarning] = useState(false)
+  const [bucketWarningAcked, setBucketWarningAcked] = useState(false)
+  const bucketSelectRef = useRef<HTMLSelectElement>(null)
   const [error, setError]             = useState<string | null>(null)
   const [isPending, startTransition]  = useTransition()
   const isIncomeSide = tx.movement_type !== 'expense'
@@ -570,10 +573,15 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
     setIsSurvival(cat.is_survival_expense)
   }, [categoryCode, categories])
 
+  function needsBucketConfirmation() {
+    return isIncomeSide && isSettlement && !investmentBucketId && !bucketWarningAcked
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     const envelopeChanged = envelopeId !== initialEnvelopeId
     const loanChanged = isLoanPaymentTx && selectedLoanId && selectedLoanId !== initialLoanLink?.loanId
@@ -775,7 +783,7 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
                       {isPassive ? ' (sin bucket no suma a ninguna inversión)' : ' (opcional)'}
                     </span>
                   </label>
-                  <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
+                  <select ref={bucketSelectRef} value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
                     <option value="">Sin bucket (solo liquidez)</option>
                     {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
@@ -881,6 +889,28 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
             <label className={lbl}>Notas <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Nota libre…" className={inputCls} />
           </div>
+          {showBucketWarning && !investmentBucketId && (
+            <div className="bg-blue-400/[0.08] border border-blue-400/25 rounded-xl px-3 py-2.5 space-y-2">
+              <p className="text-[11px] text-blue-300/90 leading-snug">
+                Marcaste esto como liquidación de inversión pero no asignaste bucket — el patrimonio invertido NO se va a debitar automáticamente.
+              </p>
+              <div className="flex gap-2">
+                <button type="button"
+                  onClick={() => {
+                    bucketSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    bucketSelectRef.current?.focus()
+                  }}
+                  className="flex-1 py-1.5 rounded-lg bg-blue-400/15 text-blue-300 text-[11px] font-bold hover:bg-blue-400/25 transition-colors">
+                  Asignar bucket
+                </button>
+                <button type="button"
+                  onClick={() => { setBucketWarningAcked(true); setShowBucketWarning(false) }}
+                  className="flex-1 py-1.5 rounded-lg bg-white/[0.06] text-zinc-300 text-[11px] font-bold hover:bg-white/[0.10] transition-colors">
+                  No vincular a ningún bucket
+                </button>
+              </div>
+            </div>
+          )}
           {error && <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={onClose}
