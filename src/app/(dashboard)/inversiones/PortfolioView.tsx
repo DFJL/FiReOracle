@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -122,6 +123,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   const [selected, setSelected] = useState<string | null>(null)
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const [showAllTx, setShowAllTx] = useState(false)
+  const [syncOpen, setSyncOpen] = useState(false)
 
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate
@@ -145,6 +147,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   function toggle(key: string) {
     setSelected(prev => prev === key ? null : key)
     setShowAllTx(false)
+    setSyncOpen(false)
   }
 
   const donutSlices = allItems.map(b => ({
@@ -242,8 +245,26 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
               <p className="text-xl font-black text-white mt-0.5">{sel.name}</p>
               <p className="text-xs text-zinc-500">{sel.industry}</p>
             </div>
-            <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
+            <div className="flex items-center gap-2 shrink-0">
+              {sel.accountId && (
+                <button onClick={() => setSyncOpen(v => !v)}
+                  className="px-2.5 py-1 rounded-lg bg-blue-400/10 text-blue-300 text-[10px] font-bold hover:bg-blue-400/20 transition-colors">
+                  {syncOpen ? 'Cerrar sync' : 'Sincronizar'}
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
+            </div>
           </div>
+
+          {syncOpen && sel.accountId && (
+            <div className="rounded-xl bg-white/[0.02] border border-blue-400/20 overflow-hidden">
+              <AccountSyncPanel
+                accountId={sel.accountId}
+                currencyCode={sel.accountCurrency ?? 'CRC'}
+                onClose={() => setSyncOpen(false)}
+              />
+            </div>
+          )}
 
           {sel.key === LIQUID_KEY ? (
             /* Liquidez detail — per-custodio breakdown */

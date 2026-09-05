@@ -23,6 +23,7 @@ export type Database = {
           notes: string | null
           period_label: string | null
           real_balance: number
+          real_balance_native: number | null
           snapshot_date: string
           system_balance: number | null
           user_id: string | null
@@ -35,6 +36,7 @@ export type Database = {
           notes?: string | null
           period_label?: string | null
           real_balance: number
+          real_balance_native?: number | null
           snapshot_date: string
           system_balance?: number | null
           user_id?: string | null
@@ -47,6 +49,7 @@ export type Database = {
           notes?: string | null
           period_label?: string | null
           real_balance?: number
+          real_balance_native?: number | null
           snapshot_date?: string
           system_balance?: number | null
           user_id?: string | null

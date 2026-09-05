@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { createBucket, updateBucket, deactivateBucket, type BucketFormData } from '@/app/actions/investmentBuckets'
-import { AccountSyncPanel } from './AccountSyncPanel'
+import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 
 type Bucket = {
   id: string

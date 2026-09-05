@@ -139,6 +139,14 @@ export default async function InversionesPage() {
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
   const snapshotPositions: Record<string, typeof snapshotResults[number]['positions']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.positions]))
 
+  const { data: snapshotAccounts } = snapshotBuckets.length > 0
+    ? await admin.from('financial_accounts').select('id, currency_code')
+        .in('id', snapshotBuckets.map(b => b.account_id!))
+    : { data: [] }
+  const accountCurrencyById: Record<string, string> = Object.fromEntries(
+    (snapshotAccounts ?? []).map(a => [a.id, a.currency_code])
+  )
+
   // Canonical envelope rule, shared with /liquidez, /patrimonio and /auditoria
   const countableIds = countableEnvelopeIds(envelopes ?? [])
   const liquidBalance = sumLiquid(movements ?? [], countableIds)
@@ -190,6 +198,8 @@ export default async function InversionesPage() {
         passiveValuation: 0, markToMarketLoss: 0,
         balance, valorizationNet: 0,
         positions: snapshotPositions[def.id] ?? [],
+        accountId: def.account_id,
+        accountCurrency: def.account_id ? (accountCurrencyById[def.account_id] ?? 'CRC') : undefined,
       }
     }
 

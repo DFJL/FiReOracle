@@ -21,28 +21,27 @@ export async function getAccountSyncData(accountId: string) {
   const [{ data: account }, { data: snapshot }, { data: positions }] = await Promise.all([
     admin.from('financial_accounts').select('id, name, currency_code')
       .eq('id', accountId).eq('user_id', user.id).maybeSingle(),
-    admin.from('account_balance_snapshots').select('real_balance, snapshot_date')
+    admin.from('account_balance_snapshots').select('real_balance_native, snapshot_date')
       .eq('account_id', accountId).order('snapshot_date', { ascending: false }).limit(1).maybeSingle(),
     admin.from('account_positions').select('symbol, quantity, market_value_usd, avg_cost_usd')
       .eq('account_id', accountId).order('market_value_usd', { ascending: false }),
   ])
   if (!account) return { error: 'Cuenta no encontrada' as const }
 
-  const rate = await fetchExchangeRate()
-  const lastBalanceUsd = snapshot?.real_balance
-    ? (account.currency_code === 'USD' ? Number(snapshot.real_balance) / rate.sell : Number(snapshot.real_balance))
-    : null
+  // Exact value from the last time someone actually looked at the real account —
+  // never re-derived from a CRC↔native reconversion, which drifts with the FX rate.
+  const lastBalanceNative = snapshot?.real_balance_native != null ? Number(snapshot.real_balance_native) : null
 
   return {
     account,
     lastSnapshotDate: snapshot?.snapshot_date ?? null,
-    lastBalanceUsd,
+    lastBalanceNative,
     positions: (positions ?? []) as PositionInput[],
   }
 }
 
 export async function syncAccountBalance(accountId: string, input: {
-  real_balance_usd: number
+  real_balance_native: number
   positions: PositionInput[]
 }) {
   const supabase = await createClient()
@@ -56,8 +55,8 @@ export async function syncAccountBalance(accountId: string, input: {
 
   const rate = await fetchExchangeRate()
   const realBalance = account.currency_code === 'USD'
-    ? input.real_balance_usd * rate.sell
-    : input.real_balance_usd
+    ? input.real_balance_native * rate.sell
+    : input.real_balance_native
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -67,8 +66,11 @@ export async function syncAccountBalance(accountId: string, input: {
       account_id: accountId,
       snapshot_date: today,
       real_balance: realBalance,
+      real_balance_native: input.real_balance_native,
       period_label: 'sync-app',
-      notes: `Sync manual desde app · $${input.real_balance_usd.toFixed(2)} USD @ ₡${rate.sell}/USD (${rate.source})`,
+      notes: account.currency_code === 'USD'
+        ? `Sync manual desde app · $${input.real_balance_native.toFixed(2)} USD @ ₡${rate.sell}/USD (${rate.source})`
+        : 'Sync manual desde app',
     },
     { onConflict: 'account_id,snapshot_date' }
   )
