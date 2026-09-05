@@ -21,6 +21,8 @@ export interface BucketData {
   positions?: BucketPosition[]
   accountId?: string | null
   accountCurrency?: string
+  balanceNative?: number
+  balanceHistory?: { date: string; balance: number; balanceNative: number | null }[]
 }
 
 export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida'

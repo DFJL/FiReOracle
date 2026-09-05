@@ -130,6 +130,16 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   const fmt    = (crc: number) => currency === 'CRC' ? fmtCRC(crc) : fmtUSD(toUSD(crc))
   const fmtFull = (crc: number) => currency === 'CRC' ? fmtCRCFull(crc) : fmtUSDFull(toUSD(crc))
 
+  // For a snapshot-backed USD account, showing USD means showing the exact
+  // number that was typed in at sync time — re-deriving it from the CRC total
+  // via today's live rate drifts with every FX tick even though nothing about
+  // the real account changed. CRC view has no native figure to fall back on,
+  // so it stays a live reconversion (expected to move with the rate).
+  const bucketBalanceLabel = (b: BucketData) =>
+    currency === 'USD' && b.accountCurrency === 'USD' && b.balanceNative != null
+      ? fmtUSDFull(b.balanceNative)
+      : fmtFull(b.balance)
+
   // Synthetic liquidez entry appended to bucket list
   const liquidItem: BucketData = {
     key: LIQUID_KEY,
@@ -222,7 +232,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-black tabular-nums text-zinc-100">{fmtFull(b.balance)}</p>
+                      <p className="text-xs font-black tabular-nums text-zinc-100">{bucketBalanceLabel(b)}</p>
                       <p className="text-[9px] tabular-nums" style={{ color: b.color }}>{pct.toFixed(1)}%</p>
                     </div>
                   </div>
@@ -315,13 +325,13 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: 'Balance',       crc: sel.balance,                             color: 'text-white',     sub: 'valor actual' },
-                  { label: 'Depósitos',     crc: sel.deposits,                            color: 'text-zinc-200',  sub: 'cash in' },
-                  { label: 'Liquidaciones', crc: sel.liquidaciones,                       color: 'text-rose-400',  sub: 'cash out' },
-                  { label: 'Rendimientos',  crc: sel.passiveValuation + sel.rendimientos, color: 'text-[#a3e635]', sub: 'NAV + efectivo' },
+                  { label: 'Balance',       crc: sel.balance,                             display: bucketBalanceLabel(sel), color: 'text-white',     sub: 'valor actual' },
+                  { label: 'Depósitos',     crc: sel.deposits,                            display: fmtFull(sel.deposits),   color: 'text-zinc-200',  sub: 'cash in' },
+                  { label: 'Liquidaciones', crc: sel.liquidaciones,                       display: fmtFull(sel.liquidaciones), color: 'text-rose-400', sub: 'cash out' },
+                  { label: 'Rendimientos',  crc: sel.passiveValuation + sel.rendimientos, display: fmtFull(sel.passiveValuation + sel.rendimientos), color: 'text-[#a3e635]', sub: 'NAV + efectivo' },
                 ].map(k => (
                   <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
-                    <p className={`text-base font-black tabular-nums ${k.color}`}>{fmtFull(k.crc)}</p>
+                    <p className={`text-base font-black tabular-nums ${k.color}`}>{k.display}</p>
                     {currency === 'CRC' && (
                       <p className="text-[9px] tabular-nums text-zinc-700">{fmtUSD(toUSD(k.crc))}</p>
                     )}
@@ -367,6 +377,33 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                     {fmtPct(((sel.balance - (sel.deposits - sel.liquidaciones)) / (sel.deposits - sel.liquidaciones)) * 100)}
                   </span>
                   <span className="text-[9px] text-zinc-700">(balance − neto desplegado) / neto desplegado</span>
+                </div>
+              )}
+
+              {/* Snapshot-tracked buckets have no per-transaction ledger — show the
+                  history of real-balance updates instead so the section isn't just blank. */}
+              {!!sel.accountId && (
+                <div className="space-y-1 pt-1">
+                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] px-1 pb-1">
+                    Historial de balance real · {sel.balanceHistory?.length ?? 0} registro{(sel.balanceHistory?.length ?? 0) === 1 ? '' : 's'}
+                  </p>
+                  {!sel.balanceHistory?.length ? (
+                    <p className="text-[10px] text-zinc-600 italic px-3 py-2">
+                      Sin registros todavía — el gráfico y este historial se van a ir llenando cada vez que actualices el balance.
+                    </p>
+                  ) : (
+                    sel.balanceHistory.map(h => (
+                      <div key={h.date} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors">
+                        <span className="text-[9px] tabular-nums text-zinc-600 w-20 shrink-0">{h.date}</span>
+                        <span className="flex-1 text-[10px] text-zinc-500">Balance real</span>
+                        <span className="text-[10px] font-black tabular-nums text-zinc-200">
+                          {currency === 'USD' && sel.accountCurrency === 'USD' && h.balanceNative != null
+                            ? fmtUSDFull(h.balanceNative)
+                            : fmtFull(h.balance)}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 

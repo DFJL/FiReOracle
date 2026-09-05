@@ -106,27 +106,32 @@ export default async function InversionesPage() {
     snapshotTotalByMonth[m]    = Number(s.invested_crc ?? 0) + Number(s.liquid_crc ?? 0)
   }
 
-  // Fetch snapshot balances + positions for snapshot_based buckets
+  // Fetch snapshot balances + positions + history for snapshot_based buckets
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
   const snapshotResults = await Promise.all(
     snapshotBuckets.map(async b => {
-      const [{ data }, { data: positions }] = await Promise.all([
+      const [{ data: history }, { data: positions }] = await Promise.all([
         admin
           .from('account_balance_snapshots')
-          .select('real_balance')
+          .select('snapshot_date, real_balance, real_balance_native')
           .eq('account_id', b.account_id!)
-          .order('snapshot_date', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .order('snapshot_date', { ascending: false }),
         admin
           .from('account_positions')
           .select('symbol, quantity, market_value_usd, avg_cost_usd')
           .eq('account_id', b.account_id!)
           .order('market_value_usd', { ascending: false }),
       ])
+      const latest = history?.[0]
       return {
         id: b.id,
-        balance: data?.real_balance ? Number(data.real_balance) : 0,
+        balance: latest?.real_balance ? Number(latest.real_balance) : 0,
+        balanceNative: latest?.real_balance_native != null ? Number(latest.real_balance_native) : null,
+        history: (history ?? []).map(h => ({
+          date: h.snapshot_date,
+          balance: Number(h.real_balance),
+          balanceNative: h.real_balance_native != null ? Number(h.real_balance_native) : null,
+        })),
         positions: (positions ?? []).map(p => ({
           symbol: p.symbol,
           quantity: Number(p.quantity),
@@ -137,6 +142,8 @@ export default async function InversionesPage() {
     })
   )
   const snapshotBalances: Record<string, number> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balance]))
+  const snapshotBalanceNative: Record<string, number | null> = Object.fromEntries(snapshotResults.map(r => [r.id, r.balanceNative]))
+  const snapshotHistory: Record<string, typeof snapshotResults[number]['history']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.history]))
   const snapshotPositions: Record<string, typeof snapshotResults[number]['positions']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.positions]))
 
   const { data: snapshotAccounts } = snapshotBuckets.length > 0
@@ -197,6 +204,8 @@ export default async function InversionesPage() {
         deposits: 0, liquidaciones: 0, rendimientos: 0,
         passiveValuation: 0, markToMarketLoss: 0,
         balance, valorizationNet: 0,
+        balanceNative: snapshotBalanceNative[def.id] ?? undefined,
+        balanceHistory: snapshotHistory[def.id] ?? [],
         positions: snapshotPositions[def.id] ?? [],
         accountId: def.account_id,
         accountCurrency: def.account_id ? (accountCurrencyById[def.account_id] ?? 'CRC') : undefined,
