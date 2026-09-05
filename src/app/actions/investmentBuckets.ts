@@ -24,6 +24,7 @@ export type BucketFormData = {
 function revalidate() {
   revalidatePath('/inversiones')
   revalidatePath('/configuracion')
+  revalidatePath('/patrimonio')
 }
 
 export async function createBucket(data: BucketFormData) {
