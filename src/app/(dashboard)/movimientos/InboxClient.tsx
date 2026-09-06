@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   confirmInboxItem, discardInboxItem, insertManualInboxItem,
-  reExtractInboxItem, batchConfirmHighConfidence, suggestCategory,
+  reExtractInboxItem, batchConfirmHighConfidence, batchDiscardByAge, suggestCategory,
 } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
 import { isCreditCardEmail } from '@/lib/inbox-utils'
@@ -737,6 +737,59 @@ function PastePanel() {
   )
 }
 
+// ── BatchDiscardPanel ────────────────────────────────────────────────────────
+
+function BatchDiscardPanel({ onDone }: { onDone: () => void }) {
+  const [days, setDays]       = useState<string>('30')
+  const [pending, setPending] = useState(false)
+  const [msg, setMsg]         = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function handleDiscard() {
+    const maxAgeDays = days === 'all' ? null : parseInt(days)
+    const label = days === 'all' ? 'TODOS los correos pendientes' : `los correos pendientes de más de ${days} días`
+    if (!confirm(`¿Descartar ${label}? No se puede deshacer desde acá.`)) return
+
+    setPending(true)
+    setMsg(null)
+    const res = await batchDiscardByAge(maxAgeDays)
+    setPending(false)
+    if (res.error) {
+      setMsg({ ok: false, text: res.error })
+    } else {
+      setMsg({ ok: true, text: `${res.discarded} descartado${res.discarded !== 1 ? 's' : ''}` })
+      if (res.discarded > 0) onDone()
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <select
+        value={days}
+        onChange={e => setDays(e.target.value)}
+        disabled={pending}
+        className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-2 text-xs text-zinc-300 focus:outline-none focus:border-white/20 disabled:opacity-40"
+      >
+        <option value="7"   className="bg-[#111]">+7 días</option>
+        <option value="15"  className="bg-[#111]">+15 días</option>
+        <option value="30"  className="bg-[#111]">+30 días</option>
+        <option value="60"  className="bg-[#111]">+60 días</option>
+        <option value="all" className="bg-[#111]">Todos los pendientes</option>
+      </select>
+      <button
+        onClick={handleDiscard}
+        disabled={pending}
+        className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-zinc-400 text-xs font-bold hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/20 transition-colors disabled:opacity-40"
+      >
+        {pending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+        Descartar
+      </button>
+      {msg && (
+        <p className={`text-xs ${msg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>{msg.text}</p>
+      )}
+    </div>
+  )
+}
+
 // ── InboxClient (main) ────────────────────────────────────────────────────────
 
 export function InboxClient({ items, categories, connectedAccounts, envelopes, loans, gmailStatus }: Props) {
@@ -819,20 +872,25 @@ export function InboxClient({ items, categories, connectedAccounts, envelopes, l
       {/* Paste panel */}
       <PastePanel />
 
-      {/* Batch confirm button */}
-      {tab === 'pending' && highConfidenceCount > 0 && (
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleBatchConfirm}
-            disabled={batchPending}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-xs font-bold hover:bg-[#a3e635]/20 transition-colors disabled:opacity-40"
-          >
-            {batchPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
-            Confirmar todos los de alta confianza ({highConfidenceCount})
-          </button>
-          {batchMsg && (
-            <p className={`text-xs ${batchMsg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>{batchMsg.text}</p>
+      {/* Batch actions */}
+      {tab === 'pending' && pending.length > 0 && (
+        <div className="space-y-2">
+          {highConfidenceCount > 0 && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleBatchConfirm}
+                disabled={batchPending}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#a3e635]/10 border border-[#a3e635]/20 text-[#a3e635] text-xs font-bold hover:bg-[#a3e635]/20 transition-colors disabled:opacity-40"
+              >
+                {batchPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                Confirmar todos los de alta confianza ({highConfidenceCount})
+              </button>
+              {batchMsg && (
+                <p className={`text-xs ${batchMsg.ok ? 'text-[#a3e635]' : 'text-rose-400'}`}>{batchMsg.text}</p>
+              )}
+            </div>
           )}
+          <BatchDiscardPanel onDone={() => router.refresh()} />
         </div>
       )}
 

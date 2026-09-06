@@ -330,6 +330,39 @@ export async function batchConfirmHighConfidence(): Promise<{ confirmed: number;
   return { confirmed, skipped, error: null }
 }
 
+export async function batchDiscardByAge(maxAgeDays: number | null): Promise<{ discarded: number; error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { discarded: 0, error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { data: items } = await admin
+    .from('transaction_inbox')
+    .select('id, email_date, created_at')
+    .eq('user_id', user.id)
+    .eq('status', 'pending')
+
+  if (!items || items.length === 0) return { discarded: 0, error: null }
+
+  const cutoff = maxAgeDays != null ? Date.now() - maxAgeDays * 86400000 : null
+  const ids = items
+    .filter(i => cutoff === null || new Date(i.email_date ?? i.created_at).getTime() < cutoff)
+    .map(i => i.id)
+
+  if (ids.length === 0) return { discarded: 0, error: null }
+
+  const { error } = await admin
+    .from('transaction_inbox')
+    .update({ status: 'discarded' })
+    .in('id', ids)
+    .eq('user_id', user.id)
+
+  if (error) return { discarded: 0, error: error.message }
+
+  revalidatePath('/movimientos')
+  return { discarded: ids.length, error: null }
+}
+
 export async function suggestCategory(vendor: string): Promise<string | null> {
   if (!vendor.trim()) return null
   const supabase = await createClient()
