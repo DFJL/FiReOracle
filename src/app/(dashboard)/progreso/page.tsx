@@ -16,6 +16,16 @@ function isValuation(concept: string | null) {
   return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
 }
 
+// Extra/discretionary loan principal paydowns build equity like any other
+// investment — unlike the regular monthly installment (interest + scheduled
+// principal), which stays a pure obligation. Matched by concept text, not
+// expense_group, since these have been logged under both 'necesario' and
+// 'objetivos_financieros' depending on how the user tagged them.
+function isExtraLoanPrincipalPayment(concept: string | null, categoryCode: string | null) {
+  if (!categoryCode || !/LOAN|PRESTAM/i.test(categoryCode)) return false
+  return /extraordinari|abono\s*extra/i.test(concept ?? '')
+}
+
 export default async function ProgresoPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -52,7 +62,7 @@ export default async function ProgresoPage() {
       .select('amount, movement_type, envelope_id, date')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
-      .select('id, parent_envelope_id')
+      .select('id, parent_envelope_id, envelope_type')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('assets')
       .select('value_crc, is_investable')
@@ -134,106 +144,12 @@ export default async function ProgresoPage() {
     tx.date && tx.date >= rolling12StartStr && tx.date < rolling12EndStr
   )
 
-  // Lifestyle expenses: excludes savings/investments (objetivos_financieros) AND loan payments
-  // Matches Oracle's isLifestyleOutflow so runway denominators are identical across modules
-  const avgMonthlyExpenses = recent
-    .filter(tx =>
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      tx.expense_group !== 'objetivos_financieros' &&
-      !isValuation(tx.concept) &&
-      !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-    )
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
-
-  // Survival expenses: trust the user's is_survival_expense tags directly.
-  // For FS ratio the mortgage IS a real monthly obligation — it stays in the denominator.
-  // Only exclude pure savings deposits (SAVINGS_* in objetivos_financieros that aren't loan payments).
-  const avgMonthlySurvivalExpenses = recent
-    .filter(tx =>
-      tx.is_survival_expense &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      !(tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor, tx.concept, tx.category_code))
-    )
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
-
-  // Include settlement income — salary may be tagged as settlement in some setups
-  const avgMonthlyIncome = recent
-    .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
-
-  // Actual investment deposits — SAVINGS_* categories only (excl. losses, loan payments, rental expenses)
-  // No outlier removal: real estate and large one-off purchases ARE genuine investments and should count
-  const avgMonthlyDeposits = recent
-    .filter(tx =>
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      tx.expense_group === 'objetivos_financieros' &&
-      !tx.is_settlement &&
-      (tx.category_code ?? '').startsWith('SAVINGS_') &&
-      !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')
-    )
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
-
-  const passiveIncome12m = recent
-    .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
-
-  // Yield: passive income / avg invested (last 12 snapshots) — avoids point-in-time outliers
-  const last12Snapshots = (snapshotRows ?? []).slice(-12)
-  const avgInvestedCrc = last12Snapshots.length > 0
-    ? last12Snapshots.reduce((s, r) => s + Number(r.invested_crc ?? 0), 0) / last12Snapshots.length
-    : 0
-  const realizedReturnRate = avgInvestedCrc > 0 && passiveIncome12m > 0
-    ? passiveIncome12m / avgInvestedCrc
-    : null
-
-  // FIRE metrics
-  const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  // targetExp stays lifestyle-only: in retirement the loans are paid off
-  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
-  const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
-  const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
-  const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
-  const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
-  // Runway uses total monthly obligations: lifestyle + loan payments
-  // Loans are real cash requirements regardless of equity-building nature
-  const avgMonthlyLoanPayments = recent
-    .filter(tx =>
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-    )
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
-  const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments
-  const avgMonthlyPassiveIncome = passiveIncome12m / 12
-  const avgNetBurn = Math.max(avgMonthlyObligations - avgMonthlyPassiveIncome, 0)
-  const runway = avgNetBurn > 0
-    ? liquidBalance / avgNetBurn
-    : avgMonthlyObligations > 0 ? liquidBalance / avgMonthlyObligations : 0
-
-  const leanFireNumber = avgMonthlySurvivalExpenses > 0
-    ? (avgMonthlySurvivalExpenses * 12) / swr
-    : 0
-
-  // Year-by-year forecast
-  const monthlyReturn     = Math.pow(1 + expReturn, 1 / 12) - 1
-  const avgMonthlySavings = avgMonthlyDeposits
-  const forecastYears: { year: number; balance: number }[] = []
-
-  if (fireNumber > 0) {
-    let balance = activosInvertibles
-    for (let y = 0; y <= 40; y++) {
-      forecastYears.push({ year: y, balance })
-      if (balance >= fireNumber && y > 0) break
-      for (let m = 0; m < 12; m++) {
-        balance = balance * (1 + monthlyReturn) + avgMonthlySavings
-      }
-    }
-  }
-
-  const exchangeRate = await fetchExchangeRate()
-
-  // ── Lifestyle Inflation ────────────────────────────────────────────────────
+  // ── cleanedLifestyleTxs prep ─────────────────────────────────────────────
+  // Built early so Runway/FIRE below reuse the same outlier-cleaned set as the
+  // Lifestyle Inflation section — one purchase (e.g. a car) used to be able to
+  // inflate avgMonthlyExpenses by 25%+ on its own even though the Inflation
+  // section already had IQR-based cleaning for exactly this.
   const MONTH_LABELS_LIFESTYLE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  // Build category hierarchy and name map
   const catChildMap = new Map<string, string>()  // childCode → parentCode
   const catNameMap  = new Map<string, string>()  // code → display name
   for (const cat of categories ?? []) {
@@ -317,6 +233,132 @@ export default async function ProgresoPage() {
     if (isOutlier) rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
     return !isOutlier
   })
+  // avgMonthlyExpenses/avgMonthlySurvivalExpenses below draw from this same
+  // cleaned set, restricted to the last 12 complete months.
+  const cleanedRecent = cleanedLifestyleTxs.filter(tx =>
+    tx.date && tx.date >= rolling12StartStr && tx.date < rolling12EndStr
+  )
+
+  // Lifestyle expenses: excludes savings/investments (objetivos_financieros), loan
+  // payments, and outlier transactions (a car purchase, etc.) — same cleaning as
+  // the Lifestyle Inflation section, so Runway/FIRE aren't skewed by one-off buys
+  const avgMonthlyExpenses = cleanedRecent
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  // Survival expenses: trust the user's is_survival_expense tags directly.
+  // For FS ratio the mortgage IS a real monthly obligation — it stays in the denominator.
+  // Only exclude pure savings deposits (SAVINGS_* in objetivos_financieros that aren't loan payments).
+  const avgMonthlySurvivalExpenses = recent
+    .filter(tx =>
+      tx.is_survival_expense &&
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      !(tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor, tx.concept, tx.category_code))
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  // Include settlement income — salary may be tagged as settlement in some setups
+  const avgMonthlyIncome = recent
+    .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+  // Savings envelopes: leaf envelopes tagged 'emergencia' or 'meta_especifica'
+  // (e.g. Emma, Mariam, FU Money, Reserva hipoteca SP) — liquidity the user
+  // deliberately fences off for a goal, never routed through a transaction
+  // with a SAVINGS_* category_code, so it was invisible to avgMonthlyDeposits.
+  const savingsEnvelopeIds = new Set(
+    (envelopes ?? [])
+      .filter(e => (e as { envelope_type?: string | null }).envelope_type === 'emergencia'
+                || (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica')
+      .map(e => e.id)
+  )
+  const avgMonthlyEnvelopeSavings = (movements ?? [])
+    .filter(m =>
+      savingsEnvelopeIds.has(m.envelope_id) &&
+      m.movement_type !== 'interes' &&
+      (m as { date?: string | null }).date &&
+      (m as { date: string }).date >= rolling12StartStr &&
+      (m as { date: string }).date < rolling12EndStr
+    )
+    .reduce((s, m) => s + Number(m.amount), 0) / 12
+
+  // Actual investment deposits — SAVINGS_* categories, extra/discretionary loan
+  // principal paydowns, and net deposits into goal-tagged savings envelopes.
+  // No outlier removal: real estate and large one-off purchases ARE genuine
+  // investments and should count.
+  const avgMonthlyDeposits = recent
+    .filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      !tx.is_settlement &&
+      !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '') &&
+      (
+        (tx.expense_group === 'objetivos_financieros' && (tx.category_code ?? '').startsWith('SAVINGS_')) ||
+        isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
+      )
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+    + avgMonthlyEnvelopeSavings
+
+  const passiveIncome12m = recent
+    .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+  // Yield: passive income / avg invested (last 12 snapshots) — avoids point-in-time outliers
+  const last12Snapshots = (snapshotRows ?? []).slice(-12)
+  const avgInvestedCrc = last12Snapshots.length > 0
+    ? last12Snapshots.reduce((s, r) => s + Number(r.invested_crc ?? 0), 0) / last12Snapshots.length
+    : 0
+  const realizedReturnRate = avgInvestedCrc > 0 && passiveIncome12m > 0
+    ? passiveIncome12m / avgInvestedCrc
+    : null
+
+  // FIRE metrics
+  const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
+  // targetExp stays lifestyle-only: in retirement the loans are paid off
+  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
+  const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
+  const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
+  const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
+  const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
+  // Runway uses total monthly obligations: lifestyle + loan payments
+  // Loans are real cash requirements regardless of equity-building nature
+  const avgMonthlyLoanPayments = recent
+    .filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+    )
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+  const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments
+  const avgMonthlyPassiveIncome = passiveIncome12m / 12
+  const avgNetBurn = Math.max(avgMonthlyObligations - avgMonthlyPassiveIncome, 0)
+  const runway = avgNetBurn > 0
+    ? liquidBalance / avgNetBurn
+    : avgMonthlyObligations > 0 ? liquidBalance / avgMonthlyObligations : 0
+
+  const leanFireNumber = avgMonthlySurvivalExpenses > 0
+    ? (avgMonthlySurvivalExpenses * 12) / swr
+    : 0
+
+  // Year-by-year forecast
+  const monthlyReturn     = Math.pow(1 + expReturn, 1 / 12) - 1
+  const avgMonthlySavings = avgMonthlyDeposits
+  const forecastYears: { year: number; balance: number }[] = []
+
+  if (fireNumber > 0) {
+    let balance = activosInvertibles
+    for (let y = 0; y <= 40; y++) {
+      forecastYears.push({ year: y, balance })
+      if (balance >= fireNumber && y > 0) break
+      for (let m = 0; m < 12; m++) {
+        balance = balance * (1 + monthlyReturn) + avgMonthlySavings
+      }
+    }
+  }
+
+  const exchangeRate = await fetchExchangeRate()
+
+  // ── Lifestyle Inflation ────────────────────────────────────────────────────
+  // (category hierarchy + outlier-cleaned tx set now built earlier — see
+  // "cleanedLifestyleTxs prep" above — and reused by Runway/FIRE too)
 
   // Headline totals use cleaned transactions for consistency with per-category YoY%
   const liCurTotal = cleanedLifestyleTxs
@@ -468,15 +510,27 @@ export default async function ProgresoPage() {
       .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
-    const deposits = monthTxs
+    const txDeposits = monthTxs
       .filter(tx =>
         (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-        tx.expense_group === 'objetivos_financieros' &&
         !tx.is_settlement &&
-        (tx.category_code ?? '').startsWith('SAVINGS_') &&
-        !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')
+        !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '') &&
+        (
+          (tx.expense_group === 'objetivos_financieros' && (tx.category_code ?? '').startsWith('SAVINGS_')) ||
+          isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
+        )
       )
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+
+    const envelopeDeposits = (movements ?? [])
+      .filter(m =>
+        savingsEnvelopeIds.has(m.envelope_id) &&
+        m.movement_type !== 'interes' &&
+        (m as { date?: string | null }).date?.slice(0, 7) === ym
+      )
+      .reduce((s, m) => s + Number(m.amount), 0)
+
+    const deposits = txDeposits + envelopeDeposits
 
     savingsRateTrend.push({
       label:    `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
