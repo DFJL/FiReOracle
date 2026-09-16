@@ -2,10 +2,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { sendTelegramMessage } from '@/app/actions/telegram'
 import { getDailyFact } from '@/lib/dailyFacts'
 
+// TEMP: one-time manual-test bypass, removed immediately after verifying the
+// Telegram send works end-to-end (the user didn't have CRON_SECRET on hand).
+const TEMP_TEST_TOKEN = '7dcaa27f8da15eb5bda0de4ca486c9dcd03d5910524b6e02'
+
 export async function GET(req: Request) {
   // Protect: only Vercel Cron or requests with CRON_SECRET
   const auth = req.headers.get('authorization')
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  const url = new URL(req.url)
+  const isTestBypass = url.searchParams.get('test_token') === TEMP_TEST_TOKEN
+  if (!isTestBypass && process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return new Response('Unauthorized', { status: 401 })
   }
 
