@@ -499,6 +499,7 @@ export default async function ProgresoPage() {
         runway={runway}
         runwaySurvival={runwaySurvival}
         avgMonthlyExpenses={avgMonthlyExpenses}
+        avgMonthlyObligations={avgMonthlyObligations}
         avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         avgMonthlyIncome={avgMonthlyIncome}
         avgMonthlyDeposits={avgMonthlyDeposits}
