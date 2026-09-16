@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { OracleView } from './OracleView'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { inferCategory, displayCategory, isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
+import { buildRootCodeMap, cleanLifestyleOutliers } from '@/lib/lifestyleExpenses'
 
 type Tx = {
   date: string | null
@@ -86,16 +87,6 @@ function isOutflow(tx: Tx) {
   return true
 }
 
-// Lifestyle expenses only — excludes savings, investments, loan payments and valuations.
-// Matches progreso's LifestyleTrendSection logic for YoY inflation comparison.
-function isLifestyleOutflow(tx: Tx) {
-  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (isValuation(tx.concept)) return false
-  if (tx.expense_group === SAVINGS_EXPENSE_GROUP) return false  // no savings/investments
-  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return false  // no cuotas/amortizaciones
-  return true
-}
-
 const sum = (arr: Tx[]) => arr.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
 export default async function OraclePage() {
@@ -124,6 +115,7 @@ export default async function OraclePage() {
     { data: envelopesRaw },
     { data: movementsRaw },
     { data: loanPaymentsRaw },
+    { data: categoriesRaw },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('transactions')
@@ -131,7 +123,8 @@ export default async function OraclePage() {
       .eq('user_id', user.id)
       .not('amount', 'is', null)
       .not('date', 'is', null)
-      .gte('date', prevCut),       // 24m for YoY comparison
+      .gte('date', prevCut)        // 24m for YoY comparison
+      .range(0, 49999),            // PostgREST defaults to a silent 1000-row cap otherwise
     admin.from('net_worth_snapshots')
       .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc, liabilities_crc')
       .eq('user_id', user.id)
@@ -159,6 +152,10 @@ export default async function OraclePage() {
       .eq('user_id', user.id)
       .gte('payment_date', cutStr)
       .lt('payment_date', endStr),
+    admin.from('transaction_categories')
+      .select('code, name, parent_code')
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
 
   const exchangeRate = await fetchExchangeRate()
@@ -202,16 +199,26 @@ export default async function OraclePage() {
   const c = kpis(cur12)
   const p = kpis(prev12)
 
-  // Lifestyle expenses (no préstamos, no inversiones) — matches progreso inflation calc
-  const lifestyleCur  = sum(cur12.filter(isLifestyleOutflow))
-  const lifestylePrev = sum(prev12.filter(isLifestyleOutflow))
+  // Lifestyle expenses (no préstamos, no inversiones), outlier-cleaned the same
+  // way as /progreso (@/lib/lifestyleExpenses) — a one-off purchase (a car, an
+  // appliance) shouldn't read as a recurring monthly cost or explain a trend
+  // it has nothing to do with. Built from the full 24m fetch so the fence has
+  // as much history per category as progreso gets.
+  const getRootCode = buildRootCodeMap((categoriesRaw ?? []) as { code: string; parent_code?: string | null }[])
+  const cleaningInput = allTxs.map(tx => ({ ...tx, amount: Number(tx.amount ?? 0) }))
+  const { cleaned: cleanedLifestyleAll, excludedByRoot } = cleanLifestyleOutliers(cleaningInput, getRootCode)
+  const cleanedCur  = cleanedLifestyleAll.filter(tx => tx.date && tx.date >= cutStr && tx.date < endStr)
+  const cleanedPrev = cleanedLifestyleAll.filter(tx => tx.date && tx.date >= prevCut && tx.date < cutStr)
+
+  const lifestyleCur  = sum(cleanedCur)
+  const lifestylePrev = sum(cleanedPrev)
   const loanPaymentsCur  = sum(cur12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
   const loanPaymentsPrev = sum(prev12.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
 
   const avgMonthlyExpenses   = c.totalExpenses / 12
   const avgLifestyleExpenses = lifestyleCur / 12
   // Survival split — lifestyle only (loan payments excluded, they're equity building)
-  const survivalLifestyle = sum(cur12.filter(tx => !!tx.is_survival_expense && isLifestyleOutflow(tx)))
+  const survivalLifestyle = sum(cleanedCur.filter(tx => !!tx.is_survival_expense))
   // Savings rate denominator = active income only (matches progreso formula exactly)
   const savingsRate     = c.totalActiveIncome > 0 ? (c.totalSavings / c.totalActiveIncome) * 100 : 0
   // Net margin: income not consumed by lifestyle (loans build equity, not consumed)
@@ -228,13 +235,13 @@ export default async function OraclePage() {
   const monthlyRows = months.map(m => {
     const mTxs     = cur12.filter(tx => tx.date?.startsWith(m))
     const k         = kpis(mTxs)
-    const lifestyle = sum(mTxs.filter(isLifestyleOutflow))
+    const lifestyle = sum(cleanedCur.filter(tx => tx.date?.startsWith(m)))
     const loans     = sum(mTxs.filter(tx => isLoanPayment(tx.vendor, tx.concept, tx.category_code) && (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal')))
     return { m, inc: k.totalIncome, lifestyle, loans, sav: k.totalSavings, net: k.totalIncome - k.totalExpenses }
   })
 
   // ── Top vendors by lifestyle spend (loans excluded — shown separately) ───────
-  const lifestyleTxs = cur12.filter(isLifestyleOutflow)
+  const lifestyleTxs = cleanedCur
   const vendorSpend: Record<string, number> = {}
   for (const tx of lifestyleTxs) {
     const v = (tx.vendor ?? tx.concept ?? 'Desconocido').trim()
@@ -403,10 +410,23 @@ export default async function OraclePage() {
     const med     = median(monthly)
     const max     = Math.max(...monthly, 0)
     const activeMonths = nonZero.length
-    // Spike: any month > 3× median (and median > 0)
+    // Spike: any month > 3× median (and median > 0) — rare now that catMonthlyTotals
+    // is already outlier-cleaned; a spike here means a genuine recurring-but-lumpy
+    // pattern, not a one-off purchase (those were already excluded, see below).
     const spikeMonths = med > 0 ? monthly.filter(v => v > med * 3).length : 0
     return { cat, avg, med, max, activeMonths, spikeMonths }
   }).filter(p => p.avg > 0)
+
+  // Root categories with transactions excluded as one-off outliers (full 24m
+  // history) — tells the model WHICH categories had a purchase big enough to
+  // get cleaned out of the averages above, so it doesn't have to guess.
+  // For exact transaction-level detail (date/monto/concepto), it should call
+  // the get_monthly_category_totals tool with the relevant category_code.
+  const excludedOutlierLines = Object.entries(excludedByRoot)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([root, count]) => `${displayCategory(root).padEnd(28)} ${String(count).padStart(2)} transacción(es) excluida(s) de los promedios por ser atípicas (24m)`)
+    .join('\n')
 
   // ─────────────────────────── BUILD CONTEXT ──────────────────────────────────
   const context = `FECHA HOY: ${now.toISOString().slice(0, 10)}
@@ -535,6 +555,18 @@ Categoría                    Prom/mes      Mediana/mes   Meses activos  Spikes
 ${expensePatterns.map(p =>
   `${p.cat.slice(0, 28).padEnd(28)} ${fmtCRC(p.avg).padStart(13)} ${fmtCRC(p.med).padStart(13)}   ${String(p.activeMonths).padStart(2)}/12           ${p.spikeMonths > 0 ? `⚠ ${p.spikeMonths} mes(es) atípico(s) (>${fmtCRC(p.med * 3)})` : 'recurrente'}`
 ).join('\n') || 'Sin datos'}
+
+Categorías con transacciones excluidas de los promedios de arriba por ser atípicas (24m):
+${excludedOutlierLines || 'Ninguna'}
+Si el usuario pregunta por qué una categoría bajó/subió o qué causó un cambio, NO
+adivines cuál transacción fue — usá la tool get_monthly_category_totals con el
+category_code exacto (ver catálogo abajo) para traer las transacciones reales
+excluidas mes a mes y citarlas con fecha y monto.
+
+══════════════════════════════════════════════════════════
+ CATÁLOGO DE CATEGORÍAS (code → nombre, para usar en las tools)
+══════════════════════════════════════════════════════════
+${(categoriesRaw ?? []).map(cat => `${cat.code.padEnd(24)} ${cat.name}`).join('\n') || 'Sin categorías'}
 
 ══════════════════════════════════════════════════════════
  ACTIVOS
