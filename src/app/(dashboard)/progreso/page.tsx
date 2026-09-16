@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
-import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
+import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -176,19 +176,17 @@ export default async function ProgresoPage() {
   // the Lifestyle Inflation section, so Runway/FIRE aren't skewed by one-off buys
   const avgMonthlyExpenses = avgMonthlyInWindow(cleanedLifestyleTxs, rolling12StartStr, rolling12EndStr)
 
-  // Survival expenses: trust the user's is_survival_expense tags directly.
-  // The regular mortgage/loan installment IS a real monthly obligation and
-  // stays in the denominator — but an extraordinary/discretionary paydown
-  // is exactly the kind of thing you'd stop making in a real emergency, so
-  // it's excluded here the same way it's excluded from the main Runway.
-  const avgMonthlySurvivalExpenses = recent
-    .filter(tx =>
-      tx.is_survival_expense &&
-      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      !isExtraLoanPrincipalPayment(tx.concept, tx.category_code) &&
-      !(tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor, tx.concept, tx.category_code))
-    )
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+  // Survival expenses: trust the user's is_survival_expense tags directly,
+  // then run the same per-root-category outlier fence as the lifestyle set
+  // (@/lib/lifestyleExpenses) — a one-off large purchase tagged as survival
+  // (e.g. an emergency repair) shouldn't skew this any more than it's
+  // allowed to skew avgMonthlyExpenses above. The regular mortgage/loan
+  // installment IS a real monthly obligation and stays in — but an
+  // extraordinary/discretionary paydown is exactly the kind of thing you'd
+  // stop making in a real emergency, so it's excluded the same way it's
+  // excluded from the main Runway.
+  const { cleaned: cleanedSurvivalTxs } = cleanSurvivalOutliers(txs ?? [], getRootCode)
+  const avgMonthlySurvivalExpenses = avgMonthlyInWindow(cleanedSurvivalTxs, rolling12StartStr, rolling12EndStr)
 
   // Include settlement income — salary may be tagged as settlement in some setups
   const avgMonthlyIncome = recent

@@ -5,6 +5,8 @@
 // inflate a raw 12-month average by 25%+ even though nothing recurring
 // actually changed.
 
+import { isLoanPayment } from '@/app/(dashboard)/resumen/categoryUtils'
+
 export type LifestyleTx = {
   date: string | null
   amount: number | null
@@ -12,6 +14,8 @@ export type LifestyleTx = {
   expense_group: string | null
   category_code: string | null
   concept: string | null
+  vendor?: string | null
+  is_survival_expense?: boolean | null
 }
 
 export type CategoryRow = {
@@ -50,6 +54,18 @@ export function isLifestyleTx(tx: LifestyleTx, getRootCode: (code: string) => st
   return true
 }
 
+// Mirrors the user's own is_survival_expense tags rather than the lifestyle
+// definition above — the regular loan installment stays IN (it's a real
+// obligation you can't skip), while an extraordinary/discretionary paydown
+// stays OUT (already counted as savings, not a bare-minimum survival cost).
+export function isSurvivalTx(tx: LifestyleTx): boolean {
+  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
+  if (!tx.is_survival_expense) return false
+  if (isExtraLoanPrincipalPayment(tx.concept, tx.category_code)) return false
+  if (tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor ?? null, tx.concept, tx.category_code)) return false
+  return true
+}
+
 export function computeGlobalP95(txs: LifestyleTx[]): number {
   const amounts = txs
     .map(tx => Number(tx.amount ?? 0))
@@ -76,20 +92,25 @@ export function outlierFence(values: number[], globalP95: number): number {
 // 4×Q3 floor; sparse categories fall back to the global P95) so one big
 // purchase can't skew a monthly average. Pass in as much history as you
 // reasonably can — the fence is more reliable with more data per category.
-export function cleanLifestyleOutliers<T extends LifestyleTx>(
+// Shared by cleanLifestyleOutliers and cleanSurvivalOutliers below so both
+// "which spending counts" definitions get identical outlier treatment —
+// otherwise one series could be skewed by a one-off purchase the other
+// already excludes.
+function cleanOutliers<T extends LifestyleTx>(
   txs: T[],
   getRootCode: (code: string) => string,
+  matches: (tx: T) => boolean,
 ): { cleaned: T[]; excludedByRoot: Record<string, number> } {
-  const lifestyleTxs = txs.filter(tx => isLifestyleTx(tx, getRootCode))
+  const matchingTxs = txs.filter(matches)
 
-  const allAmounts = lifestyleTxs
+  const allAmounts = matchingTxs
     .map(tx => Number(tx.amount ?? 0))
     .filter(a => a > 0)
     .sort((a, b) => a - b)
   const globalP95 = allAmounts.length > 0 ? allAmounts[Math.floor(allAmounts.length * 0.95)] : Infinity
 
   const rootAmounts: Record<string, number[]> = {}
-  for (const tx of lifestyleTxs) {
+  for (const tx of matchingTxs) {
     const root = getRootCode(tx.category_code ?? '__na__')
     ;(rootAmounts[root] ??= []).push(Number(tx.amount ?? 0))
   }
@@ -98,7 +119,7 @@ export function cleanLifestyleOutliers<T extends LifestyleTx>(
   )
 
   const excludedByRoot: Record<string, number> = {}
-  const cleaned = lifestyleTxs.filter(tx => {
+  const cleaned = matchingTxs.filter(tx => {
     const root      = getRootCode(tx.category_code ?? '__na__')
     const amount    = Number(tx.amount ?? 0)
     const isOutlier = amount > (rootFences[root] ?? Infinity)
@@ -107,6 +128,20 @@ export function cleanLifestyleOutliers<T extends LifestyleTx>(
   })
 
   return { cleaned, excludedByRoot }
+}
+
+export function cleanLifestyleOutliers<T extends LifestyleTx>(
+  txs: T[],
+  getRootCode: (code: string) => string,
+): { cleaned: T[]; excludedByRoot: Record<string, number> } {
+  return cleanOutliers(txs, getRootCode, tx => isLifestyleTx(tx, getRootCode))
+}
+
+export function cleanSurvivalOutliers<T extends LifestyleTx>(
+  txs: T[],
+  getRootCode: (code: string) => string,
+): { cleaned: T[]; excludedByRoot: Record<string, number> } {
+  return cleanOutliers(txs, getRootCode, tx => isSurvivalTx(tx))
 }
 
 export function avgMonthlyInWindow<T extends LifestyleTx>(
