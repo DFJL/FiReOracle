@@ -177,12 +177,15 @@ export default async function ProgresoPage() {
   const avgMonthlyExpenses = avgMonthlyInWindow(cleanedLifestyleTxs, rolling12StartStr, rolling12EndStr)
 
   // Survival expenses: trust the user's is_survival_expense tags directly.
-  // For FS ratio the mortgage IS a real monthly obligation — it stays in the denominator.
-  // Only exclude pure savings deposits (SAVINGS_* in objetivos_financieros that aren't loan payments).
+  // The regular mortgage/loan installment IS a real monthly obligation and
+  // stays in the denominator — but an extraordinary/discretionary paydown
+  // is exactly the kind of thing you'd stop making in a real emergency, so
+  // it's excluded here the same way it's excluded from the main Runway.
   const avgMonthlySurvivalExpenses = recent
     .filter(tx =>
       tx.is_survival_expense &&
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      !isExtraLoanPrincipalPayment(tx.concept, tx.category_code) &&
       !(tx.expense_group === 'objetivos_financieros' && !isLoanPayment(tx.vendor, tx.concept, tx.category_code))
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
@@ -268,6 +271,16 @@ export default async function ProgresoPage() {
   const runway = avgNetBurn > 0
     ? liquidBalance / avgNetBurn
     : avgMonthlyObligations > 0 ? liquidBalance / avgMonthlyObligations : 0
+
+  // Survival runway: how long liquidity lasts against the bare-minimum burn
+  // if lifestyle spending got cut in a real emergency/job loss — vs. `runway`
+  // above, which assumes spending stays exactly as-is. avgMonthlySurvivalExpenses
+  // already includes the regular loan installment (via is_survival_expense),
+  // so it isn't added again here.
+  const avgSurvivalNetBurn = Math.max(avgMonthlySurvivalExpenses - avgMonthlyPassiveIncome, 0)
+  const runwaySurvival = avgSurvivalNetBurn > 0
+    ? liquidBalance / avgSurvivalNetBurn
+    : avgMonthlySurvivalExpenses > 0 ? liquidBalance / avgMonthlySurvivalExpenses : 0
 
   const leanFireNumber = avgMonthlySurvivalExpenses > 0
     ? (avgMonthlySurvivalExpenses * 12) / swr
@@ -486,6 +499,7 @@ export default async function ProgresoPage() {
         leanFireNumber={leanFireNumber}
         fireProgress={fireProgress}
         runway={runway}
+        runwaySurvival={runwaySurvival}
         avgMonthlyExpenses={avgMonthlyExpenses}
         avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         avgMonthlyIncome={avgMonthlyIncome}

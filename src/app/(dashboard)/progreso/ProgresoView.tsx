@@ -33,6 +33,7 @@ type Props = {
   leanFireNumber: number
   fireProgress: number
   runway: number
+  runwaySurvival: number
   avgMonthlyExpenses: number
   avgMonthlySurvivalExpenses: number
   avgMonthlyIncome: number
@@ -60,7 +61,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
-  fireNumber, leanFireNumber, fireProgress, runway,
+  fireNumber, leanFireNumber, fireProgress, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, exchangeRate,
@@ -81,6 +82,9 @@ export function ProgresoView({
   const runwayColor =
     runway >= runwayGreen  ? '#a3e635' :
     runway >= runwayYellow ? '#f59e0b' : '#f43f5e'
+  const runwaySurvivalColor =
+    runwaySurvival >= runwayGreen  ? '#a3e635' :
+    runwaySurvival >= runwayYellow ? '#f59e0b' : '#f43f5e'
 
   const yearsToFire = forecastYears.length > 1
     ? forecastYears.find(p => p.balance >= fireNumber)?.year ?? null
@@ -236,14 +240,25 @@ export function ProgresoView({
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
 
         <KpiCard
-          label="Runway"
+          label="Runway (estilo de vida)"
           value={runway >= 999 ? '∞' : runway.toFixed(1)}
           unit="meses"
           sub={passiveMonthlyAvg > 0
             ? `quema neta ${fmt(Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 0))}/mes`
             : `${fmt(avgMonthlyExpenses)}/mes`}
           color={runwayColor}
-          tooltip={`Saldo líquido ÷ quema neta. Obligaciones = gasto de vida + cuotas de préstamos. Quema neta = obligaciones menos ingresos pasivos recurrentes (crypto, dividendos, alquileres, airdrops).`}
+          tooltip={`Saldo líquido ÷ quema neta, asumiendo que el gasto se mantiene igual. Obligaciones = gasto de vida + cuota regular de préstamos. Quema neta = obligaciones menos ingresos pasivos recurrentes (crypto, dividendos, alquileres, airdrops).`}
+        />
+
+        <KpiCard
+          label="Runway (sobrevivencia)"
+          value={runwaySurvival >= 999 ? '∞' : runwaySurvival.toFixed(1)}
+          unit="meses"
+          sub={passiveMonthlyAvg > 0
+            ? `quema mínima ${fmt(Math.max(avgMonthlySurvivalExpenses - passiveMonthlyAvg, 0))}/mes`
+            : `${fmt(avgMonthlySurvivalExpenses)}/mes`}
+          color={runwaySurvivalColor}
+          tooltip={`Saldo líquido ÷ quema mínima, si tuvieras que cortar todo gasto de estilo de vida en una emergencia o pérdida de empleo. Usa solo tus gastos marcados como sobrevivencia (incluye la cuota regular de préstamos).`}
         />
 
         <KpiCard
