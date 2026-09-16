@@ -335,6 +335,7 @@ export function ProgresoView({
       <FuMoneyChart
         snapshots={snapshots}
         avgMonthlyExpenses={avgMonthlyExpenses}
+        avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         passiveMonthlyAvg={passiveMonthlyAvg}
         runwayGreen={runwayGreen}
         runwayYellow={runwayYellow}
@@ -502,10 +503,11 @@ function MilestoneStrip({
 }
 
 function FuMoneyChart({
-  snapshots, avgMonthlyExpenses, passiveMonthlyAvg, runwayGreen, runwayYellow, currency, rate,
+  snapshots, avgMonthlyExpenses, avgMonthlySurvivalExpenses, passiveMonthlyAvg, runwayGreen, runwayYellow, currency, rate,
 }: {
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
   avgMonthlyExpenses: number
+  avgMonthlySurvivalExpenses: number
   passiveMonthlyAvg: number
   runwayGreen: number
   runwayYellow: number
@@ -515,7 +517,11 @@ function FuMoneyChart({
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
+  // Both series reuse the current (constant) monthly burn as the divisor —
+  // same approach the lifestyle line already used before survival existed —
+  // so only the numerator (liquid+invested per snapshot) varies over time.
   const netMonthlyExpenses = Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 1)
+  const netSurvivalMonthlyExpenses = Math.max(avgMonthlySurvivalExpenses - passiveMonthlyAvg, 1)
   if (avgMonthlyExpenses <= 0) return null
 
   const points = snapshots
@@ -523,6 +529,7 @@ function FuMoneyChart({
     .map(s => ({
       ms: new Date(s.snapshot_date + 'T12:00:00').getTime(),
       months: (s.liquid_crc + s.invested_crc) / netMonthlyExpenses,
+      monthsSurvival: (s.liquid_crc + s.invested_crc) / netSurvivalMonthlyExpenses,
       liquid: s.liquid_crc + s.invested_crc,
     }))
     .sort((a, b) => a.ms - b.ms)
@@ -538,12 +545,15 @@ function FuMoneyChart({
   const maxMs   = points[points.length - 1].ms
   const msRange = maxMs - minMs
 
-  const maxMonths = Math.max(...points.map(p => p.months), runwayGreen + 2)
+  const maxMonths = Math.max(...points.map(p => p.months), ...points.map(p => p.monthsSurvival), runwayGreen + 2)
   const xOf = (ms: number)     => padL + ((ms - minMs) / msRange) * chartW
   const yOf = (v: number)      => padT + chartH - (Math.min(v, maxMonths * 1.1) / (maxMonths * 1.1)) * chartH
 
   const linePath = points.map((p, i) =>
     `${i === 0 ? 'M' : 'L'}${xOf(p.ms).toFixed(1)},${yOf(p.months).toFixed(1)}`
+  ).join(' ')
+  const survivalLinePath = points.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${xOf(p.ms).toFixed(1)},${yOf(p.monthsSurvival).toFixed(1)}`
   ).join(' ')
 
   const fmtDate = (ms: number) => {
@@ -587,18 +597,29 @@ function FuMoneyChart({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money</p>
-          <p className="text-[9px] text-zinc-600 mt-0.5">(Líquido + Invertido) / (gasto − ingresos pasivos) — histórico</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1"><span className="w-2 h-0.5 bg-amber-500 inline-block" />estilo de vida</span>
+            <span className="inline-flex items-center gap-1"><span className="w-2 h-0.5 bg-sky-400 inline-block" />sobrevivencia</span>
+          </p>
         </div>
         {hovered && (
-          <span className="text-[10px] text-zinc-300">
-            {fmtDate(hovered.ms)}:{' '}
-            <span className="font-bold" style={{
-              color: hovered.months >= runwayGreen ? '#a3e635' :
-                     hovered.months >= runwayYellow ? '#f59e0b' : '#f43f5e'
-            }}>
-              {hovered.months.toFixed(1)}m
-            </span>
-            <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.liquid)})</span>
+          <span className="text-[10px] text-zinc-300 text-right">
+            <div>{fmtDate(hovered.ms)} <span className="text-zinc-600">({fmtLiquid(hovered.liquid)})</span></div>
+            <div>
+              <span className="font-bold" style={{
+                color: hovered.months >= runwayGreen ? '#a3e635' :
+                       hovered.months >= runwayYellow ? '#f59e0b' : '#f43f5e'
+              }}>
+                {hovered.months.toFixed(1)}m
+              </span>
+              <span className="text-zinc-600 mx-1">/</span>
+              <span className="font-bold" style={{
+                color: hovered.monthsSurvival >= runwayGreen ? '#a3e635' :
+                       hovered.monthsSurvival >= runwayYellow ? '#f59e0b' : '#f43f5e'
+              }}>
+                {hovered.monthsSurvival.toFixed(1)}m
+              </span>
+            </div>
           </span>
         )}
       </div>
@@ -647,6 +668,9 @@ function FuMoneyChart({
         {/* Line — color by current threshold */}
         <path d={linePath} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
 
+        {/* Survival runway line — same liquid+invested numerator, survival-expense divisor */}
+        <path d={survivalLinePath} fill="none" stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+
         {/* Hover crosshair */}
         {hovered && (
           <g>
@@ -655,6 +679,8 @@ function FuMoneyChart({
             <circle cx={xOf(hovered.ms)} cy={yOf(hovered.months)} r={4}
               fill={hovered.months >= runwayGreen ? '#a3e635' : hovered.months >= runwayYellow ? '#f59e0b' : '#f43f5e'}
               stroke="#080c08" strokeWidth={2} />
+            <circle cx={xOf(hovered.ms)} cy={yOf(hovered.monthsSurvival)} r={3.5}
+              fill="#38bdf8" stroke="#080c08" strokeWidth={1.5} />
           </g>
         )}
 
