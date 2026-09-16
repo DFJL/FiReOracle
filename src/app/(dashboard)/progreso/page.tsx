@@ -68,6 +68,26 @@ export default async function ProgresoPage() {
       .order('sort_order'),
   ])
 
+  // FU Money chart: exclude locked retirement funds (ROP & FCL, Pensión
+  // Voluntaria — not accessible before retirement age without penalty) from
+  // the "invertido" side of the numerator. Everything else stays untouched
+  // (FIRE number, activos invertibles, etc. still count them as real net worth).
+  const lockedBucketIds = (bucketRows ?? [])
+    .filter(b => b.name === 'ROP & FCL' || b.name === 'Pensión Voluntaria')
+    .map(b => b.id)
+  const { data: lockedYieldRows } = lockedBucketIds.length > 0
+    ? await admin.from('investment_yield_history')
+        .select('bucket_id, year_month, invested_usd, exchange_rate')
+        .in('bucket_id', lockedBucketIds)
+        .order('year_month', { ascending: true })
+    : { data: [] as { bucket_id: string; year_month: string; invested_usd: number; exchange_rate: number }[] }
+
+  const lockedInvestedByMonth: Record<string, number> = {}
+  for (const r of lockedYieldRows ?? []) {
+    const ym = String(r.year_month).slice(0, 7)
+    lockedInvestedByMonth[ym] = (lockedInvestedByMonth[ym] ?? 0) + Number(r.invested_usd) * Number(r.exchange_rate)
+  }
+
   // Snapshot-based bucket balances
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
   const snapshotResults = await Promise.all(
@@ -512,6 +532,7 @@ export default async function ProgresoPage() {
           invested_crc:  Number(s.invested_crc ?? 0),
           liquid_crc:    Number((s as { liquid_crc?: number | null }).liquid_crc ?? 0),
         }))}
+        lockedInvestedByMonth={lockedInvestedByMonth}
         exchangeRate={exchangeRate}
         fireConfig={{ swr, targetExp, expReturn, inflation }}
         runwayGreen={fireConfig?.runway_green_months  ?? 6}
