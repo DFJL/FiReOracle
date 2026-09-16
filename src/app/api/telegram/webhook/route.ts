@@ -15,9 +15,10 @@ import { toTelegramText, chunkForTelegram } from '@/lib/telegramFormat'
 // DB queries) — extend past the default 10s to the Hobby-plan ceiling.
 export const maxDuration = 60
 
-// Keeps roughly the last 10 exchanges per chat — enough for follow-up
-// questions ("¿y en marzo?") without the history growing unbounded.
-const MAX_HISTORY = 20
+// Keeps roughly the last ~5 exchanges per chat — enough for follow-up
+// questions ("¿y en marzo?") without paying (uncached) history tokens on
+// every message as the conversation grows.
+const MAX_HISTORY = 10
 
 export async function POST(req: Request) {
   const secret = req.headers.get('x-telegram-bot-api-secret-token')

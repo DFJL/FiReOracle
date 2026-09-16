@@ -40,6 +40,10 @@ export const ORACLE_TOOLS: Anthropic.Tool[] = [
       },
       required: ['category_code'],
     },
+    // Marks the end of the tools block as a cache breakpoint — tiny on its
+    // own, but it's processed before the (much larger) cached system prompt,
+    // so caching it too avoids invalidating that larger cache on every call.
+    cache_control: { type: 'ephemeral', ttl: '1h' },
   },
 ]
 

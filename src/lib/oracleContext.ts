@@ -350,8 +350,10 @@ export async function buildOracleContext(userId: string): Promise<string> {
       return `${d} ${type} ${v} ${fmtCRC(Number(tx.amount ?? 0)).padStart(14)} [${cat}]`
     })
 
-  // ── NW history (all snapshots) ─────────────────────────────────────────────
-  const nwHistory = (snapshots ?? []).map(s => ({
+  // ── NW history (last 30 snapshots — full history can be years of monthly
+  // rows; the model can ask for older data explicitly if it ever needs it,
+  // this just keeps the default context from carrying dead weight) ────────
+  const nwHistory = (snapshots ?? []).slice(-30).map(s => ({
     date:  s.snapshot_date,
     nw:    Number(s.net_worth_crc),
     inv:   Number(s.invested_crc ?? 0),
@@ -575,7 +577,7 @@ ${(liabilitiesRaw ?? []).length > 0 ? `\nPasivos manuales:\n${(liabilitiesRaw ??
 ).join('\n')}` : ''}
 
 ══════════════════════════════════════════════════════════
- PATRIMONIO NETO — HISTORIAL COMPLETO
+ PATRIMONIO NETO — ÚLTIMOS 30 SNAPSHOTS
 ══════════════════════════════════════════════════════════
 Fecha        Patrim.Neto       Invertido         Liquidez        Pasivos
 ${nwHistory.map(s =>

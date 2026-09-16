@@ -7,8 +7,10 @@ const anthropic = new Anthropic()
 // Caps the tool-call back-and-forth per user message. Each round is one
 // non-streamed model call plus (fast) DB queries — this bounds worst-case
 // latency/cost while still allowing the model to chain a couple of lookups
-// (e.g. list categories, then drill into one).
-const MAX_TOOL_ROUNDS = 5
+// (e.g. list categories, then drill into one). Lowered from 5: most real
+// questions resolve in 1-2 tool calls, and every extra round re-sends the
+// growing conversation on top of the (cached, but not free) system prompt.
+const MAX_TOOL_ROUNDS = 3
 
 export type OracleMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -68,6 +70,16 @@ export async function runOracleEngine(
   const admin = createAdminClient()
   const systemPrompt = buildSystemPrompt(context)
 
+  // Prompt caching: the financial context is the single biggest cost driver
+  // (several KB re-sent on every tool-calling round, and on every message in
+  // a conversation, at full price). Marking it as an ephemeral 1h cache
+  // breakpoint means only the FIRST call within that hour pays full price —
+  // every round after that (and every follow-up message within the hour, on
+  // Telegram or the web) reads it back at ~10% of the normal input cost.
+  const systemBlocks: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral', ttl: '1h' } },
+  ]
+
   const convo: Anthropic.MessageParam[] = messages.map(m => ({ role: m.role, content: m.content }))
   let finalText = ''
 
@@ -76,7 +88,7 @@ export async function runOracleEngine(
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: systemPrompt,
+      system: systemBlocks,
       messages: convo,
       ...(forceFinal ? {} : { tools: ORACLE_TOOLS }),
     })
