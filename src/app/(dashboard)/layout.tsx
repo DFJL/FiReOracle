@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { getPendingCount } from '@/app/actions/inbox'
 import { AlertsServer } from './AlertsServer'
+import { DailyFactServer } from './DailyFactServer'
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: number }
 type NavGroup = { label: string; items: NavItem[] }
@@ -168,6 +169,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* Smart alert banners — async, non-blocking */}
         <Suspense fallback={null}>
           <AlertsServer userId={user.id} />
+        </Suspense>
+
+        {/* Daily fact card — async, non-blocking */}
+        <Suspense fallback={null}>
+          <DailyFactServer userId={user.id} />
         </Suspense>
 
         <main className="flex-1 overflow-auto">{children}</main>
