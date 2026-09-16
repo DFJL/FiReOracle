@@ -517,6 +517,12 @@ function FuMoneyChart({
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const [visible, setVisible] = useState({ fu: true, runway: true })
+  const toggle = (key: 'fu' | 'runway') => setVisible(v => {
+    const next = { ...v, [key]: !v[key] }
+    // Never allow hiding both — a chart with nothing plotted is confusing.
+    return next.fu || next.runway ? next : v
+  })
 
   // Two different metrics, not two different burn rates:
   // - "Meses FU" = (líquido + invertido) / gasto de estilo de vida — counts
@@ -550,7 +556,11 @@ function FuMoneyChart({
   const maxMs   = points[points.length - 1].ms
   const msRange = maxMs - minMs
 
-  const maxMonths = Math.max(...points.map(p => p.fuMonths), ...points.map(p => p.runwayMonths), runwayGreen + 2)
+  const maxMonths = Math.max(
+    ...(visible.fu ? points.map(p => p.fuMonths) : []),
+    ...(visible.runway ? points.map(p => p.runwayMonths) : []),
+    runwayGreen + 2,
+  )
   const xOf = (ms: number)     => padL + ((ms - minMs) / msRange) * chartW
   const yOf = (v: number)      => padT + chartH - (Math.min(v, maxMonths * 1.1) / (maxMonths * 1.1)) * chartH
 
@@ -602,32 +612,52 @@ function FuMoneyChart({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money / Runway</p>
-          <p className="text-[9px] text-zinc-600 mt-0.5 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1"><span className="w-2 h-0.5 bg-amber-500 inline-block" />FU Money (líquido+invertido)</span>
-            <span className="inline-flex items-center gap-1"><span className="w-2 h-0.5 bg-sky-400 inline-block" />Runway (solo líquido)</span>
+          <p className="text-[9px] mt-0.5 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => toggle('fu')}
+              className="inline-flex items-center gap-1 cursor-pointer"
+              style={{ opacity: visible.fu ? 1 : 0.35 }}
+            >
+              <span className="w-2 h-0.5 bg-amber-500 inline-block" />
+              <span className="text-zinc-600">FU Money (líquido+invertido)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggle('runway')}
+              className="inline-flex items-center gap-1 cursor-pointer"
+              style={{ opacity: visible.runway ? 1 : 0.35 }}
+            >
+              <span className="w-2 h-0.5 bg-sky-400 inline-block" />
+              <span className="text-zinc-600">Runway (solo líquido)</span>
+            </button>
           </p>
         </div>
         {hovered && (
           <span className="text-[10px] text-zinc-300 text-right">
             <div>{fmtDate(hovered.ms)}</div>
-            <div>
-              <span className="font-bold" style={{
-                color: hovered.fuMonths >= runwayGreen ? '#a3e635' :
-                       hovered.fuMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
-              }}>
-                {hovered.fuMonths.toFixed(1)}m
-              </span>
-              <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.fuBalance)})</span>
-            </div>
-            <div>
-              <span className="font-bold" style={{
-                color: hovered.runwayMonths >= runwayGreen ? '#a3e635' :
-                       hovered.runwayMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
-              }}>
-                {hovered.runwayMonths.toFixed(1)}m
-              </span>
-              <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.liquid)})</span>
-            </div>
+            {visible.fu && (
+              <div>
+                <span className="font-bold" style={{
+                  color: hovered.fuMonths >= runwayGreen ? '#a3e635' :
+                         hovered.fuMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
+                }}>
+                  {hovered.fuMonths.toFixed(1)}m
+                </span>
+                <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.fuBalance)})</span>
+              </div>
+            )}
+            {visible.runway && (
+              <div>
+                <span className="font-bold" style={{
+                  color: hovered.runwayMonths >= runwayGreen ? '#a3e635' :
+                         hovered.runwayMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
+                }}>
+                  {hovered.runwayMonths.toFixed(1)}m
+                </span>
+                <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.liquid)})</span>
+              </div>
+            )}
           </span>
         )}
       </div>
@@ -668,27 +698,37 @@ function FuMoneyChart({
             <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path
-          d={`${linePath} L${xOf(maxMs).toFixed(1)},${padT + chartH} L${padL},${padT + chartH} Z`}
-          fill="url(#fu-grad)"
-        />
+        {visible.fu && (
+          <path
+            d={`${linePath} L${xOf(maxMs).toFixed(1)},${padT + chartH} L${padL},${padT + chartH} Z`}
+            fill="url(#fu-grad)"
+          />
+        )}
 
         {/* FU Money line (líquido+invertido) — color by current threshold */}
-        <path d={linePath} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        {visible.fu && (
+          <path d={linePath} fill="none" stroke="#f59e0b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        )}
 
         {/* Runway line (líquido solo, obligaciones totales) */}
-        <path d={runwayLinePath} fill="none" stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+        {visible.runway && (
+          <path d={runwayLinePath} fill="none" stroke="#38bdf8" strokeWidth={1.5} strokeDasharray="4 3" strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+        )}
 
         {/* Hover crosshair */}
         {hovered && (
           <g>
             <line x1={xOf(hovered.ms)} x2={xOf(hovered.ms)} y1={padT} y2={padT + chartH}
               stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
-            <circle cx={xOf(hovered.ms)} cy={yOf(hovered.fuMonths)} r={4}
-              fill={hovered.fuMonths >= runwayGreen ? '#a3e635' : hovered.fuMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'}
-              stroke="#080c08" strokeWidth={2} />
-            <circle cx={xOf(hovered.ms)} cy={yOf(hovered.runwayMonths)} r={3.5}
-              fill="#38bdf8" stroke="#080c08" strokeWidth={1.5} />
+            {visible.fu && (
+              <circle cx={xOf(hovered.ms)} cy={yOf(hovered.fuMonths)} r={4}
+                fill={hovered.fuMonths >= runwayGreen ? '#a3e635' : hovered.fuMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'}
+                stroke="#080c08" strokeWidth={2} />
+            )}
+            {visible.runway && (
+              <circle cx={xOf(hovered.ms)} cy={yOf(hovered.runwayMonths)} r={3.5}
+                fill="#38bdf8" stroke="#080c08" strokeWidth={1.5} />
+            )}
           </g>
         )}
 
