@@ -40,12 +40,14 @@ export async function AlertsServer({ userId }: { userId: string }) {
   const twelveMonthsBack = new Date(now.getFullYear(), now.getMonth() - 12, 1)
   const twelveMonthsBackStr = `${twelveMonthsBack.getFullYear()}-${String(twelveMonthsBack.getMonth() + 1).padStart(2, '0')}-01`
 
-  const [{ data: prevTx }, { data: categories }] = await Promise.all([
+  // Full history (not just 12 months) — the outlier fence needs as much data
+  // per category as /progreso gets, or the two disagree on what counts as a
+  // one-off purchase and land on different runway numbers for no real reason.
+  const [{ data: allTx }, { data: categories }] = await Promise.all([
     admin.from('transactions')
       .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income, is_settlement')
       .eq('user_id', userId)
-      .gte('date', twelveMonthsBackStr)
-      .lt('date', thisMonthStart),
+      .not('amount', 'is', null),
     admin.from('transaction_categories')
       .select('code, parent_code')
       .eq('is_active', true),
@@ -56,8 +58,8 @@ export async function AlertsServer({ userId }: { userId: string }) {
   // purchase can't skew this banner's runway differently from the FIRE page.
   let loanTotal = 0
   let passiveTotal = 0
-  for (const tx of prevTx ?? []) {
-    if (!tx.date) continue
+  for (const tx of allTx ?? []) {
+    if (!tx.date || tx.date < twelveMonthsBackStr || tx.date >= thisMonthStart) continue
     if (tx.movement_type === 'income' && tx.is_passive_income && !tx.is_settlement) {
       passiveTotal += Number(tx.amount)
     } else if (
@@ -69,7 +71,7 @@ export async function AlertsServer({ userId }: { userId: string }) {
     }
   }
   const getRootCode = buildRootCodeMap((categories ?? []) as { code: string; parent_code?: string | null }[])
-  const { cleaned: cleanedLifestyleTxs } = cleanLifestyleOutliers(prevTx ?? [], getRootCode)
+  const { cleaned: cleanedLifestyleTxs } = cleanLifestyleOutliers(allTx ?? [], getRootCode)
   const avgMonthlyLifestyle = avgMonthlyInWindow(cleanedLifestyleTxs, twelveMonthsBackStr, thisMonthStart)
 
   // Obligations = lifestyle + loans (both are real monthly cash requirements)
