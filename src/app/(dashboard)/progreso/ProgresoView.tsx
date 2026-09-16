@@ -35,7 +35,6 @@ type Props = {
   runway: number
   runwaySurvival: number
   avgMonthlyExpenses: number
-  avgMonthlyObligations: number
   avgMonthlySurvivalExpenses: number
   avgMonthlyIncome: number
   avgMonthlyDeposits: number
@@ -64,7 +63,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
   fireNumber, leanFireNumber, fireProgress, runway, runwaySurvival,
-  avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
+  avgMonthlyExpenses, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, lifestyle,
@@ -337,8 +336,7 @@ export function ProgresoView({
       <FuMoneyChart
         snapshots={snapshots}
         lockedInvestedByMonth={lockedInvestedByMonth}
-        avgMonthlyExpenses={avgMonthlyExpenses}
-        avgMonthlyObligations={avgMonthlyObligations}
+        avgMonthlySurvivalExpenses={avgMonthlySurvivalExpenses}
         passiveMonthlyAvg={passiveMonthlyAvg}
         runwayGreen={runwayGreen}
         runwayYellow={runwayYellow}
@@ -506,11 +504,10 @@ function MilestoneStrip({
 }
 
 function FuMoneyChart({
-  snapshots, avgMonthlyExpenses, avgMonthlyObligations, passiveMonthlyAvg, lockedInvestedByMonth, runwayGreen, runwayYellow, currency, rate,
+  snapshots, avgMonthlySurvivalExpenses, passiveMonthlyAvg, lockedInvestedByMonth, runwayGreen, runwayYellow, currency, rate,
 }: {
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
-  avgMonthlyExpenses: number
-  avgMonthlyObligations: number
+  avgMonthlySurvivalExpenses: number
   passiveMonthlyAvg: number
   lockedInvestedByMonth: Record<string, number>
   runwayGreen: number
@@ -527,16 +524,15 @@ function FuMoneyChart({
     return next.fu || next.runway ? next : v
   })
 
-  // Two different metrics, not two different burn rates:
-  // - "Meses FU" = (líquido + invertido accesible) / gasto de estilo de vida.
-  //   "Invertido accesible" excludes ROP & FCL / Pensión Voluntaria — locked
-  //   until retirement age, not real "libertad financiera" money today.
-  // - "Runway" = líquido solo / obligaciones totales (gasto + cuota de
-  //   préstamo) — the actual Runway KPI shown at the top of this page,
-  //   which never counts invested capital since it isn't immediately liquid.
-  const netMonthlyExpenses    = Math.max(avgMonthlyExpenses - passiveMonthlyAvg, 1)
-  const netMonthlyObligations = Math.max(avgMonthlyObligations - passiveMonthlyAvg, 1)
-  if (avgMonthlyExpenses <= 0) return null
+  // Same burn rate for both series — gasto de sobrevivencia, the bare-minimum
+  // spend you'd actually be stuck with in a real emergency/job loss, same
+  // logic as the "Runway (sobrevivencia)" KPI card. The two lines differ only
+  // in numerator scope:
+  // - "Meses FU" = líquido + invertido accesible (excludes ROP & FCL /
+  //   Pensión Voluntaria — locked until retirement age).
+  // - "Runway" = líquido solo — invested capital isn't immediately liquid.
+  const netSurvivalBurn = Math.max(avgMonthlySurvivalExpenses - passiveMonthlyAvg, 1)
+  if (avgMonthlySurvivalExpenses <= 0) return null
 
   // Backward-fill: use the latest known locked-bucket value at or before
   // each snapshot's month, so gaps between imported data points don't reset
@@ -558,8 +554,8 @@ function FuMoneyChart({
       const accessibleInvested = Math.max(s.invested_crc - locked, 0)
       return {
         ms: new Date(s.snapshot_date + 'T12:00:00').getTime(),
-        fuMonths: (s.liquid_crc + accessibleInvested) / netMonthlyExpenses,
-        runwayMonths: s.liquid_crc / netMonthlyObligations,
+        fuMonths: (s.liquid_crc + accessibleInvested) / netSurvivalBurn,
+        runwayMonths: s.liquid_crc / netSurvivalBurn,
         fuBalance: s.liquid_crc + accessibleInvested,
         liquid: s.liquid_crc,
       }
@@ -633,6 +629,7 @@ function FuMoneyChart({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Meses de FU Money / Runway</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">quema = gasto de sobrevivencia (igual que Runway sobrevivencia)</p>
           <p className="text-[9px] mt-0.5 flex items-center gap-3">
             <button
               type="button"
