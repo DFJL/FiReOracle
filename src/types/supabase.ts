@@ -2361,18 +2361,21 @@ export type Database = {
           chat_id: string
           created_at: string
           is_active: boolean
+          oracle_history: Json
           user_id: string
         }
         Insert: {
           chat_id: string
           created_at?: string
           is_active?: boolean
+          oracle_history?: Json
           user_id: string
         }
         Update: {
           chat_id?: string
           created_at?: string
           is_active?: boolean
+          oracle_history?: Json
           user_id?: string
         }
         Relationships: []

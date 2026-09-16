@@ -58,15 +58,23 @@ export async function deleteTelegramConfig(): Promise<{ error: string | null }> 
   return { error: null }
 }
 
-// Shared helper — also used by the cron job via direct import
-export async function sendTelegramMessage(chatId: string, text: string): Promise<string | null> {
+// Shared helper — also used by the cron job via direct import.
+// parseMode defaults to 'Markdown' for existing callers (payment reminders,
+// daily fact); pass null to send plain text — needed for Oracle replies,
+// whose Markdown isn't guaranteed well-formed (an unmatched * or _ makes
+// Telegram reject the whole message).
+export async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  parseMode: 'Markdown' | null = 'Markdown',
+): Promise<string | null> {
   const token = process.env.TELEGRAM_BOT_TOKEN
   if (!token) return 'TELEGRAM_BOT_TOKEN no configurado'
 
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+    body:    JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) }),
   })
 
   if (!res.ok) {
