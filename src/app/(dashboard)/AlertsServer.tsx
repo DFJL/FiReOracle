@@ -47,7 +47,8 @@ export async function AlertsServer({ userId }: { userId: string }) {
     admin.from('transactions')
       .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income, is_settlement')
       .eq('user_id', userId)
-      .not('amount', 'is', null),
+      .not('amount', 'is', null)
+      .range(0, 49999),
     admin.from('transaction_categories')
       .select('code, parent_code')
       .eq('is_active', true),

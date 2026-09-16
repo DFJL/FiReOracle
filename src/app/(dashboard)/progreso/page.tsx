@@ -48,7 +48,8 @@ export default async function ProgresoPage() {
     admin.from('transactions')
       .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id')
       .eq('user_id', user.id)
-      .not('amount', 'is', null),
+      .not('amount', 'is', null)
+      .range(0, 49999),
     admin.from('envelope_movements')
       .select('amount, movement_type, envelope_id, date')
       .eq('user_id', user.id),
