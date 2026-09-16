@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { computeAlerts } from '@/lib/alerts'
 import { AlertsBanner } from '@/components/AlertsBanner'
 import { isLoanPayment } from './resumen/categoryUtils'
+import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow } from '@/lib/lifestyleExpenses'
 
 export async function AlertsServer({ userId }: { userId: string }) {
   const admin = createAdminClient()
@@ -39,31 +40,39 @@ export async function AlertsServer({ userId }: { userId: string }) {
   const twelveMonthsBack = new Date(now.getFullYear(), now.getMonth() - 12, 1)
   const twelveMonthsBackStr = `${twelveMonthsBack.getFullYear()}-${String(twelveMonthsBack.getMonth() + 1).padStart(2, '0')}-01`
 
-  const { data: prevTx } = await admin
-    .from('transactions')
-    .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income, is_settlement')
-    .eq('user_id', userId)
-    .gte('date', twelveMonthsBackStr)
-    .lt('date', thisMonthStart)
+  const [{ data: prevTx }, { data: categories }] = await Promise.all([
+    admin.from('transactions')
+      .select('amount, date, category_code, movement_type, expense_group, concept, vendor, is_passive_income, is_settlement')
+      .eq('user_id', userId)
+      .gte('date', twelveMonthsBackStr)
+      .lt('date', thisMonthStart),
+    admin.from('transaction_categories')
+      .select('code, parent_code')
+      .eq('is_active', true),
+  ])
 
-  // Lifestyle expenses only — same filter as progreso's avgMonthlyExpenses
-  let lifestyleTotal = 0
+  // Lifestyle expenses, outlier-cleaned the same way as /progreso's
+  // avgMonthlyExpenses (@/lib/lifestyleExpenses) — a single large one-off
+  // purchase can't skew this banner's runway differently from the FIRE page.
   let loanTotal = 0
   let passiveTotal = 0
   for (const tx of prevTx ?? []) {
     if (!tx.date) continue
     if (tx.movement_type === 'income' && tx.is_passive_income && !tx.is_settlement) {
       passiveTotal += Number(tx.amount)
-    } else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') {
-      if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) {
-        loanTotal += Number(tx.amount)
-      } else if (tx.expense_group !== 'objetivos_financieros') {
-        lifestyleTotal += Number(tx.amount)
-      }
+    } else if (
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+    ) {
+      loanTotal += Number(tx.amount)
     }
   }
+  const getRootCode = buildRootCodeMap((categories ?? []) as { code: string; parent_code?: string | null }[])
+  const { cleaned: cleanedLifestyleTxs } = cleanLifestyleOutliers(prevTx ?? [], getRootCode)
+  const avgMonthlyLifestyle = avgMonthlyInWindow(cleanedLifestyleTxs, twelveMonthsBackStr, thisMonthStart)
+
   // Obligations = lifestyle + loans (both are real monthly cash requirements)
-  const avgMonthlyExpense = (lifestyleTotal + loanTotal) / 12
+  const avgMonthlyExpense = avgMonthlyLifestyle + loanTotal / 12
   const avgMonthlyPassive = passiveTotal / 12
   const avgNetBurn = Math.max(avgMonthlyExpense - avgMonthlyPassive, 0)
 

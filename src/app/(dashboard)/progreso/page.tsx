@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
+import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95 } from '@/lib/lifestyleExpenses'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -148,19 +149,15 @@ export default async function ProgresoPage() {
   // Built early so Runway/FIRE below reuse the same outlier-cleaned set as the
   // Lifestyle Inflation section — one purchase (e.g. a car) used to be able to
   // inflate avgMonthlyExpenses by 25%+ on its own even though the Inflation
-  // section already had IQR-based cleaning for exactly this.
+  // section already had IQR-based cleaning for exactly this. Shared with the
+  // dashboard's runway alert banner via @/lib/lifestyleExpenses so the two
+  // can't drift apart again.
   const MONTH_LABELS_LIFESTYLE = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  const catChildMap = new Map<string, string>()  // childCode → parentCode
   const catNameMap  = new Map<string, string>()  // code → display name
   for (const cat of categories ?? []) {
     catNameMap.set(cat.code, cat.name)
-    const c = cat as { code: string; name: string; parent_code?: string | null }
-    if (c.parent_code) catChildMap.set(c.code, c.parent_code)
   }
-  const getRootCode = (code: string) => catChildMap.get(code) ?? code
-
-  // Hard-exclude debt payments: LOANS root and all its children
-  const DEBT_ROOTS = new Set(['LOANS'])
+  const getRootCode = buildRootCodeMap((categories ?? []) as { code: string; parent_code?: string | null }[])
 
   const liCurEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
   const liCurStart = new Date(now.getFullYear(), now.getMonth() - 12, 1)
@@ -168,17 +165,6 @@ export default async function ProgresoPage() {
   const liCurEndStr   = liCurEnd.toISOString().slice(0, 10)
   const liCurStartStr = liCurStart.toISOString().slice(0, 10)
   const liPrvStartStr = liPrvStart.toISOString().slice(0, 10)
-
-  const isLifestyleTx = (tx: typeof txs extends (infer T)[] | null ? T : never) => {
-    if (!tx) return false
-    if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-    if (tx.expense_group === 'objetivos_financieros') return false
-    if (isValuation(tx.concept)) return false
-    if (tx.category_code && DEBT_ROOTS.has(getRootCode(tx.category_code))) return false
-    return true
-  }
-
-  const lifestyleTxs = (txs ?? []).filter(isLifestyleTx)
 
   // Top categories — two-pass outlier removal for fair YoY comparison:
   // Pass 1 (tx-level): remove single large one-off purchases per category (el sofá)
@@ -191,59 +177,14 @@ export default async function ProgresoPage() {
   const curYMs = allYMs.slice(12)
   const prvYMs = allYMs.slice(0, 12)
 
-  // Global P95 across all lifestyle transactions — fallback for sparse categories
-  const allLsAmounts = lifestyleTxs
-    .map(tx => Number(tx.amount ?? 0))
-    .filter(a => a > 0)
-    .sort((a, b) => a - b)
-  const globalP95 = allLsAmounts.length > 0
-    ? allLsAmounts[Math.floor(allLsAmounts.length * 0.95)]
-    : Infinity
-
-  function outlierFence(values: number[]): number {
-    const nonZero = values.filter(v => v > 0)
-    // Sparse category (e.g. one-off purchase) → use global P95 as reference
-    if (nonZero.length < 4) return globalP95
-    const s  = [...nonZero].sort((a, b) => a - b)
-    const q1 = s[Math.floor(s.length * 0.25)]
-    const q3 = s[Math.floor(s.length * 0.75)]
-    // 4×Q3 floor avoids over-flagging dense categories (food, fuel) where Q3 is low
-    return Math.max(q3 + 1.5 * (q3 - q1), q3 * 4)
-  }
-
-  // Pass 1: compute per-root transaction fence across all 24m
-  const rootTxAmounts: Record<string, number[]> = {}
-  for (const tx of lifestyleTxs) {
-    const root = getRootCode(tx.category_code ?? '__na__')
-    if (!rootTxAmounts[root]) rootTxAmounts[root] = []
-    rootTxAmounts[root].push(Number(tx.amount ?? 0))
-  }
-  const rootTxFences = Object.fromEntries(
-    Object.entries(rootTxAmounts).map(([root, amounts]) => [root, outlierFence(amounts)])
-  )
-  const rootTxExcluded: Record<string, number> = {}
-
-  // cleanedLifestyleTxs: same as lifestyleTxs but with tx-level outliers removed.
-  // Used for both monthly aggregation AND driver drill-down so the drivers stay
-  // consistent with the category averages (no outlier tx showing as top driver).
-  const cleanedLifestyleTxs = lifestyleTxs.filter(tx => {
-    const root   = getRootCode(tx.category_code ?? '__na__')
-    const amount = Number(tx.amount ?? 0)
-    const isOutlier = amount > (rootTxFences[root] ?? Infinity)
-    if (isOutlier) rootTxExcluded[root] = (rootTxExcluded[root] ?? 0) + 1
-    return !isOutlier
-  })
-  // avgMonthlyExpenses/avgMonthlySurvivalExpenses below draw from this same
-  // cleaned set, restricted to the last 12 complete months.
-  const cleanedRecent = cleanedLifestyleTxs.filter(tx =>
-    tx.date && tx.date >= rolling12StartStr && tx.date < rolling12EndStr
-  )
+  // Pass 1: tx-level outlier fence, computed from the user's full history
+  const { cleaned: cleanedLifestyleTxs, excludedByRoot: rootTxExcluded } =
+    cleanLifestyleOutliers(txs ?? [], getRootCode)
 
   // Lifestyle expenses: excludes savings/investments (objetivos_financieros), loan
   // payments, and outlier transactions (a car purchase, etc.) — same cleaning as
   // the Lifestyle Inflation section, so Runway/FIRE aren't skewed by one-off buys
-  const avgMonthlyExpenses = cleanedRecent
-    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+  const avgMonthlyExpenses = avgMonthlyInWindow(cleanedLifestyleTxs, rolling12StartStr, rolling12EndStr)
 
   // Survival expenses: trust the user's is_survival_expense tags directly.
   // For FS ratio the mortgage IS a real monthly obligation — it stays in the denominator.
@@ -395,10 +336,11 @@ export default async function ProgresoPage() {
   }
 
   // Pass 3: monthly IQR on cleaned totals
+  const liGlobalP95 = computeGlobalP95(cleanedLifestyleTxs)
   const liTopCats = Object.entries(rootMonthly)
     .filter(([, monthly]) => curYMs.some(m => (monthly[m] ?? 0) > 0))
     .map(([code, monthly]) => {
-      const fence         = outlierFence(allYMs.map(m => monthly[m] ?? 0))
+      const fence         = outlierFence(allYMs.map(m => monthly[m] ?? 0), liGlobalP95)
       const monthOutliers = new Set(allYMs.filter(m => (monthly[m] ?? 0) > fence))
       const curSum        = curYMs.filter(m => !monthOutliers.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
       const prvSum        = prvYMs.filter(m => !monthOutliers.has(m)).reduce((s, m) => s + (monthly[m] ?? 0), 0)
