@@ -73,15 +73,27 @@ export async function POST(req: Request) {
   const history = Array.isArray(config.oracle_history) ? (config.oracle_history as unknown as OracleMessage[]) : []
   const nextMessages: OracleMessage[] = [...history, { role: 'user', content: text }]
 
-  const context  = await buildOracleContext(config.user_id)
-  const replyRaw = await runOracleEngine(config.user_id, nextMessages, context)
+  // If anything here throws (Anthropic API error, DB error, etc.), the user
+  // must still get SOME reply — silently swallowing it left them staring at
+  // a chat that "doesn't respond" with no indication anything went wrong.
+  try {
+    const context  = await buildOracleContext(config.user_id)
+    const replyRaw = await runOracleEngine(config.user_id, nextMessages, context)
 
-  const updatedHistory = [...nextMessages, { role: 'assistant' as const, content: replyRaw }].slice(-MAX_HISTORY)
-  await admin.from('user_telegram_config').update({ oracle_history: updatedHistory }).eq('chat_id', chatId)
+    const updatedHistory = [...nextMessages, { role: 'assistant' as const, content: replyRaw }].slice(-MAX_HISTORY)
+    await admin.from('user_telegram_config').update({ oracle_history: updatedHistory }).eq('chat_id', chatId)
 
-  const replyText = toTelegramText(replyRaw) || 'No pude generar una respuesta esta vez — probá reformular la pregunta.'
-  for (const chunk of chunkForTelegram(replyText)) {
-    await sendTelegramMessage(chatId, chunk, null)
+    const replyText = toTelegramText(replyRaw) || 'No pude generar una respuesta esta vez — probá reformular la pregunta.'
+    for (const chunk of chunkForTelegram(replyText)) {
+      await sendTelegramMessage(chatId, chunk, null)
+    }
+  } catch (err) {
+    console.error('Oracle Telegram error:', err)
+    await sendTelegramMessage(
+      chatId,
+      '⚠️ Tuve un problema respondiendo tu pregunta. Puede ser un error temporal del servicio de IA — probá de nuevo en un rato.',
+      null,
+    )
   }
 
   return new Response('ok')

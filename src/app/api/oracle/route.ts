@@ -18,7 +18,16 @@ export async function POST(req: Request) {
 
   if (!messages?.length) return new Response('Bad request', { status: 400 })
 
-  const finalText = await runOracleEngine(user.id, messages, context)
+  let finalText: string
+  try {
+    finalText = await runOracleEngine(user.id, messages, context)
+  } catch (err) {
+    console.error('Oracle engine error:', err)
+    return new Response(
+      'Tuve un problema respondiendo tu pregunta. Puede ser un error temporal del servicio de IA — probá de nuevo en un rato.',
+      { status: 502 },
+    )
+  }
 
   // The response was already generated in full (possibly after several tool
   // round-trips) — chunk it back out so the existing client-side incremental
