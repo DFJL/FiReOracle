@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
-import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95 } from '@/lib/lifestyleExpenses'
+import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -15,16 +15,6 @@ type ConceptMap = {
 
 function isValuation(concept: string | null) {
   return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
-}
-
-// Extra/discretionary loan principal paydowns build equity like any other
-// investment — unlike the regular monthly installment (interest + scheduled
-// principal), which stays a pure obligation. Matched by concept text, not
-// expense_group, since these have been logged under both 'necesario' and
-// 'objetivos_financieros' depending on how the user tagged them.
-function isExtraLoanPrincipalPayment(concept: string | null, categoryCode: string | null) {
-  if (!categoryCode || !/LOAN|PRESTAM/i.test(categoryCode)) return false
-  return /extraordinari|abono\s*extra/i.test(concept ?? '')
 }
 
 export default async function ProgresoPage() {
@@ -260,12 +250,16 @@ export default async function ProgresoPage() {
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
-  // Runway uses total monthly obligations: lifestyle + loan payments
-  // Loans are real cash requirements regardless of equity-building nature
+  // Runway uses total monthly obligations: lifestyle + loan payments.
+  // Only the regular scheduled installment counts here — extraordinary/
+  // discretionary principal paydowns are the first thing to stop in a
+  // real cash crunch, so they don't belong in what runway is meant to
+  // measure (they already count toward avgMonthlyDeposits as savings).
   const avgMonthlyLoanPayments = recent
     .filter(tx =>
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+      isLoanPayment(tx.vendor, tx.concept, tx.category_code) &&
+      !isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
   const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments

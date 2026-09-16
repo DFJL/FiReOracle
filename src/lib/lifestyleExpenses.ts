@@ -23,6 +23,17 @@ export function isValuation(concept: string | null): boolean {
   return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
 }
 
+// Extra/discretionary loan principal paydowns build equity like any other
+// investment — unlike the regular monthly installment (interest + scheduled
+// principal), which stays a pure obligation for Runway purposes. Matched by
+// concept text, not expense_group, since these get logged under both
+// 'necesario' and 'objetivos_financieros' depending on how the user tagged
+// them. Shared by /progreso (savings rate + runway) and the alert banner.
+export function isExtraLoanPrincipalPayment(concept: string | null, categoryCode: string | null): boolean {
+  if (!categoryCode || !/LOAN|PRESTAM/i.test(categoryCode)) return false
+  return /extraordinari|abono\s*extra/i.test(concept ?? '')
+}
+
 export function buildRootCodeMap(categories: CategoryRow[]): (code: string) => string {
   const catChildMap = new Map<string, string>()
   for (const cat of categories) {

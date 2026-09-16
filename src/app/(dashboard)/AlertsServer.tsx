@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { computeAlerts } from '@/lib/alerts'
 import { AlertsBanner } from '@/components/AlertsBanner'
 import { isLoanPayment } from './resumen/categoryUtils'
-import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow } from '@/lib/lifestyleExpenses'
+import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 
 export async function AlertsServer({ userId }: { userId: string }) {
   const admin = createAdminClient()
@@ -62,7 +62,8 @@ export async function AlertsServer({ userId }: { userId: string }) {
       passiveTotal += Number(tx.amount)
     } else if (
       (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-      isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+      isLoanPayment(tx.vendor, tx.concept, tx.category_code) &&
+      !isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
     ) {
       loanTotal += Number(tx.amount)
     }
