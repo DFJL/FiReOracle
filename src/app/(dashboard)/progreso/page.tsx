@@ -286,19 +286,17 @@ export default async function ProgresoPage() {
     ? ((passiveIncome12m - passiveIncomePrev12m) / passiveIncomePrev12m) * 100
     : null
 
-  // Crypto/DeFi rendimientos all share one generic concept ("Rendimientos
-  // Farming Crypto Monedas") regardless of whether it's an LP fee, an
-  // airdrop, or a staking reward — but the reward TYPE is often written in
-  // `notes` by hand ("LP fees btc-hype", "Airdrop Aligned"). Use that when
-  // present; older bulk-imported rows only carry a placeholder note, so
-  // fall back to vendor/protocol as the next-best disaggregation.
-  const cryptoBucketId = (bucketRows ?? []).find(b => /crypto|defi/i.test(b.name ?? ''))?.id ?? null
-  const isCryptoTx = (tx: { investment_bucket_id?: string | null; category_code: string | null }) =>
-    (cryptoBucketId && tx.investment_bucket_id === cryptoBucketId)
-    || tx.category_code === 'INVESTMENT_RETURN_CRYPTO'
-    || tx.category_code === 'INVESTMENT_RETURN_MINING'
-
-  function cryptoRewardType(notes: string | null): string | null {
+  // Sub-source disaggregation — deliberately generic, not crypto-specific,
+  // so a brand-new investment bucket or a source we've never audited gets
+  // the same treatment for free: no per-category allowlist to keep updated.
+  // 1) If `notes` names the reward mechanism (users write this by hand —
+  //    "LP fees btc-hype", "Airdrop Aligned" — regardless of category),
+  //    use that.
+  // 2) Otherwise fall back to vendor/protocol — this is what separates
+  //    TRANSCOMER from Dominion/Meatex/SH Mining/Multimoney (all share the
+  //    category_code INVESTMENT_RETURN) and one rental property from
+  //    another (RENTAL_INCOME has 4 distinct vendors in this account).
+  function passiveSubtype(notes: string | null): string | null {
     const n = (notes ?? '').toLowerCase()
     if (/airdrop/.test(n))        return 'Airdrops'
     if (/lp\s*fees?/.test(n))     return 'LP fees'
@@ -320,9 +318,9 @@ export default async function ProgresoPage() {
       || tx.concept
       || tx.vendor
       || 'Otros'
-    const name = isCryptoTx(tx)
-      ? `${baseName} · ${cryptoRewardType(tx.notes) || tx.vendor || 'Otro protocolo'}`
-      : baseName
+    const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim()) ? tx.vendor.trim() : null
+    const subtype = passiveSubtype(tx.notes) || vendorLabel
+    const name = subtype && subtype !== baseName ? `${baseName} · ${subtype}` : baseName
     passiveSourceMap[name] = (passiveSourceMap[name] ?? 0) + Number(tx.amount ?? 0)
   }
   const passiveSources = Object.entries(passiveSourceMap)
