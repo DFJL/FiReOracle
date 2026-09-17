@@ -1,6 +1,7 @@
 import Anthropic, { toFile } from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
 import type { ImageBlockParam, DocumentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages'
+import { lookupConcept } from '@/lib/concept-catalog'
 
 const anthropic = new Anthropic()
 
@@ -74,6 +75,7 @@ REGLAS:
 - El campo "vendor" es el nombre del comercio o pagador
 - El campo "concept" es una descripción corta del motivo (ej: "Almuerzo", "Salario")
 - Elegí la category_code de la lista; si ninguna aplica, omitilo
+- Preferí siempre la categoría más ESPECÍFICA disponible sobre una genérica tipo "Ingreso Pasivo" u "Otros ingresos" — ej: un rendimiento de un fondo de inversión o protocolo crypto conocido va en su categoría de rendimientos específica, no en la genérica, aunque ambas parezcan aplicar
 - Hacé máximo UNA pregunta si algo crítico es ambiguo; nunca hagas múltiples preguntas
 
 FORMATO — respondé SOLO con JSON sin texto adicional:
@@ -141,6 +143,25 @@ Cuando necesitás UNA aclaración:
     const match = rawText.match(/\{[\s\S]*\}/)
     if (match) {
       const parsed = JSON.parse(match[0])
+
+      // The model picks category_code by reasoning over category names/flags
+      // alone, with no concept↔category ground truth — it can (and did, per
+      // a recent data audit) default to a generic catch-all like "Ingreso
+      // Pasivo" for a concept that has an exact, more specific match in the
+      // catalog the manual entry form already uses (e.g. "Rendimientos Fondo
+      // Inversión TRANSCOMER" → INVESTMENT_RETURN). When the catalog has an
+      // exact/fuzzy match for this concept, it wins over the model's guess —
+      // same source of truth, so AI entry and manual entry never disagree.
+      if (parsed?.status === 'complete' && parsed.fields && typeof parsed.fields.concept === 'string') {
+        const txType = parsed.fields.type === 'ingreso' ? 'income' : 'expense'
+        const hit = lookupConcept(parsed.fields.concept)
+        if (hit && hit.type === txType) {
+          parsed.fields.category_code = hit.categoryCode
+          const cat = (body.categories ?? []).find(c => c.code === hit.categoryCode)
+          if (cat) parsed.fields.is_passive_income = cat.is_passive_income
+        }
+      }
+
       return Response.json(parsed)
     }
   } catch {

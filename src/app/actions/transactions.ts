@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import { GENERIC_PASSIVE_CATEGORIES } from '@/lib/passiveIncomeCategory'
 
 export type DuplicateHit = {
   id: string
@@ -211,6 +212,39 @@ async function applySideEffects(
   return null
 }
 
+// Prevents the drift that motivated this: an AI-parsed or ambiguous entry
+// landing on a generic catch-all category_code (PASSIVE_INCOME,
+// MISC_INCOME) even though this same vendor already has an established,
+// more specific category (e.g. TRANSCOMER → INVESTMENT_RETURN). Runs on
+// every 'ingreso' insert — the one place ALL entry paths (manual form, AI
+// quick-entry) funnel through — so no future entry path needs its own copy
+// of this check to stay safe.
+async function resolveIngresoCategoryCode(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  vendor: string | null,
+  categoryCode: string | null,
+): Promise<string | null> {
+  if (!categoryCode || !GENERIC_PASSIVE_CATEGORIES.has(categoryCode)) return categoryCode
+  if (!vendor || /^na$/i.test(vendor.trim())) return categoryCode
+
+  const { data } = await admin
+    .from('transactions')
+    .select('category_code, amount')
+    .eq('user_id', userId)
+    .eq('is_passive_income', true)
+    .ilike('vendor', vendor.trim())
+    .not('category_code', 'in', `(${[...GENERIC_PASSIVE_CATEGORIES].join(',')})`)
+
+  const votes: Record<string, number> = {}
+  for (const row of data ?? []) {
+    if (!row.category_code) continue
+    votes[row.category_code] = (votes[row.category_code] ?? 0) + Number(row.amount ?? 0)
+  }
+  const dominant = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]
+  return dominant ? dominant[0] : categoryCode
+}
+
 export async function createTransaction(input: CreateTransactionInput) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -256,6 +290,9 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   else if (input.type === 'ingreso') {
     const isUSD = input.currency_code === 'USD'
+    const resolvedCategoryCode = input.is_passive_income
+      ? await resolveIngresoCategoryCode(admin, user.id, input.vendor, input.category_code ?? null)
+      : input.category_code ?? null
     const { error } = await admin.from('transactions').insert({
       user_id: user.id,
       date: input.date,
@@ -266,7 +303,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       vendor: input.vendor.trim() || null,
       concept: input.concept.trim() || null,
       expense_group: 'na',
-      category_code: input.category_code ?? null,
+      category_code: resolvedCategoryCode,
       investment_bucket_id: input.investment_bucket_id ?? null,
       movement_type: input.is_valorizacion ? null : 'income',
       is_passive_income: input.is_passive_income,

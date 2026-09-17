@@ -5,6 +5,7 @@ import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
 import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
+import { GENERIC_PASSIVE_CATEGORIES, normalizeVendorKey } from '@/lib/passiveIncomeCategory'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -315,9 +316,6 @@ export default async function ProgresoPage() {
   // dominant *specific* category from its own history and use that instead
   // of the generic one — self-healing for any future vendor, not just the
   // ones audited today.
-  const GENERIC_PASSIVE_CATEGORIES = new Set(['PASSIVE_INCOME', 'MISC_INCOME'])
-  const normalizeVendorKey = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ')
-
   const vendorCategoryVotes: Record<string, Record<string, number>> = {}
   for (const tx of passiveTxsAll) {
     if (!tx.vendor || !tx.category_code || GENERIC_PASSIVE_CATEGORIES.has(tx.category_code)) continue
