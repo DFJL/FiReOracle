@@ -14,6 +14,11 @@ export type DupeTxSnapshot = {
   movement_type: string | null
   created_at: string
   notes: string | null
+  // The Google-Sheets sync writes the sheet's "Detalle" column here — a
+  // different field than `notes`, which the sync instead uses for its own
+  // "CATEGORY_UNMAPPED:" bookkeeping. A sheet-synced row's real
+  // hand-written description lives here, not in `notes`.
+  detail: string | null
   is_settlement: boolean | null
 }
 
@@ -33,6 +38,7 @@ export type AuditIssue = {
     is_passive_income: boolean | null
     is_settlement: boolean | null
     notes: string | null
+    detail: string | null
     category_code: string | null
   }
 }
@@ -78,7 +84,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, created_at, notes, is_settlement')
+      .select('id, date, amount, vendor, concept, movement_type, created_at, notes, detail, is_settlement')
       .eq('user_id', user.id)
       .order('date')
       .order('amount')
@@ -101,6 +107,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
           movement_type: r.movement_type,
           created_at: r.created_at ?? '',
           notes: (r as unknown as { notes?: string | null }).notes ?? null,
+          detail: (r as unknown as { detail?: string | null }).detail ?? null,
           is_settlement: (r as unknown as { is_settlement?: boolean | null }).is_settlement ?? null,
         })
         dupes.push({
@@ -135,7 +142,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'na')
@@ -157,6 +164,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))
@@ -176,7 +184,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
     const passiveCodes = ['RENTAL_INCOME', 'INTEREST', 'DIVIDENDS', 'PASSIVE_OTHER']
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_passive_income', false)
@@ -198,6 +206,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))
@@ -216,7 +225,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('concept', null)
@@ -238,6 +247,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))
@@ -256,7 +266,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data: savingsTx } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'expense')
       .eq('expense_group', 'objetivos_financieros')
@@ -291,6 +301,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
             is_passive_income: tx.is_passive_income ?? null,
             is_settlement: tx.is_settlement ?? null,
             notes: tx.notes ?? null,
+            detail: tx.detail ?? null,
             category_code: tx.category_code ?? null,
           },
         })
@@ -311,7 +322,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data: bigIncome } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .gte('amount', 50000)
@@ -352,6 +363,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
             is_passive_income: tx.is_passive_income ?? null,
             is_settlement: tx.is_settlement ?? null,
             notes: tx.notes ?? null,
+            detail: tx.detail ?? null,
             category_code: tx.category_code ?? null,
           },
         })
@@ -372,7 +384,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .is('movement_type', null)
       .order('date', { ascending: false }))
@@ -394,6 +406,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
           is_passive_income: tx.is_passive_income ?? null,
           is_settlement: tx.is_settlement ?? null,
           notes: tx.notes ?? null,
+          detail: tx.detail ?? null,
           category_code: tx.category_code ?? null,
         },
       } satisfies AuditIssue
@@ -424,7 +437,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
 
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .is('category_code', null)
@@ -445,6 +458,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))
@@ -463,7 +477,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_settlement', true)
@@ -485,6 +499,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))
@@ -503,7 +518,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
   {
     const { data } = await withExclude(admin
       .from('transactions')
-      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, category_code')
+      .select('id, date, amount, vendor, concept, movement_type, expense_group, is_passive_income, is_settlement, notes, detail, category_code')
       .eq('user_id', user.id)
       .lte('amount', 0)
       .in('movement_type', ['income', 'expense'])
@@ -524,6 +539,7 @@ export async function runAudit(excludeIds: string[] = []): Promise<{ error: stri
         is_passive_income: tx.is_passive_income ?? null,
         is_settlement: tx.is_settlement ?? null,
         notes: tx.notes ?? null,
+        detail: tx.detail ?? null,
         category_code: tx.category_code ?? null,
       },
     }))

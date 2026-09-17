@@ -31,6 +31,12 @@ export interface TxClient {
   is_passive_income?: boolean
   is_survival_expense?: boolean
   notes?: string | null
+  // The Google-Sheets sync writes the sheet's "Detalle" column here — a
+  // DIFFERENT field than `notes`, which the sync instead uses for its own
+  // "CATEGORY_UNMAPPED:" bookkeeping when it can't resolve a category. So a
+  // sheet-synced row's real hand-written description lives in `detail`,
+  // not `notes` — both need to be shown, not just one.
+  detail?: string | null
   investment_bucket_id?: string | null
   created_at?: string | null
 }
@@ -1053,7 +1059,10 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
                   <td className="px-4 py-2.5 text-zinc-200 max-w-[160px] truncate">{tx.vendor ?? '—'}</td>
                   <td className="px-4 py-2 max-w-[150px]">
                     <p className="text-zinc-400 truncate">{tx.concept ?? '—'}</p>
-                    {tx.notes && <p className="text-[10px] text-zinc-600 truncate italic mt-0.5">{tx.notes}</p>}
+                    {tx.detail && <p className="text-[10px] text-zinc-600 truncate italic mt-0.5">{tx.detail}</p>}
+                    {tx.notes && !/^category_unmapped:/i.test(tx.notes) && (
+                      <p className="text-[10px] text-zinc-600 truncate italic mt-0.5">{tx.notes}</p>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500 whitespace-nowrap">
                     <div className="flex items-center gap-1.5 flex-wrap">

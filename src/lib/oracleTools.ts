@@ -62,7 +62,7 @@ async function queryTransactions(admin: AdminClient, userId: string, input: Quer
   const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
   let q = admin
     .from('transactions')
-    .select('date, amount, concept, vendor, category_code, movement_type, expense_group')
+    .select('date, amount, concept, vendor, category_code, movement_type, expense_group, notes, detail')
     .eq('user_id', userId)
     .not('amount', 'is', null)
     .order('date', { ascending: false })

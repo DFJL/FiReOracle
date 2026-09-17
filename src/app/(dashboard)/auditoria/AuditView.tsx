@@ -407,6 +407,7 @@ function DuplicateComparePanel({
   const cmpRows: { label: string; ov: string; dv: string }[] = [
     { label: 'Ingresado', ov: fmtCreated(orig.created_at), dv: fmtCreated(dupe.created_at) },
     { label: 'Notas',     ov: orig.notes ?? '—',           dv: dupe.notes ?? '—'           },
+    { label: 'Detalle',   ov: orig.detail ?? '—',          dv: dupe.detail ?? '—'          },
     { label: 'Liquid.',   ov: orig.is_settlement ? 'Sí' : 'No', dv: dupe.is_settlement ? 'Sí' : 'No' },
   ]
 
@@ -647,7 +648,7 @@ function TxDetailPanel({
     if (!fix?.selectAction || selOptions !== null) return
     fix.selectAction.loadOptions().then(opts => {
       setSelOptions(opts)
-      const text = `${tx?.vendor ?? ''} ${tx?.concept ?? ''} ${tx?.notes ?? ''}`.toLowerCase()
+      const text = `${tx?.vendor ?? ''} ${tx?.concept ?? ''} ${tx?.notes ?? ''} ${tx?.detail ?? ''}`.toLowerCase()
       // Keyword-based suggestion first
       const keyword = (
         // More-specific crypto/farming before generic investment
@@ -702,6 +703,7 @@ function TxDetailPanel({
     tx.is_passive_income && { label: 'Pasivo',      value: 'Sí' },
     tx.is_settlement     && { label: 'Liquidación', value: 'Sí' },
     tx.notes             && { label: 'Notas',       value: tx.notes },
+    tx.detail            && { label: 'Detalle',     value: tx.detail },
     tx.vendor            && { label: 'Comercio',    value: tx.vendor },
     tx.concept           && { label: 'Concepto',    value: tx.concept },
   ].filter(Boolean) as { label: string; value: string }[]
