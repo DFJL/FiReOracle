@@ -47,7 +47,7 @@ export default async function ProgresoPage() {
       .select('id, name, bucket_type, vendors, concept_map, account_id')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes')
+      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes, detail')
       .eq('user_id', user.id)
       .not('amount', 'is', null)
       .range(0, 49999),
@@ -290,15 +290,22 @@ export default async function ProgresoPage() {
   // Sub-source disaggregation — deliberately generic, not crypto-specific,
   // so a brand-new investment bucket or a source we've never audited gets
   // the same treatment for free: no per-category allowlist to keep updated.
-  // 1) If `notes` names the reward mechanism (users write this by hand —
-  //    "LP fees btc-hype", "Airdrop Aligned" — regardless of category),
-  //    use that.
+  // 1) If `notes` OR `detail` names the reward mechanism (the user always
+  //    writes this by hand — "LP fees btc-hype", "Airdrop Aligned" —
+  //    regardless of category), use that. These are two DIFFERENT columns
+  //    fed by two different paths: the app's manual-entry form writes to
+  //    `notes`, while the Google-Sheets sync writes the sheet's "Detalle"
+  //    column to `detail` and reserves `notes` for its own
+  //    "CATEGORY_UNMAPPED:" bookkeeping — so a sheet-synced row's real
+  //    hand-written description lives in `detail`, not `notes`. Missing
+  //    this was why sheet-synced crypto rows kept falling back to vendor
+  //    even though the user always filled in the reward type.
   // 2) Otherwise fall back to vendor/protocol — this is what separates
   //    TRANSCOMER from Dominion/Meatex/SH Mining/Multimoney (all share the
   //    category_code INVESTMENT_RETURN) and one rental property from
   //    another (RENTAL_INCOME has 4 distinct vendors in this account).
-  function passiveSubtype(notes: string | null): string | null {
-    const n = (notes ?? '').toLowerCase()
+  function passiveSubtype(notes: string | null, detail: string | null): string | null {
+    const n = `${notes ?? ''} ${detail ?? ''}`.toLowerCase()
     if (/airdrop/.test(n))        return 'Airdrops'
     if (/lp\s*fees?/.test(n))     return 'LP fees'
     if (/staking/.test(n))        return 'Staking'
@@ -371,7 +378,7 @@ export default async function ProgresoPage() {
     const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim())
       ? vendorCanonicalLabel[normalizeVendorKey(tx.vendor)]
       : null
-    const subName = passiveSubtype(tx.notes) || vendorLabel || baseName
+    const subName = passiveSubtype(tx.notes, tx.detail) || vendorLabel || baseName
     const amt = Number(tx.amount ?? 0)
     passiveSourceMap[baseName] = (passiveSourceMap[baseName] ?? 0) + amt
     passiveSubMap[baseName] ??= {}
