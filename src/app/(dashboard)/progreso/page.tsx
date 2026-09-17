@@ -306,11 +306,13 @@ export default async function ProgresoPage() {
     return null
   }
 
-  // Sources — grouped the same way category names are resolved elsewhere on
-  // this page (catNameMap from transaction_categories), falling back to the
-  // raw concept/vendor for passive income that was never tagged a category
-  // (e.g. an early crypto yield entry).
+  // Sources — top level is grouped by TYPE of passive income (catNameMap
+  // from transaction_categories), matching how the user thinks about this
+  // ("¿de qué TIPO viene mi ingreso pasivo?"), not by vendor. Vendor/notes
+  // subtype becomes drill-down detail on demand instead of flattening
+  // everything into one combined row.
   const passiveSourceMap: Record<string, number> = {}
+  const passiveSubMap: Record<string, Record<string, number>> = {}
   for (const tx of passiveTxsAll) {
     if (!tx.date || !curYMs.includes(tx.date.slice(0, 7))) continue
     const baseName = (tx.category_code && catNameMap.get(tx.category_code))
@@ -319,17 +321,33 @@ export default async function ProgresoPage() {
       || tx.vendor
       || 'Otros'
     const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim()) ? tx.vendor.trim() : null
-    const subtype = passiveSubtype(tx.notes) || vendorLabel
-    const name = subtype && subtype !== baseName ? `${baseName} · ${subtype}` : baseName
-    passiveSourceMap[name] = (passiveSourceMap[name] ?? 0) + Number(tx.amount ?? 0)
+    const subName = passiveSubtype(tx.notes) || vendorLabel || baseName
+    const amt = Number(tx.amount ?? 0)
+    passiveSourceMap[baseName] = (passiveSourceMap[baseName] ?? 0) + amt
+    passiveSubMap[baseName] ??= {}
+    passiveSubMap[baseName][subName] = (passiveSubMap[baseName][subName] ?? 0) + amt
   }
+  // Values are shown as a monthly average (12m total ÷ 12) — a "typical
+  // month" reads much more naturally than a 12-month lump sum.
   const passiveSources = Object.entries(passiveSourceMap)
     .sort((a, b) => b[1] - a[1])
-    .map(([name, amount12m]) => ({
-      name,
-      amount12m,
-      pct: passiveIncome12m > 0 ? (amount12m / passiveIncome12m) * 100 : 0,
-    }))
+    .map(([name, amount12m]) => {
+      const subEntries = Object.entries(passiveSubMap[name] ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([subName, subAmount12m]) => ({
+          name: subName,
+          amountMonthly: subAmount12m / 12,
+          pct: amount12m > 0 ? (subAmount12m / amount12m) * 100 : 0,
+        }))
+      // Nothing to drill into when the only "sub-source" is the category itself.
+      const subSources = subEntries.length === 1 && subEntries[0].name === name ? [] : subEntries
+      return {
+        name,
+        amountMonthly: amount12m / 12,
+        pct: passiveIncome12m > 0 ? (amount12m / passiveIncome12m) * 100 : 0,
+        subSources,
+      }
+    })
   // Concentration risk: how much of the total rides on the single biggest
   // source — a useful diversification signal independent of the amount.
   const passiveTopSourcePct = passiveSources[0]?.pct ?? 0

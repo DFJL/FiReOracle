@@ -25,8 +25,11 @@ type SavingsRateMonth = {
   income: number
 }
 
+type PassiveIncomeSubSource = { name: string; amountMonthly: number; pct: number }
+type PassiveIncomeSource = { name: string; amountMonthly: number; pct: number; subSources: PassiveIncomeSubSource[] }
+
 type PassiveIncomeData = {
-  sources: { name: string; amount12m: number; pct: number }[]
+  sources: PassiveIncomeSource[]
   trend: { label: string; amount: number }[]
   topSourcePct: number
   yoyPct: number | null
@@ -819,6 +822,7 @@ function PassiveIncomeSection({
   fmt: (v: number) => string
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
+  const [expandedSource, setExpandedSource] = useState<string | null>(null)
   const maxAmount = Math.max(...data.trend.map(d => d.amount), 1)
   const hov = hovIdx !== null ? data.trend[hovIdx] : null
 
@@ -839,7 +843,7 @@ function PassiveIncomeSection({
           <p className="text-sm font-black mt-1" style={{ color: yoyColor }}>
             {data.yoyPct === null ? 'n/d' : `${data.yoyPct >= 0 ? '+' : ''}${data.yoyPct.toFixed(0)}%`}
           </p>
-          <p className="text-[8px] text-zinc-600 mt-0.5">vs. {fmt(data.prev12m)} año anterior</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">vs. {fmt(data.prev12m / 12)}/mes año anterior</p>
         </div>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Concentración</p>
@@ -861,9 +865,9 @@ function PassiveIncomeSection({
       {(data.cobrado12m + data.reinvertido12m) > 0 && (
         <div>
           <div className="flex items-center justify-between mb-1">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Cobrado vs. reinvertido (12m)</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Cobrado vs. reinvertido (promedio mensual)</p>
             <p className="text-[9px] text-zinc-600">
-              {fmt(data.cobrado12m)} cobrado · {fmt(data.reinvertido12m)} reinvertido
+              {fmt(data.cobrado12m / 12)} cobrado · {fmt(data.reinvertido12m / 12)} reinvertido
             </p>
           </div>
           <div className="flex h-3 rounded-full overflow-hidden bg-white/[0.04]">
@@ -928,21 +932,46 @@ function PassiveIncomeSection({
         </div>
       </div>
 
-      {/* Sources */}
+      {/* Sources — by TYPE of passive income; click a row with a ▸ to drill
+          into which vendor/protocol/reward-type makes it up. */}
       <div className="space-y-1.5">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Fuentes (últimos 12m)</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Fuentes (promedio mensual)</p>
         {data.sources.length === 0 ? (
           <p className="text-[10px] text-zinc-600">Sin ingresos pasivos registrados en los últimos 12 meses.</p>
-        ) : data.sources.slice(0, 8).map(s => (
-          <div key={s.name} className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-400 w-28 shrink-0 truncate">{s.name}</span>
-            <div className="flex-1 h-4 bg-white/[0.04] rounded overflow-hidden">
-              <div className="h-full bg-[#84cc16]/60 rounded" style={{ width: `${Math.max(s.pct, 1.5)}%` }} />
+        ) : data.sources.slice(0, 8).map(s => {
+          const canExpand = s.subSources.length > 0
+          const isOpen = expandedSource === s.name
+          return (
+            <div key={s.name}>
+              <div
+                className={`flex items-center gap-2 ${canExpand ? 'cursor-pointer' : ''}`}
+                onClick={() => canExpand && setExpandedSource(isOpen ? null : s.name)}
+              >
+                <span className="text-[9px] text-zinc-600 w-3 shrink-0">{canExpand ? (isOpen ? '▾' : '▸') : ''}</span>
+                <span className="text-[10px] text-zinc-400 w-24 shrink-0 truncate">{s.name}</span>
+                <div className="flex-1 h-4 bg-white/[0.04] rounded overflow-hidden">
+                  <div className="h-full bg-[#84cc16]/60 rounded" style={{ width: `${Math.max(s.pct, 1.5)}%` }} />
+                </div>
+                <span className="text-[9px] text-zinc-500 w-16 text-right shrink-0 tabular-nums">{fmt(s.amountMonthly)}</span>
+                <span className="text-[9px] text-zinc-600 w-9 text-right shrink-0 tabular-nums">{s.pct.toFixed(0)}%</span>
+              </div>
+              {isOpen && (
+                <div className="ml-5 mt-1 space-y-1 border-l border-white/[0.06] pl-3">
+                  {s.subSources.map(sub => (
+                    <div key={sub.name} className="flex items-center gap-2">
+                      <span className="text-[9px] text-zinc-500 w-24 shrink-0 truncate">{sub.name}</span>
+                      <div className="flex-1 h-3 bg-white/[0.03] rounded overflow-hidden">
+                        <div className="h-full bg-[#84cc16]/30 rounded" style={{ width: `${Math.max(sub.pct, 1.5)}%` }} />
+                      </div>
+                      <span className="text-[9px] text-zinc-600 w-16 text-right shrink-0 tabular-nums">{fmt(sub.amountMonthly)}</span>
+                      <span className="text-[8px] text-zinc-700 w-9 text-right shrink-0 tabular-nums">{sub.pct.toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <span className="text-[9px] text-zinc-500 w-16 text-right shrink-0 tabular-nums">{fmt(s.amount12m)}</span>
-            <span className="text-[9px] text-zinc-600 w-9 text-right shrink-0 tabular-nums">{s.pct.toFixed(0)}%</span>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Diversification note */}
