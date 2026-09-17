@@ -31,6 +31,8 @@ type PassiveIncomeData = {
   topSourcePct: number
   yoyPct: number | null
   prev12m: number
+  cobrado12m: number
+  reinvertido12m: number
 }
 
 type Props = {
@@ -854,6 +856,33 @@ function PassiveIncomeSection({
           <p className="text-[8px] text-zinc-600 mt-0.5">pasivo vs. activo+pasivo</p>
         </div>
       </div>
+
+      {/* Cobrado (cash) vs. Reinvertido (compounding) */}
+      {(data.cobrado12m + data.reinvertido12m) > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Cobrado vs. reinvertido (12m)</p>
+            <p className="text-[9px] text-zinc-600">
+              {fmt(data.cobrado12m)} cobrado · {fmt(data.reinvertido12m)} reinvertido
+            </p>
+          </div>
+          <div className="flex h-3 rounded-full overflow-hidden bg-white/[0.04]">
+            <div
+              className="h-full bg-[#22d3ee]"
+              style={{ width: `${Math.max((data.cobrado12m / (data.cobrado12m + data.reinvertido12m)) * 100, data.cobrado12m > 0 ? 2 : 0)}%` }}
+              title="Cobrado en efectivo"
+            />
+            <div
+              className="h-full bg-[#a78bfa]"
+              style={{ width: `${Math.max((data.reinvertido12m / (data.cobrado12m + data.reinvertido12m)) * 100, data.reinvertido12m > 0 ? 2 : 0)}%` }}
+              title="Reinvertido / compounding"
+            />
+          </div>
+          <p className="text-[8px] text-zinc-600 mt-1">
+            Reinvertido = quedó componiendo en el fondo/wallet en vez de llegar a tu cuenta — sigue siendo ingreso pasivo real, solo que no es liquidez disponible hoy.
+          </p>
+        </div>
+      )}
 
       {/* Trend (24m) */}
       <div>

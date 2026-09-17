@@ -251,16 +251,30 @@ export default async function ProgresoPage() {
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
     + avgMonthlyEnvelopeSavings
 
+  // A "rendimiento" counts as passive income whether it landed as cash
+  // ("Cobrado", movement_type 'income') or stayed compounding in the fund/
+  // wallet ("Valorización — se reinvirtió", movement_type null) — both are
+  // real yield the user earned. Only category_code 'APPRECIATION' (pure
+  // unrealized mark-to-market, e.g. "Aumento de valor Criptomonedas") is a
+  // paper gain rather than earned income, so that one stays excluded.
+  // (Previously this required movement_type === 'income', which silently
+  // dropped nearly all reinvested TRANSCOMER/crypto-farming yield — the
+  // "¿por qué tan bajo?" the user flagged.)
+  const isRealizedPassiveIncome = (tx: { is_passive_income: boolean | null; is_settlement: boolean | null; category_code: string | null }) =>
+    !!tx.is_passive_income && !tx.is_settlement && tx.category_code !== 'APPRECIATION'
+
   const passiveIncome12m = recent
-    .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
+    .filter(isRealizedPassiveIncome)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  const passiveCashCobrado12m = recent
+    .filter(tx => isRealizedPassiveIncome(tx) && tx.movement_type === 'income')
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  const passiveReinvested12m = passiveIncome12m - passiveCashCobrado12m
 
   // ── Ingresos pasivos: fuentes, tendencia y diversificación ─────────────────
   // Full history (not just `recent`'s 12m window) so the trend chart and the
   // YoY comparison below have real prior-year data to compare against.
-  const passiveTxsAll = (txs ?? []).filter(tx =>
-    tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement
-  )
+  const passiveTxsAll = (txs ?? []).filter(isRealizedPassiveIncome)
 
   const passiveIncomePrev12m = passiveTxsAll
     .filter(tx => tx.date && prvYMs.includes(tx.date.slice(0, 7)))
@@ -269,6 +283,18 @@ export default async function ProgresoPage() {
     ? ((passiveIncome12m - passiveIncomePrev12m) / passiveIncomePrev12m) * 100
     : null
 
+  // Crypto/DeFi rendimientos all share one generic concept ("Rendimientos
+  // Farming Crypto Monedas") regardless of whether it's an LP fee, an
+  // airdrop, or a staking reward — the data doesn't distinguish the reward
+  // mechanism. Vendor (the protocol) is the finest real disaggregation
+  // available, so crypto sources are split by vendor instead of collapsed
+  // into one "Crypto/DeFi" row.
+  const cryptoBucketId = (bucketRows ?? []).find(b => /crypto|defi/i.test(b.name ?? ''))?.id ?? null
+  const isCryptoTx = (tx: { investment_bucket_id?: string | null; category_code: string | null }) =>
+    (cryptoBucketId && tx.investment_bucket_id === cryptoBucketId)
+    || tx.category_code === 'INVESTMENT_RETURN_CRYPTO'
+    || tx.category_code === 'INVESTMENT_RETURN_MINING'
+
   // Sources — grouped the same way category names are resolved elsewhere on
   // this page (catNameMap from transaction_categories), falling back to the
   // raw concept/vendor for passive income that was never tagged a category
@@ -276,11 +302,12 @@ export default async function ProgresoPage() {
   const passiveSourceMap: Record<string, number> = {}
   for (const tx of passiveTxsAll) {
     if (!tx.date || !curYMs.includes(tx.date.slice(0, 7))) continue
-    const name = (tx.category_code && catNameMap.get(tx.category_code))
+    const baseName = (tx.category_code && catNameMap.get(tx.category_code))
       || tx.category_code
       || tx.concept
       || tx.vendor
       || 'Otros'
+    const name = isCryptoTx(tx) ? `${baseName} · ${tx.vendor || 'Otro protocolo'}` : baseName
     passiveSourceMap[name] = (passiveSourceMap[name] ?? 0) + Number(tx.amount ?? 0)
   }
   const passiveSources = Object.entries(passiveSourceMap)
@@ -586,6 +613,8 @@ export default async function ProgresoPage() {
           topSourcePct: passiveTopSourcePct,
           yoyPct: passiveYoyPct,
           prev12m: passiveIncomePrev12m,
+          cobrado12m: passiveCashCobrado12m,
+          reinvertido12m: passiveReinvested12m,
         }}
         realizedReturnRate={realizedReturnRate}
         forecastYears={forecastYears}
