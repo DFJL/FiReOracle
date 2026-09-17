@@ -46,7 +46,7 @@ export default async function ProgresoPage() {
       .select('id, name, bucket_type, vendors, concept_map, account_id')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id')
+      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes')
       .eq('user_id', user.id)
       .not('amount', 'is', null)
       .range(0, 49999),
@@ -260,8 +260,11 @@ export default async function ProgresoPage() {
   // (Previously this required movement_type === 'income', which silently
   // dropped nearly all reinvested TRANSCOMER/crypto-farming yield — the
   // "¿por qué tan bajo?" the user flagged.)
-  const isRealizedPassiveIncome = (tx: { is_passive_income: boolean | null; is_settlement: boolean | null; category_code: string | null }) =>
-    !!tx.is_passive_income && !tx.is_settlement && tx.category_code !== 'APPRECIATION'
+  // A few valuation entries were imported under the generic PASSIVE_INCOME
+  // code instead of APPRECIATION (e.g. "Aumento de valor Criptomonedas") —
+  // isValuation catches those by concept text so they don't sneak back in.
+  const isRealizedPassiveIncome = (tx: { is_passive_income: boolean | null; is_settlement: boolean | null; category_code: string | null; concept: string | null }) =>
+    !!tx.is_passive_income && !tx.is_settlement && tx.category_code !== 'APPRECIATION' && !isValuation(tx.concept)
 
   const passiveIncome12m = recent
     .filter(isRealizedPassiveIncome)
@@ -285,15 +288,25 @@ export default async function ProgresoPage() {
 
   // Crypto/DeFi rendimientos all share one generic concept ("Rendimientos
   // Farming Crypto Monedas") regardless of whether it's an LP fee, an
-  // airdrop, or a staking reward — the data doesn't distinguish the reward
-  // mechanism. Vendor (the protocol) is the finest real disaggregation
-  // available, so crypto sources are split by vendor instead of collapsed
-  // into one "Crypto/DeFi" row.
+  // airdrop, or a staking reward — but the reward TYPE is often written in
+  // `notes` by hand ("LP fees btc-hype", "Airdrop Aligned"). Use that when
+  // present; older bulk-imported rows only carry a placeholder note, so
+  // fall back to vendor/protocol as the next-best disaggregation.
   const cryptoBucketId = (bucketRows ?? []).find(b => /crypto|defi/i.test(b.name ?? ''))?.id ?? null
   const isCryptoTx = (tx: { investment_bucket_id?: string | null; category_code: string | null }) =>
     (cryptoBucketId && tx.investment_bucket_id === cryptoBucketId)
     || tx.category_code === 'INVESTMENT_RETURN_CRYPTO'
     || tx.category_code === 'INVESTMENT_RETURN_MINING'
+
+  function cryptoRewardType(notes: string | null): string | null {
+    const n = (notes ?? '').toLowerCase()
+    if (/airdrop/.test(n))        return 'Airdrops'
+    if (/lp\s*fees?/.test(n))     return 'LP fees'
+    if (/staking/.test(n))        return 'Staking'
+    if (/mineria|miner[ií]a|mining/.test(n)) return 'Minería'
+    if (/nodo/.test(n))           return 'Nodos'
+    return null
+  }
 
   // Sources — grouped the same way category names are resolved elsewhere on
   // this page (catNameMap from transaction_categories), falling back to the
@@ -307,7 +320,9 @@ export default async function ProgresoPage() {
       || tx.concept
       || tx.vendor
       || 'Otros'
-    const name = isCryptoTx(tx) ? `${baseName} · ${tx.vendor || 'Otro protocolo'}` : baseName
+    const name = isCryptoTx(tx)
+      ? `${baseName} · ${cryptoRewardType(tx.notes) || tx.vendor || 'Otro protocolo'}`
+      : baseName
     passiveSourceMap[name] = (passiveSourceMap[name] ?? 0) + Number(tx.amount ?? 0)
   }
   const passiveSources = Object.entries(passiveSourceMap)
