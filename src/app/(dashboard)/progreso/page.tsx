@@ -255,6 +255,54 @@ export default async function ProgresoPage() {
     .filter(tx => tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
+  // ── Ingresos pasivos: fuentes, tendencia y diversificación ─────────────────
+  // Full history (not just `recent`'s 12m window) so the trend chart and the
+  // YoY comparison below have real prior-year data to compare against.
+  const passiveTxsAll = (txs ?? []).filter(tx =>
+    tx.is_passive_income && tx.movement_type === 'income' && !tx.is_settlement
+  )
+
+  const passiveIncomePrev12m = passiveTxsAll
+    .filter(tx => tx.date && prvYMs.includes(tx.date.slice(0, 7)))
+    .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+  const passiveYoyPct = passiveIncomePrev12m > 0
+    ? ((passiveIncome12m - passiveIncomePrev12m) / passiveIncomePrev12m) * 100
+    : null
+
+  // Sources — grouped the same way category names are resolved elsewhere on
+  // this page (catNameMap from transaction_categories), falling back to the
+  // raw concept/vendor for passive income that was never tagged a category
+  // (e.g. an early crypto yield entry).
+  const passiveSourceMap: Record<string, number> = {}
+  for (const tx of passiveTxsAll) {
+    if (!tx.date || !curYMs.includes(tx.date.slice(0, 7))) continue
+    const name = (tx.category_code && catNameMap.get(tx.category_code))
+      || tx.category_code
+      || tx.concept
+      || tx.vendor
+      || 'Otros'
+    passiveSourceMap[name] = (passiveSourceMap[name] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const passiveSources = Object.entries(passiveSourceMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, amount12m]) => ({
+      name,
+      amount12m,
+      pct: passiveIncome12m > 0 ? (amount12m / passiveIncome12m) * 100 : 0,
+    }))
+  // Concentration risk: how much of the total rides on the single biggest
+  // source — a useful diversification signal independent of the amount.
+  const passiveTopSourcePct = passiveSources[0]?.pct ?? 0
+
+  // 24-month trend, same month range as the Lifestyle Inflation section above.
+  const passiveTrend = allYMs.map(ym => {
+    const [y, m] = ym.split('-')
+    const amount = passiveTxsAll
+      .filter(tx => tx.date?.startsWith(ym))
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+    return { label: `${MONTH_LABELS_LIFESTYLE[Number(m) - 1]} ${y.slice(2)}`, amount }
+  })
+
   // Yield: passive income / avg invested (last 12 snapshots) — avoids point-in-time outliers
   const last12Snapshots = (snapshotRows ?? []).slice(-12)
   const avgInvestedCrc = last12Snapshots.length > 0
@@ -286,6 +334,12 @@ export default async function ProgresoPage() {
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
   const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments
   const avgMonthlyPassiveIncome = passiveIncome12m / 12
+  // Share of TOTAL income (active + passive) that's passive — a diversification
+  // gauge distinct from the FI/FS ratios below (which compare against expenses,
+  // not income): this one tracks how much you still depend on active work.
+  const passiveToIncomeRatio = (avgMonthlyIncome + avgMonthlyPassiveIncome) > 0
+    ? avgMonthlyPassiveIncome / (avgMonthlyIncome + avgMonthlyPassiveIncome)
+    : 0
   const avgNetBurn = Math.max(avgMonthlyObligations - avgMonthlyPassiveIncome, 0)
   const runway = avgNetBurn > 0
     ? liquidBalance / avgNetBurn
@@ -525,6 +579,14 @@ export default async function ProgresoPage() {
         avgMonthlyIncome={avgMonthlyIncome}
         avgMonthlyDeposits={avgMonthlyDeposits}
         passiveIncome12m={passiveIncome12m}
+        passiveToIncomeRatio={passiveToIncomeRatio}
+        passiveIncomeData={{
+          sources: passiveSources,
+          trend: passiveTrend,
+          topSourcePct: passiveTopSourcePct,
+          yoyPct: passiveYoyPct,
+          prev12m: passiveIncomePrev12m,
+        }}
         realizedReturnRate={realizedReturnRate}
         forecastYears={forecastYears}
         snapshots={(snapshotRows ?? []).map(s => ({

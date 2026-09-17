@@ -25,6 +25,14 @@ type SavingsRateMonth = {
   income: number
 }
 
+type PassiveIncomeData = {
+  sources: { name: string; amount12m: number; pct: number }[]
+  trend: { label: string; amount: number }[]
+  topSourcePct: number
+  yoyPct: number | null
+  prev12m: number
+}
+
 type Props = {
   activosInvertibles: number
   liquidBalance: number
@@ -40,6 +48,8 @@ type Props = {
   avgMonthlyIncome: number
   avgMonthlyDeposits: number
   passiveIncome12m: number
+  passiveToIncomeRatio: number
+  passiveIncomeData: PassiveIncomeData
   realizedReturnRate: number | null
   forecastYears: { year: number; balance: number }[]
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
@@ -65,7 +75,7 @@ export function ProgresoView({
   activosInvertibles, liquidBalance, totalInvested,
   fireNumber, leanFireNumber, fireProgress, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
-  passiveIncome12m, realizedReturnRate,
+  passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, lifestyle,
 }: Props) {
@@ -316,6 +326,13 @@ export function ProgresoView({
           tooltip="Financial Security: % de tus gastos básicos de sobrevivencia (vivienda, comida, salud) cubiertos por ingresos pasivos. Al 100% tenés seguridad financiera total."
         />
       </div>
+
+      {/* Passive income: sources, trend, diversification */}
+      <PassiveIncomeSection
+        data={passiveIncomeData}
+        passiveToIncomeRatio={passiveToIncomeRatio}
+        fmt={fmt}
+      />
 
       {/* Savings rate trend */}
       {savingsRateTrend.length > 0 && (
@@ -788,6 +805,128 @@ function FuMoneyChart({
           </text>
         ))}
       </svg>
+    </div>
+  )
+}
+
+function PassiveIncomeSection({
+  data, passiveToIncomeRatio, fmt,
+}: {
+  data: PassiveIncomeData
+  passiveToIncomeRatio: number
+  fmt: (v: number) => string
+}) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+  const maxAmount = Math.max(...data.trend.map(d => d.amount), 1)
+  const hov = hovIdx !== null ? data.trend[hovIdx] : null
+
+  const concentrationColor = data.topSourcePct >= 70 ? '#f43f5e' : data.topSourcePct >= 45 ? '#f59e0b' : '#a3e635'
+  const yoyColor = data.yoyPct === null ? '#71717a' : data.yoyPct >= 0 ? '#a3e635' : '#f43f5e'
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
+      <div>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ingresos pasivos — fuentes y tendencia</p>
+        <p className="text-[9px] text-zinc-600 mt-0.5">De dónde viene tu ingreso pasivo, cómo evoluciona, y qué tan diversificado está</p>
+      </div>
+
+      {/* Mini KPI row */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Tendencia YoY</p>
+          <p className="text-sm font-black mt-1" style={{ color: yoyColor }}>
+            {data.yoyPct === null ? 'n/d' : `${data.yoyPct >= 0 ? '+' : ''}${data.yoyPct.toFixed(0)}%`}
+          </p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">vs. {fmt(data.prev12m)} año anterior</p>
+        </div>
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Concentración</p>
+          <p className="text-sm font-black mt-1" style={{ color: concentrationColor }}>
+            {data.topSourcePct.toFixed(0)}%
+          </p>
+          <p className="text-[8px] text-zinc-600 mt-0.5 truncate">en {data.sources[0]?.name ?? 'n/d'}</p>
+        </div>
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">% del ingreso total</p>
+          <p className="text-sm font-black mt-1 text-[#84cc16]">
+            {(passiveToIncomeRatio * 100).toFixed(0)}%
+          </p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">pasivo vs. activo+pasivo</p>
+        </div>
+      </div>
+
+      {/* Trend (24m) */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (24m)</p>
+          {hov && (
+            <span className="text-[10px] text-zinc-300">
+              {hov.label}: <span className="font-bold text-[#84cc16]">{fmt(hov.amount)}</span>
+            </span>
+          )}
+        </div>
+        <div className="flex items-end gap-1 h-20">
+          {data.trend.map((m, i) => {
+            const pct   = Math.min(m.amount / (maxAmount * 1.05), 1)
+            const isHov = hovIdx === i
+            return (
+              <div
+                key={i}
+                className="flex-1 flex flex-col items-center relative cursor-default"
+                style={{ height: '100%' }}
+                onMouseEnter={() => setHovIdx(i)}
+                onMouseLeave={() => setHovIdx(null)}
+              >
+                <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
+                  <div
+                    className="w-full rounded-t-sm transition-opacity"
+                    style={{
+                      height: `${pct * 100}%`,
+                      backgroundColor: '#84cc16',
+                      opacity: isHov ? 0.9 : 0.5,
+                      minHeight: m.amount > 0 ? '2px' : undefined,
+                    }}
+                  />
+                </div>
+                {i % 3 === 0 && (
+                  <p className="text-[6px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
+                    {m.label.split(' ')[0]}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Sources */}
+      <div className="space-y-1.5">
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Fuentes (últimos 12m)</p>
+        {data.sources.length === 0 ? (
+          <p className="text-[10px] text-zinc-600">Sin ingresos pasivos registrados en los últimos 12 meses.</p>
+        ) : data.sources.slice(0, 8).map(s => (
+          <div key={s.name} className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-400 w-28 shrink-0 truncate">{s.name}</span>
+            <div className="flex-1 h-4 bg-white/[0.04] rounded overflow-hidden">
+              <div className="h-full bg-[#84cc16]/60 rounded" style={{ width: `${Math.max(s.pct, 1.5)}%` }} />
+            </div>
+            <span className="text-[9px] text-zinc-500 w-16 text-right shrink-0 tabular-nums">{fmt(s.amount12m)}</span>
+            <span className="text-[9px] text-zinc-600 w-9 text-right shrink-0 tabular-nums">{s.pct.toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Diversification note */}
+      {data.sources.length > 0 && (
+        <p className="text-[9px] text-zinc-600 leading-relaxed">
+          {data.topSourcePct >= 70
+            ? `⚠️ Casi todo tu ingreso pasivo depende de una sola fuente (${data.sources[0].name}, ${data.topSourcePct.toFixed(0)}%). Si esa fuente se corta, tu ingreso pasivo real cae a casi cero — vale la pena diversificar hacia otras inversiones o rentas.`
+            : data.topSourcePct >= 45
+            ? `Tu ingreso pasivo está moderadamente concentrado en ${data.sources[0].name} (${data.topSourcePct.toFixed(0)}%). Diversificar más reduciría el riesgo de depender de una sola fuente.`
+            : `Tu ingreso pasivo está razonablemente diversificado entre ${data.sources.length} fuente(s) — ninguna concentra más del ${Math.round(data.topSourcePct)}%.`
+          }
+        </p>
+      )}
     </div>
   )
 }
