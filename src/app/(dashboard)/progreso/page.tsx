@@ -306,21 +306,73 @@ export default async function ProgresoPage() {
     return null
   }
 
+  // Data drift correction #1: some entries (mostly AI-parsed quick-entry,
+  // by the look of the dates) land on a generic catch-all category_code
+  // (PASSIVE_INCOME, MISC_INCOME) instead of the specific one the same
+  // vendor otherwise uses — e.g. 6 TRANSCOMER rows tagged PASSIVE_INCOME
+  // while 57 others from the same vendor are INVESTMENT_RETURN. Rather than
+  // hardcode "TRANSCOMER → INVESTMENT_RETURN", derive each vendor's
+  // dominant *specific* category from its own history and use that instead
+  // of the generic one — self-healing for any future vendor, not just the
+  // ones audited today.
+  const GENERIC_PASSIVE_CATEGORIES = new Set(['PASSIVE_INCOME', 'MISC_INCOME'])
+  const normalizeVendorKey = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ')
+
+  const vendorCategoryVotes: Record<string, Record<string, number>> = {}
+  for (const tx of passiveTxsAll) {
+    if (!tx.vendor || !tx.category_code || GENERIC_PASSIVE_CATEGORIES.has(tx.category_code)) continue
+    const key = normalizeVendorKey(tx.vendor)
+    vendorCategoryVotes[key] ??= {}
+    vendorCategoryVotes[key][tx.category_code] = (vendorCategoryVotes[key][tx.category_code] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const vendorDominantCategory: Record<string, string> = {}
+  for (const [key, votes] of Object.entries(vendorCategoryVotes)) {
+    vendorDominantCategory[key] = Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0]
+  }
+  function resolveCategoryCode(tx: { category_code: string | null; vendor: string | null }): string | null {
+    if (tx.category_code && GENERIC_PASSIVE_CATEGORIES.has(tx.category_code) && tx.vendor) {
+      const resolved = vendorDominantCategory[normalizeVendorKey(tx.vendor)]
+      if (resolved) return resolved
+    }
+    return tx.category_code
+  }
+
+  // Data drift correction #2: the same protocol/vendor sometimes appears
+  // under multiple spellings ("Bluefin"/"BlueFin", "Pancake Swap"/
+  // "PancakeSwap", "etherfi"/"Etherfi"/"Ether Fi") — normalize the grouping
+  // key so they don't fragment the drill-down, and display whichever
+  // spelling carries the largest amount as the canonical label.
+  const vendorDisplayTotals: Record<string, Record<string, number>> = {}
+  for (const tx of passiveTxsAll) {
+    if (!tx.vendor) continue
+    const key = normalizeVendorKey(tx.vendor)
+    vendorDisplayTotals[key] ??= {}
+    const label = tx.vendor.trim()
+    vendorDisplayTotals[key][label] = (vendorDisplayTotals[key][label] ?? 0) + Number(tx.amount ?? 0)
+  }
+  const vendorCanonicalLabel: Record<string, string> = {}
+  for (const [key, labels] of Object.entries(vendorDisplayTotals)) {
+    vendorCanonicalLabel[key] = Object.entries(labels).sort((a, b) => b[1] - a[1])[0][0]
+  }
+
   // Sources — top level is grouped by TYPE of passive income (catNameMap
-  // from transaction_categories), matching how the user thinks about this
-  // ("¿de qué TIPO viene mi ingreso pasivo?"), not by vendor. Vendor/notes
-  // subtype becomes drill-down detail on demand instead of flattening
-  // everything into one combined row.
+  // from transaction_categories, after resolving drifted generic codes
+  // above), matching how the user thinks about this ("¿de qué TIPO viene mi
+  // ingreso pasivo?"), not by vendor. Vendor/notes subtype becomes
+  // drill-down detail on demand instead of flattening everything together.
   const passiveSourceMap: Record<string, number> = {}
   const passiveSubMap: Record<string, Record<string, number>> = {}
   for (const tx of passiveTxsAll) {
     if (!tx.date || !curYMs.includes(tx.date.slice(0, 7))) continue
-    const baseName = (tx.category_code && catNameMap.get(tx.category_code))
-      || tx.category_code
+    const resolvedCode = resolveCategoryCode(tx)
+    const baseName = (resolvedCode && catNameMap.get(resolvedCode))
+      || resolvedCode
       || tx.concept
       || tx.vendor
       || 'Otros'
-    const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim()) ? tx.vendor.trim() : null
+    const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim())
+      ? vendorCanonicalLabel[normalizeVendorKey(tx.vendor)]
+      : null
     const subName = passiveSubtype(tx.notes) || vendorLabel || baseName
     const amt = Number(tx.amount ?? 0)
     passiveSourceMap[baseName] = (passiveSourceMap[baseName] ?? 0) + amt
