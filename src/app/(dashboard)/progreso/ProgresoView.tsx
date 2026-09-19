@@ -26,9 +26,17 @@ type SavingsRateMonth = {
 }
 
 type AhorroInversionSource = { name: string; amountMonthly: number; pct: number }
+type AhorroInversionRawSource = { name: string; amount: number }
+
+type AhorroInversionMonth = {
+  label: string; ahorro: number; inversion: number; deuda: number
+  ahorroSources: AhorroInversionRawSource[]
+  inversionSources: AhorroInversionRawSource[]
+  deudaSources: AhorroInversionRawSource[]
+}
 
 type AhorroInversionData = {
-  trend: { label: string; ahorro: number; inversion: number; deuda: number }[]
+  trend: AhorroInversionMonth[]
   ahorroMonthly: number
   inversionMonthly: number
   deudaMonthly: number
@@ -1035,6 +1043,14 @@ function AhorroInversionSourceList({
   )
 }
 
+// Converts a month's raw {name, amount} sources into the same {name,
+// amountMonthly, pct} shape the 12m aggregate list uses, with pct computed
+// against that month's own total (not the 12m total) — so the drill-down
+// reads correctly whichever scope is showing.
+function rawSourcesToDisplay(raw: AhorroInversionRawSource[], total: number): AhorroInversionSource[] {
+  return raw.map(s => ({ name: s.name, amountMonthly: s.amount, pct: total > 0 ? (s.amount / total) * 100 : 0 }))
+}
+
 function AhorroInversionSection({
   data, fmt,
 }: {
@@ -1042,13 +1058,24 @@ function AhorroInversionSection({
   fmt: (v: number) => string
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [expanded, setExpanded] = useState(false)
   const { trend, ahorroMonthly, inversionMonthly, deudaMonthly, inversionShare, ahorroSources, inversionSources, deudaSources } = data
   const maxTotal = Math.max(...trend.map(m => m.ahorro + m.inversion + m.deuda), 1)
   const hov = hovIdx !== null ? trend[hovIdx] : null
+  const selected = selectedIdx !== null ? trend[selectedIdx] : null
   const sharePct = inversionShare * 100
   const shareColor = sharePct >= 60 ? '#a3e661' : sharePct >= 35 ? '#f59e0b' : '#f43f5e'
   const hasDeuda = deudaMonthly > 0.5
+
+  // Drill-down + mini-KPIs reflect the selected month when there is one,
+  // otherwise fall back to the 12m aggregate.
+  const displayAhorro    = selected ? selected.ahorro : ahorroMonthly
+  const displayInversion = selected ? selected.inversion : inversionMonthly
+  const displayDeuda     = selected ? selected.deuda : deudaMonthly
+  const displayAhorroSources    = selected ? rawSourcesToDisplay(selected.ahorroSources, selected.ahorro) : ahorroSources
+  const displayInversionSources = selected ? rawSourcesToDisplay(selected.inversionSources, selected.inversion) : inversionSources
+  const displayDeudaSources     = selected ? rawSourcesToDisplay(selected.deudaSources, selected.deuda) : deudaSources
 
   return (
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
@@ -1071,27 +1098,27 @@ function AhorroInversionSection({
       <div className={`grid gap-2 ${hasDeuda ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ahorro (líquido)</p>
-          <p className="text-sm font-black mt-1 text-[#22d3ee]">{fmt(ahorroMonthly)}</p>
-          <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+          <p className="text-sm font-black mt-1 text-[#22d3ee]">{fmt(displayAhorro)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
         </div>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Inversión</p>
-          <p className="text-sm font-black mt-1 text-[#a78bfa]">{fmt(inversionMonthly)}</p>
-          <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+          <p className="text-sm font-black mt-1 text-[#a78bfa]">{fmt(displayInversion)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
         </div>
         {hasDeuda && (
           <div className="bg-black/20 rounded-xl p-3">
             <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Abono extra deuda</p>
-            <p className="text-sm font-black mt-1 text-[#fb923c]">{fmt(deudaMonthly)}</p>
-            <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+            <p className="text-sm font-black mt-1 text-[#fb923c]">{fmt(displayDeuda)}</p>
+            <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
           </div>
         )}
       </div>
 
-      {/* Stacked monthly trend */}
+      {/* Stacked monthly trend — click a bar to filter the drill-down below to that month */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (12m)</p>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (12m) · clic para filtrar</p>
           {hov && (
             <span className="text-[10px] text-zinc-300">
               {hov.label}: <span className="font-bold text-[#22d3ee]">{fmt(hov.ahorro)}</span> ahorro ·{' '}
@@ -1107,29 +1134,29 @@ function AhorroInversionSection({
             const invPct   = total > 0 ? m.inversion / total : 0
             const deudaPct = total > 0 ? m.deuda / total : 0
             const isHov   = hovIdx === i
+            const isSel   = selectedIdx === i
             return (
               <div
                 key={i}
-                className="flex-1 flex flex-col items-center relative cursor-default"
+                className="flex-1 flex flex-col items-center relative cursor-pointer"
                 style={{ height: '100%' }}
                 onMouseEnter={() => setHovIdx(i)}
                 onMouseLeave={() => setHovIdx(null)}
+                onClick={() => setSelectedIdx(isSel ? null : i)}
               >
                 <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
                   <div
-                    className="w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity"
-                    style={{ height: `${totalPct * 100}%`, opacity: isHov ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
+                    className={`w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity ${isSel ? 'ring-1 ring-white/60' : ''}`}
+                    style={{ height: `${totalPct * 100}%`, opacity: isHov || isSel ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
                   >
                     <div style={{ height: `${deudaPct * 100}%`, backgroundColor: '#fb923c' }} />
                     <div style={{ height: `${invPct * 100}%`, backgroundColor: '#a78bfa' }} />
                     <div style={{ height: `${(1 - invPct - deudaPct) * 100}%`, backgroundColor: '#22d3ee' }} />
                   </div>
                 </div>
-                {i % 2 === 0 && (
-                  <p className="text-[6px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
-                    {m.label.split(' ')[0]}
-                  </p>
-                )}
+                <p className={`text-[6px] truncate w-full text-center leading-none mt-0.5 ${isSel ? 'text-zinc-300 font-bold' : 'text-zinc-700'}`}>
+                  {i % 2 === 0 || isSel ? m.label.split(' ')[0] : ''}
+                </p>
               </div>
             )
           })}
@@ -1146,18 +1173,29 @@ function AhorroInversionSection({
       </p>
 
       {/* Drill-down: what's actually in each bucket */}
-      <button
-        type="button"
-        onClick={() => setExpanded(v => !v)}
-        className="text-[9px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
-      >
-        {expanded ? '▾ Ocultar desglose' : '▸ Ver desglose por fuente'}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded(v => !v)}
+          className="text-[9px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          {expanded ? '▾ Ocultar desglose' : '▸ Ver desglose por fuente'}
+        </button>
+        {selected && (
+          <button
+            type="button"
+            onClick={() => setSelectedIdx(null)}
+            className="text-[9px] font-medium text-zinc-400 bg-white/[0.06] rounded-full px-2 py-0.5 hover:bg-white/[0.1] transition-colors"
+          >
+            {selected.label} ✕
+          </button>
+        )}
+      </div>
       {expanded && (
         <div className="space-y-3 pt-1">
-          <AhorroInversionSourceList title="Ahorro líquido" color="#22d3ee" sources={ahorroSources} fmt={fmt} />
-          <AhorroInversionSourceList title="Inversión" color="#a78bfa" sources={inversionSources} fmt={fmt} />
-          {hasDeuda && <AhorroInversionSourceList title="Abono extra a deuda" color="#fb923c" sources={deudaSources} fmt={fmt} />}
+          <AhorroInversionSourceList title="Ahorro líquido" color="#22d3ee" sources={displayAhorroSources} fmt={fmt} />
+          <AhorroInversionSourceList title="Inversión" color="#a78bfa" sources={displayInversionSources} fmt={fmt} />
+          {hasDeuda && <AhorroInversionSourceList title="Abono extra a deuda" color="#fb923c" sources={displayDeudaSources} fmt={fmt} />}
         </div>
       )}
     </div>

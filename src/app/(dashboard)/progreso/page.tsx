@@ -665,11 +665,36 @@ export default async function ProgresoPage() {
   //     the user means by ahorro. Kept as its own group instead.
   // Envelope-routed deposits count as ahorro — no envelope in this account
   // is tagged envelope_type='inversion' (that split lives in category_code).
+  // Destination detail for a deposit tx — "Inversión" alone doesn't say
+  // whether it went to TRANSCOMER, IBKR, crypto, etc. Vendor is the real
+  // destination; fall back to concept for the odd row where vendor is 'NA'
+  // (e.g. "Compra Bitcoins" logged with no vendor).
+  function depositDestination(tx: { vendor: string | null; concept: string | null }): string | null {
+    const v = tx.vendor?.trim()
+    if (v && !/^na$/i.test(v)) return v
+    return tx.concept?.trim() || null
+  }
+
+  type SourceMap = Record<string, number>
+  function addSource(map: SourceMap, baseName: string, destination: string | null, amt: number) {
+    const name = destination && destination !== baseName ? `${baseName} · ${destination}` : baseName
+    map[name] = (map[name] ?? 0) + amt
+  }
+  const toSourceList = (map: SourceMap, total: number) =>
+    Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amt]) => ({ name, amountMonthly: amt / 12, pct: total > 0 ? (amt / total) * 100 : 0 }))
+
   const savingsRateTrend: { label: string; rate: number; deposits: number; income: number }[] = []
-  const ahorroInversionTrend: { label: string; ahorro: number; inversion: number; deuda: number }[] = []
-  const ahorroSourceMap: Record<string, number> = {}
-  const inversionSourceMap: Record<string, number> = {}
-  const deudaSourceMap: Record<string, number> = {}
+  const ahorroInversionTrend: {
+    label: string; ahorro: number; inversion: number; deuda: number
+    ahorroSources: { name: string; amount: number }[]
+    inversionSources: { name: string; amount: number }[]
+    deudaSources: { name: string; amount: number }[]
+  }[] = []
+  const ahorroSourceMap: SourceMap = {}
+  const inversionSourceMap: SourceMap = {}
+  const deudaSourceMap: SourceMap = {}
 
   for (let i = 12; i >= 1; i--) {
     const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
@@ -690,21 +715,31 @@ export default async function ProgresoPage() {
       )
     )
 
+    // Per-month maps too, so the UI can filter the drill-down to one
+    // selected month instead of always showing the 12m aggregate.
+    const monthAhorroMap: SourceMap = {}
+    const monthInversionMap: SourceMap = {}
+    const monthDeudaMap: SourceMap = {}
+
     let txAhorro = 0, txInversion = 0, txDeuda = 0
     for (const tx of depositTxs) {
       const amt = Number(tx.amount ?? 0)
+      const dest = depositDestination(tx)
       if (isExtraLoanPrincipalPayment(tx.concept, tx.category_code)) {
         txDeuda += amt
         const name = tx.concept || tx.vendor || 'Abono extra'
         deudaSourceMap[name] = (deudaSourceMap[name] ?? 0) + amt
+        monthDeudaMap[name] = (monthDeudaMap[name] ?? 0) + amt
       } else if (INVERSION_CATEGORY_CODES.has(tx.category_code ?? '')) {
         txInversion += amt
-        const name = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Inversión'
-        inversionSourceMap[name] = (inversionSourceMap[name] ?? 0) + amt
+        const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Inversión'
+        addSource(inversionSourceMap, baseName, dest, amt)
+        addSource(monthInversionMap, baseName, dest, amt)
       } else {
         txAhorro += amt
-        const name = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Ahorro'
-        ahorroSourceMap[name] = (ahorroSourceMap[name] ?? 0) + amt
+        const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Ahorro'
+        addSource(ahorroSourceMap, baseName, dest, amt)
+        addSource(monthAhorroMap, baseName, dest, amt)
       }
     }
 
@@ -718,6 +753,7 @@ export default async function ProgresoPage() {
     for (const m of envelopeMovs) {
       const name = envelopeNameMap.get(m.envelope_id) ?? 'Sobre'
       ahorroSourceMap[name] = (ahorroSourceMap[name] ?? 0) + Number(m.amount)
+      monthAhorroMap[name] = (monthAhorroMap[name] ?? 0) + Number(m.amount)
     }
 
     const ahorro = txAhorro + envelopeDeposits
@@ -734,6 +770,9 @@ export default async function ProgresoPage() {
       inversion: txInversion,
       ahorro,
       deuda:     txDeuda,
+      ahorroSources:    Object.entries(monthAhorroMap).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount })),
+      inversionSources: Object.entries(monthInversionMap).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount })),
+      deudaSources:     Object.entries(monthDeudaMap).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount })),
     })
   }
 
@@ -743,11 +782,6 @@ export default async function ProgresoPage() {
   )
   const ahorroInversionTotal = ahorroInversion12m.ahorro + ahorroInversion12m.inversion + ahorroInversion12m.deuda
   const inversionShare = ahorroInversionTotal > 0 ? ahorroInversion12m.inversion / ahorroInversionTotal : 0
-
-  const toSourceList = (map: Record<string, number>, total: number) =>
-    Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, total12m]) => ({ name, amountMonthly: total12m / 12, pct: total > 0 ? (total12m / total) * 100 : 0 }))
 
   const ahorroSources    = toSourceList(ahorroSourceMap, ahorroInversion12m.ahorro)
   const inversionSources = toSourceList(inversionSourceMap, ahorroInversion12m.inversion)
