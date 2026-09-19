@@ -18,6 +18,18 @@ function isValuation(concept: string | null) {
   return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
 }
 
+// The bare 'SAVINGS' code ("Ahorro") doesn't start with 'SAVINGS_' — a
+// `.startsWith('SAVINGS_')` check silently excludes it. Real money: ₡7.37M
+// across 99 transactions in this account, invisible to the savings rate
+// until this helper replaced that check everywhere.
+function isSavingsCategoryCode(code: string | null | undefined): boolean {
+  return code === 'SAVINGS' || (code ?? '').startsWith('SAVINGS_')
+}
+
+// Within objetivos_financieros, which SAVINGS_* codes have market exposure
+// (inversión, expected return) vs just sit liquid (ahorro puro).
+const INVERSION_CATEGORY_CODES = new Set(['SAVINGS_INVESTMENT', 'SAVINGS_PENSION'])
+
 export default async function ProgresoPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -245,7 +257,7 @@ export default async function ProgresoPage() {
       !tx.is_settlement &&
       !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '') &&
       (
-        (tx.expense_group === 'objetivos_financieros' && (tx.category_code ?? '').startsWith('SAVINGS_')) ||
+        (tx.expense_group === 'objetivos_financieros' && isSavingsCategoryCode(tx.category_code)) ||
         isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
       )
     )
@@ -636,8 +648,15 @@ export default async function ProgresoPage() {
     })
   }
 
-  // Savings rate trend — month-by-month for the last 12 complete months
+  // Savings rate trend — month-by-month for the last 12 complete months.
+  // Also splits those same deposits into ahorro (liquid, no market
+  // exposure) vs inversión (SAVINGS_INVESTMENT/SAVINGS_PENSION — expected
+  // return) so the user can see how much of what they set aside each month
+  // is actually working for them, not just sitting still. Envelope-routed
+  // deposits count as ahorro — no envelope in this account is tagged
+  // envelope_type='inversion' (that split lives in category_code instead).
   const savingsRateTrend: { label: string; rate: number; deposits: number; income: number }[] = []
+  const ahorroInversionTrend: { label: string; ahorro: number; inversion: number }[] = []
   for (let i = 12; i >= 1; i--) {
     const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -647,16 +666,18 @@ export default async function ProgresoPage() {
       .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
-    const txDeposits = monthTxs
-      .filter(tx =>
-        (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
-        !tx.is_settlement &&
-        !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '') &&
-        (
-          (tx.expense_group === 'objetivos_financieros' && (tx.category_code ?? '').startsWith('SAVINGS_')) ||
-          isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
-        )
+    const depositTxs = monthTxs.filter(tx =>
+      (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+      !tx.is_settlement &&
+      !/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '') &&
+      (
+        (tx.expense_group === 'objetivos_financieros' && isSavingsCategoryCode(tx.category_code)) ||
+        isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
       )
+    )
+    const txDeposits = depositTxs.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+    const txInversion = depositTxs
+      .filter(tx => INVERSION_CATEGORY_CODES.has(tx.category_code ?? ''))
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
     const envelopeDeposits = (movements ?? [])
@@ -675,7 +696,19 @@ export default async function ProgresoPage() {
       deposits,
       income,
     })
+    ahorroInversionTrend.push({
+      label:     `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+      inversion: txInversion,
+      ahorro:    deposits - txInversion,
+    })
   }
+
+  const ahorroInversion12m = ahorroInversionTrend.reduce(
+    (acc, m) => ({ ahorro: acc.ahorro + m.ahorro, inversion: acc.inversion + m.inversion }),
+    { ahorro: 0, inversion: 0 }
+  )
+  const ahorroInversionTotal = ahorroInversion12m.ahorro + ahorroInversion12m.inversion
+  const inversionShare = ahorroInversionTotal > 0 ? ahorroInversion12m.inversion / ahorroInversionTotal : 0
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
@@ -719,6 +752,12 @@ export default async function ProgresoPage() {
         runwayYellow={fireConfig?.runway_yellow_months ?? 3}
         wealthDelta={wealthDelta}
         savingsRateTrend={savingsRateTrend}
+        ahorroInversionData={{
+          trend: ahorroInversionTrend,
+          ahorroMonthly: ahorroInversion12m.ahorro / 12,
+          inversionMonthly: ahorroInversion12m.inversion / 12,
+          inversionShare,
+        }}
         lifestyle={{
           inflationRate: inflation,
           curTotal:      liCurTotal,

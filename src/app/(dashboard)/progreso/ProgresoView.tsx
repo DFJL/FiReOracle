@@ -25,6 +25,13 @@ type SavingsRateMonth = {
   income: number
 }
 
+type AhorroInversionData = {
+  trend: { label: string; ahorro: number; inversion: number }[]
+  ahorroMonthly: number
+  inversionMonthly: number
+  inversionShare: number
+}
+
 type PassiveIncomeSubSource = { name: string; amountMonthly: number; pct: number }
 type PassiveIncomeSource = { name: string; amountMonthly: number; pct: number; subSources: PassiveIncomeSubSource[] }
 
@@ -65,6 +72,7 @@ type Props = {
   runwayYellow: number
   wealthDelta: WealthDeltaMonth[]
   savingsRateTrend: SavingsRateMonth[]
+  ahorroInversionData: AhorroInversionData
   lifestyle: LifestyleData
 }
 
@@ -82,7 +90,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, lifestyle,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle,
 }: Props) {
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const rate = exchangeRate.sell
@@ -342,6 +350,12 @@ export function ProgresoView({
       {/* Savings rate trend */}
       {savingsRateTrend.length > 0 && (
         <SavingsRateTrendChart data={savingsRateTrend} avg12m={savingsRate} fmt={fmt} />
+      )}
+
+      {/* Ahorro vs. inversión — of what you set aside each month, how much
+          actually has market exposure vs. sits liquid */}
+      {(ahorroInversionData.ahorroMonthly + ahorroInversionData.inversionMonthly) > 0 && (
+        <AhorroInversionSection data={ahorroInversionData} fmt={fmt} />
       )}
 
       {/* Combined historical + forecast chart */}
@@ -985,6 +999,103 @@ function PassiveIncomeSection({
           }
         </p>
       )}
+    </div>
+  )
+}
+
+function AhorroInversionSection({
+  data, fmt,
+}: {
+  data: AhorroInversionData
+  fmt: (v: number) => string
+}) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+  const { trend, ahorroMonthly, inversionMonthly, inversionShare } = data
+  const maxTotal = Math.max(...trend.map(m => m.ahorro + m.inversion), 1)
+  const hov = hovIdx !== null ? trend[hovIdx] : null
+  const sharePct = inversionShare * 100
+  const shareColor = sharePct >= 60 ? '#a3e635' : sharePct >= 35 ? '#f59e0b' : '#f43f5e'
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ahorro vs. inversión</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">De lo que apartás cada mes, cuánto queda líquido vs. cuánto trabaja con retorno esperado</p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs font-black" style={{ color: shareColor }}>{sharePct.toFixed(0)}% inversión</p>
+          <p className="text-[9px] text-zinc-600">del total aportado</p>
+        </div>
+      </div>
+
+      {/* Mini KPI row */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ahorro (líquido)</p>
+          <p className="text-sm font-black mt-1 text-[#22d3ee]">{fmt(ahorroMonthly)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+        </div>
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Inversión</p>
+          <p className="text-sm font-black mt-1 text-[#a78bfa]">{fmt(inversionMonthly)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+        </div>
+      </div>
+
+      {/* Stacked monthly trend */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (12m)</p>
+          {hov && (
+            <span className="text-[10px] text-zinc-300">
+              {hov.label}: <span className="font-bold text-[#22d3ee]">{fmt(hov.ahorro)}</span> ahorro ·{' '}
+              <span className="font-bold text-[#a78bfa]">{fmt(hov.inversion)}</span> inversión
+            </span>
+          )}
+        </div>
+        <div className="flex items-end gap-1.5 h-24">
+          {trend.map((m, i) => {
+            const total   = m.ahorro + m.inversion
+            const totalPct = Math.min(total / (maxTotal * 1.05), 1)
+            const invPct  = total > 0 ? m.inversion / total : 0
+            const isHov   = hovIdx === i
+            return (
+              <div
+                key={i}
+                className="flex-1 flex flex-col items-center relative cursor-default"
+                style={{ height: '100%' }}
+                onMouseEnter={() => setHovIdx(i)}
+                onMouseLeave={() => setHovIdx(null)}
+              >
+                <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
+                  <div
+                    className="w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity"
+                    style={{ height: `${totalPct * 100}%`, opacity: isHov ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
+                  >
+                    <div style={{ height: `${invPct * 100}%`, backgroundColor: '#a78bfa' }} />
+                    <div style={{ height: `${(1 - invPct) * 100}%`, backgroundColor: '#22d3ee' }} />
+                  </div>
+                </div>
+                {i % 2 === 0 && (
+                  <p className="text-[6px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
+                    {m.label.split(' ')[0]}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <p className="text-[9px] text-zinc-600 leading-relaxed">
+        {sharePct >= 60
+          ? `La mayoría de lo que apartás (${sharePct.toFixed(0)}%) va a inversión con retorno esperado — buena señal si tu colchón líquido ya está cubierto.`
+          : sharePct >= 35
+          ? `Vas balanceado: ${sharePct.toFixed(0)}% a inversión y el resto líquido. Si tu fondo de emergencia ya está completo, podés inclinar más hacia inversión.`
+          : `Solo ${sharePct.toFixed(0)}% de lo que apartás va a inversión — el resto queda líquido sin generar retorno. Si ya tenés colchón de emergencia cubierto, considerá mover más hacia inversión.`
+        }
+      </p>
     </div>
   )
 }
