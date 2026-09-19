@@ -25,11 +25,17 @@ type SavingsRateMonth = {
   income: number
 }
 
+type AhorroInversionSource = { name: string; amountMonthly: number; pct: number }
+
 type AhorroInversionData = {
-  trend: { label: string; ahorro: number; inversion: number }[]
+  trend: { label: string; ahorro: number; inversion: number; deuda: number }[]
   ahorroMonthly: number
   inversionMonthly: number
+  deudaMonthly: number
   inversionShare: number
+  ahorroSources: AhorroInversionSource[]
+  inversionSources: AhorroInversionSource[]
+  deudaSources: AhorroInversionSource[]
 }
 
 type PassiveIncomeSubSource = { name: string; amountMonthly: number; pct: number }
@@ -1003,6 +1009,32 @@ function PassiveIncomeSection({
   )
 }
 
+function AhorroInversionSourceList({
+  title, color, sources, fmt,
+}: {
+  title: string
+  color: string
+  sources: AhorroInversionSource[]
+  fmt: (v: number) => string
+}) {
+  if (sources.length === 0) return null
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color }}>{title}</p>
+      {sources.slice(0, 6).map(s => (
+        <div key={s.name} className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-400 w-32 shrink-0 truncate">{s.name}</span>
+          <div className="flex-1 h-3 bg-white/[0.04] rounded overflow-hidden">
+            <div className="h-full rounded" style={{ width: `${Math.max(s.pct, 1.5)}%`, backgroundColor: color, opacity: 0.5 }} />
+          </div>
+          <span className="text-[9px] text-zinc-500 w-16 text-right shrink-0 tabular-nums">{fmt(s.amountMonthly)}</span>
+          <span className="text-[9px] text-zinc-600 w-9 text-right shrink-0 tabular-nums">{s.pct.toFixed(0)}%</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function AhorroInversionSection({
   data, fmt,
 }: {
@@ -1010,18 +1042,24 @@ function AhorroInversionSection({
   fmt: (v: number) => string
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
-  const { trend, ahorroMonthly, inversionMonthly, inversionShare } = data
-  const maxTotal = Math.max(...trend.map(m => m.ahorro + m.inversion), 1)
+  const [expanded, setExpanded] = useState(false)
+  const { trend, ahorroMonthly, inversionMonthly, deudaMonthly, inversionShare, ahorroSources, inversionSources, deudaSources } = data
+  const maxTotal = Math.max(...trend.map(m => m.ahorro + m.inversion + m.deuda), 1)
   const hov = hovIdx !== null ? trend[hovIdx] : null
   const sharePct = inversionShare * 100
-  const shareColor = sharePct >= 60 ? '#a3e635' : sharePct >= 35 ? '#f59e0b' : '#f43f5e'
+  const shareColor = sharePct >= 60 ? '#a3e661' : sharePct >= 35 ? '#f59e0b' : '#f43f5e'
+  const hasDeuda = deudaMonthly > 0.5
 
   return (
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ahorro vs. inversión</p>
-          <p className="text-[9px] text-zinc-600 mt-0.5">De lo que apartás cada mes, cuánto queda líquido vs. cuánto trabaja con retorno esperado</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            {hasDeuda
+              ? 'De lo que apartás cada mes: cuánto queda líquido, cuánto trabaja con retorno esperado, y cuánto va a bajar deuda antes de tiempo'
+              : 'De lo que apartás cada mes, cuánto queda líquido vs. cuánto trabaja con retorno esperado'}
+          </p>
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs font-black" style={{ color: shareColor }}>{sharePct.toFixed(0)}% inversión</p>
@@ -1030,7 +1068,7 @@ function AhorroInversionSection({
       </div>
 
       {/* Mini KPI row */}
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${hasDeuda ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ahorro (líquido)</p>
           <p className="text-sm font-black mt-1 text-[#22d3ee]">{fmt(ahorroMonthly)}</p>
@@ -1041,6 +1079,13 @@ function AhorroInversionSection({
           <p className="text-sm font-black mt-1 text-[#a78bfa]">{fmt(inversionMonthly)}</p>
           <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
         </div>
+        {hasDeuda && (
+          <div className="bg-black/20 rounded-xl p-3">
+            <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Abono extra deuda</p>
+            <p className="text-sm font-black mt-1 text-[#fb923c]">{fmt(deudaMonthly)}</p>
+            <p className="text-[8px] text-zinc-600 mt-0.5">promedio mensual</p>
+          </div>
+        )}
       </div>
 
       {/* Stacked monthly trend */}
@@ -1051,14 +1096,16 @@ function AhorroInversionSection({
             <span className="text-[10px] text-zinc-300">
               {hov.label}: <span className="font-bold text-[#22d3ee]">{fmt(hov.ahorro)}</span> ahorro ·{' '}
               <span className="font-bold text-[#a78bfa]">{fmt(hov.inversion)}</span> inversión
+              {hasDeuda && <> · <span className="font-bold text-[#fb923c]">{fmt(hov.deuda)}</span> deuda</>}
             </span>
           )}
         </div>
         <div className="flex items-end gap-1.5 h-24">
           {trend.map((m, i) => {
-            const total   = m.ahorro + m.inversion
+            const total   = m.ahorro + m.inversion + m.deuda
             const totalPct = Math.min(total / (maxTotal * 1.05), 1)
-            const invPct  = total > 0 ? m.inversion / total : 0
+            const invPct   = total > 0 ? m.inversion / total : 0
+            const deudaPct = total > 0 ? m.deuda / total : 0
             const isHov   = hovIdx === i
             return (
               <div
@@ -1073,8 +1120,9 @@ function AhorroInversionSection({
                     className="w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity"
                     style={{ height: `${totalPct * 100}%`, opacity: isHov ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
                   >
+                    <div style={{ height: `${deudaPct * 100}%`, backgroundColor: '#fb923c' }} />
                     <div style={{ height: `${invPct * 100}%`, backgroundColor: '#a78bfa' }} />
-                    <div style={{ height: `${(1 - invPct) * 100}%`, backgroundColor: '#22d3ee' }} />
+                    <div style={{ height: `${(1 - invPct - deudaPct) * 100}%`, backgroundColor: '#22d3ee' }} />
                   </div>
                 </div>
                 {i % 2 === 0 && (
@@ -1092,10 +1140,26 @@ function AhorroInversionSection({
         {sharePct >= 60
           ? `La mayoría de lo que apartás (${sharePct.toFixed(0)}%) va a inversión con retorno esperado — buena señal si tu colchón líquido ya está cubierto.`
           : sharePct >= 35
-          ? `Vas balanceado: ${sharePct.toFixed(0)}% a inversión y el resto líquido. Si tu fondo de emergencia ya está completo, podés inclinar más hacia inversión.`
-          : `Solo ${sharePct.toFixed(0)}% de lo que apartás va a inversión — el resto queda líquido sin generar retorno. Si ya tenés colchón de emergencia cubierto, considerá mover más hacia inversión.`
+          ? `Vas balanceado: ${sharePct.toFixed(0)}% a inversión y el resto líquido${hasDeuda ? ' o bajando deuda' : ''}. Si tu fondo de emergencia ya está completo, podés inclinar más hacia inversión.`
+          : `Solo ${sharePct.toFixed(0)}% de lo que apartás va a inversión — el resto queda líquido${hasDeuda ? ' o bajando deuda' : ''} sin generar retorno de mercado. Si ya tenés colchón de emergencia cubierto, considerá mover más hacia inversión.`
         }
       </p>
+
+      {/* Drill-down: what's actually in each bucket */}
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="text-[9px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+      >
+        {expanded ? '▾ Ocultar desglose' : '▸ Ver desglose por fuente'}
+      </button>
+      {expanded && (
+        <div className="space-y-3 pt-1">
+          <AhorroInversionSourceList title="Ahorro líquido" color="#22d3ee" sources={ahorroSources} fmt={fmt} />
+          <AhorroInversionSourceList title="Inversión" color="#a78bfa" sources={inversionSources} fmt={fmt} />
+          {hasDeuda && <AhorroInversionSourceList title="Abono extra a deuda" color="#fb923c" sources={deudaSources} fmt={fmt} />}
+        </div>
+      )}
     </div>
   )
 }

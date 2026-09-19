@@ -67,7 +67,7 @@ export default async function ProgresoPage() {
       .select('amount, movement_type, envelope_id, date')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
-      .select('id, parent_envelope_id, envelope_type')
+      .select('id, name, parent_envelope_id, envelope_type')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('assets')
       .select('value_crc, is_investable')
@@ -236,6 +236,9 @@ export default async function ProgresoPage() {
       .filter(e => (e as { envelope_type?: string | null }).envelope_type === 'emergencia'
                 || (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica')
       .map(e => e.id)
+  )
+  const envelopeNameMap = new Map(
+    (envelopes ?? []).map(e => [e.id, (e as { name?: string | null }).name ?? 'Sobre'])
   )
   const avgMonthlyEnvelopeSavings = (movements ?? [])
     .filter(m =>
@@ -649,14 +652,25 @@ export default async function ProgresoPage() {
   }
 
   // Savings rate trend — month-by-month for the last 12 complete months.
-  // Also splits those same deposits into ahorro (liquid, no market
-  // exposure) vs inversión (SAVINGS_INVESTMENT/SAVINGS_PENSION — expected
-  // return) so the user can see how much of what they set aside each month
-  // is actually working for them, not just sitting still. Envelope-routed
-  // deposits count as ahorro — no envelope in this account is tagged
-  // envelope_type='inversion' (that split lives in category_code instead).
+  // Also splits those same deposits THREE ways:
+  //   - Ahorro líquido: SAVINGS/SAVINGS_TRAVEL/SAVINGS_DAUGHTERS/SAVINGS_FU
+  //     + envelope-routed deposits — no market exposure, no expected return.
+  //   - Inversión: SAVINGS_INVESTMENT/SAVINGS_PENSION — market exposure,
+  //     expected return.
+  //   - Abono extra a deuda: discretionary/"extraordinario" loan principal
+  //     paydowns (isExtraLoanPrincipalPayment). This is NOT liquid savings —
+  //     it retires debt, it doesn't sit anywhere — and in this account it's
+  //     ~4x bigger than actual SAVINGS_* deposits, so folding it into
+  //     "ahorro" made that bucket look enormous and disconnected from what
+  //     the user means by ahorro. Kept as its own group instead.
+  // Envelope-routed deposits count as ahorro — no envelope in this account
+  // is tagged envelope_type='inversion' (that split lives in category_code).
   const savingsRateTrend: { label: string; rate: number; deposits: number; income: number }[] = []
-  const ahorroInversionTrend: { label: string; ahorro: number; inversion: number }[] = []
+  const ahorroInversionTrend: { label: string; ahorro: number; inversion: number; deuda: number }[] = []
+  const ahorroSourceMap: Record<string, number> = {}
+  const inversionSourceMap: Record<string, number> = {}
+  const deudaSourceMap: Record<string, number> = {}
+
   for (let i = 12; i >= 1; i--) {
     const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -675,20 +689,39 @@ export default async function ProgresoPage() {
         isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
       )
     )
-    const txDeposits = depositTxs.reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
-    const txInversion = depositTxs
-      .filter(tx => INVERSION_CATEGORY_CODES.has(tx.category_code ?? ''))
-      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
-    const envelopeDeposits = (movements ?? [])
+    let txAhorro = 0, txInversion = 0, txDeuda = 0
+    for (const tx of depositTxs) {
+      const amt = Number(tx.amount ?? 0)
+      if (isExtraLoanPrincipalPayment(tx.concept, tx.category_code)) {
+        txDeuda += amt
+        const name = tx.concept || tx.vendor || 'Abono extra'
+        deudaSourceMap[name] = (deudaSourceMap[name] ?? 0) + amt
+      } else if (INVERSION_CATEGORY_CODES.has(tx.category_code ?? '')) {
+        txInversion += amt
+        const name = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Inversión'
+        inversionSourceMap[name] = (inversionSourceMap[name] ?? 0) + amt
+      } else {
+        txAhorro += amt
+        const name = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Ahorro'
+        ahorroSourceMap[name] = (ahorroSourceMap[name] ?? 0) + amt
+      }
+    }
+
+    const envelopeMovs = (movements ?? [])
       .filter(m =>
         savingsEnvelopeIds.has(m.envelope_id) &&
         m.movement_type !== 'interes' &&
         (m as { date?: string | null }).date?.slice(0, 7) === ym
       )
-      .reduce((s, m) => s + Number(m.amount), 0)
+    const envelopeDeposits = envelopeMovs.reduce((s, m) => s + Number(m.amount), 0)
+    for (const m of envelopeMovs) {
+      const name = envelopeNameMap.get(m.envelope_id) ?? 'Sobre'
+      ahorroSourceMap[name] = (ahorroSourceMap[name] ?? 0) + Number(m.amount)
+    }
 
-    const deposits = txDeposits + envelopeDeposits
+    const ahorro = txAhorro + envelopeDeposits
+    const deposits = ahorro + txInversion + txDeuda
 
     savingsRateTrend.push({
       label:    `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
@@ -699,16 +732,26 @@ export default async function ProgresoPage() {
     ahorroInversionTrend.push({
       label:     `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
       inversion: txInversion,
-      ahorro:    deposits - txInversion,
+      ahorro,
+      deuda:     txDeuda,
     })
   }
 
   const ahorroInversion12m = ahorroInversionTrend.reduce(
-    (acc, m) => ({ ahorro: acc.ahorro + m.ahorro, inversion: acc.inversion + m.inversion }),
-    { ahorro: 0, inversion: 0 }
+    (acc, m) => ({ ahorro: acc.ahorro + m.ahorro, inversion: acc.inversion + m.inversion, deuda: acc.deuda + m.deuda }),
+    { ahorro: 0, inversion: 0, deuda: 0 }
   )
-  const ahorroInversionTotal = ahorroInversion12m.ahorro + ahorroInversion12m.inversion
+  const ahorroInversionTotal = ahorroInversion12m.ahorro + ahorroInversion12m.inversion + ahorroInversion12m.deuda
   const inversionShare = ahorroInversionTotal > 0 ? ahorroInversion12m.inversion / ahorroInversionTotal : 0
+
+  const toSourceList = (map: Record<string, number>, total: number) =>
+    Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, total12m]) => ({ name, amountMonthly: total12m / 12, pct: total > 0 ? (total12m / total) * 100 : 0 }))
+
+  const ahorroSources    = toSourceList(ahorroSourceMap, ahorroInversion12m.ahorro)
+  const inversionSources = toSourceList(inversionSourceMap, ahorroInversion12m.inversion)
+  const deudaSources     = toSourceList(deudaSourceMap, ahorroInversion12m.deuda)
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
@@ -756,7 +799,11 @@ export default async function ProgresoPage() {
           trend: ahorroInversionTrend,
           ahorroMonthly: ahorroInversion12m.ahorro / 12,
           inversionMonthly: ahorroInversion12m.inversion / 12,
+          deudaMonthly: ahorroInversion12m.deuda / 12,
           inversionShare,
+          ahorroSources,
+          inversionSources,
+          deudaSources,
         }}
         lifestyle={{
           inflationRate: inflation,
