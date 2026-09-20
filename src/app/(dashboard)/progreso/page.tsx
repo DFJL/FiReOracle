@@ -6,7 +6,6 @@ import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
 import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 import { GENERIC_PASSIVE_CATEGORIES, normalizeVendorKey } from '@/lib/passiveIncomeCategory'
-import { computeEnvelopeBalances } from '@/lib/envelopeBalances'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -264,34 +263,30 @@ export default async function ProgresoPage() {
     (envelopes ?? []).map(e => [e.id, (e as { name?: string | null }).name ?? 'Sobre'])
   )
 
-  // Saldos en sobres — balance evolution, not flow. Same savings envelopes
-  // as above, but shown as current balance vs. 12 months ago (goal
-  // progress), using the canonical balance rule shared with /liquidez and
-  // /auditoria instead of re-deriving it. This is where envelope activity
-  // belongs now that Ahorro/Inversión is transaction-only.
-  const currentEnvBalances = computeEnvelopeBalances(envelopes ?? [], movements ?? [])
-  const priorMovements = (movements ?? []).filter(m =>
-    (m as { date?: string | null }).date && (m as { date: string }).date < rolling12StartStr
-  )
-  const priorEnvBalances = computeEnvelopeBalances(envelopes ?? [], priorMovements)
-  const sobresBalances = [...savingsEnvelopeIds]
-    .map(id => {
-      const balance = currentEnvBalances.ownBalance[id] ?? 0
-      const change12m = balance - (priorEnvBalances.ownBalance[id] ?? 0)
-      return { name: envelopeNameMap.get(id) ?? 'Sobre', balance, change12m }
-    })
-    .filter(e => e.balance !== 0 || e.change12m !== 0)
-    .sort((a, b) => b.balance - a.balance)
+  // Envelope balance evolution moved to /liquidez (Saldos en sobres) —
+  // that's where the envelopes themselves already live and get managed.
 
-  // Actual investment deposits — SAVINGS_* categories and extra/discretionary
-  // loan principal paydowns only. Deliberately transaction-only, not mixed
-  // with envelope_movements: a transaction is a flow event (money that moved
-  // THIS month), while an envelope's balance change can reflect money saved
-  // years ago being spent now, a self-loan cycling between the user's own
-  // envelopes, or a balance-restoration artifact — none of which answer "how
-  // much did I save this month." Envelope balances get their own section
-  // (Saldos en sobres) instead of being folded into this flow-based number.
-  // No outlier removal: real estate and large one-off purchases ARE genuine
+  // Genuine envelope contributions — "Plan transferencias: <sobre>"
+  // quincenal deposits that move money from Líquido BAC (salary) into a
+  // savings envelope. That's the real ahorro event from the user's own
+  // mental model, distinct from a withdrawal (spending previously-saved
+  // money) or a self-loan traslado (money moving between envelopes the
+  // user already had) — neither of which represent new money being set
+  // aside this period.
+  const avgMonthlyEnvelopeContribs = (movements ?? [])
+    .filter(m =>
+      savingsEnvelopeIds.has(m.envelope_id) &&
+      m.movement_type === 'deposito' &&
+      !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test((m as { notes?: string | null }).notes ?? '') &&
+      (m as { date?: string | null }).date &&
+      (m as { date: string }).date >= rolling12StartStr &&
+      (m as { date: string }).date < rolling12EndStr
+    )
+    .reduce((s, m) => s + Number(m.amount), 0) / 12
+
+  // Actual investment deposits — SAVINGS_* categories, extra/discretionary
+  // loan principal paydowns, and genuine envelope contributions (above). No
+  // outlier removal: real estate and large one-off purchases ARE genuine
   // investments and should count.
   const avgMonthlyDeposits = recent
     .filter(tx =>
@@ -304,6 +299,7 @@ export default async function ProgresoPage() {
       )
     )
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+    + avgMonthlyEnvelopeContribs
 
   // A "rendimiento" counts as passive income whether it landed as cash
   // ("Cobrado", movement_type 'income') or stayed compounding in the fund/
@@ -781,11 +777,29 @@ export default async function ProgresoPage() {
       }
     }
 
-    // Envelope movements are deliberately NOT folded in here — see the
-    // avgMonthlyDeposits comment above. They get their own "Saldos en
-    // sobres" section, tracking balance evolution rather than pretending
-    // every balance change is this month's savings.
-    const ahorro = txAhorro
+    // Envelope CONTRIBUTIONS count too — specifically the recurring
+    // "Plan transferencias: <sobre>" quincenal deposits that move money
+    // from Líquido BAC (salary) into a savings envelope. That's the actual
+    // ahorro event from the user's own mental model: money moving from
+    // spendable liquidity into something set aside. Deliberately NOT
+    // counting retiro/traslado_in/traslado_out here — a withdrawal is
+    // spending from money already counted as ahorro when it went in, and
+    // an autopréstamo repayment is money moving between envelopes the user
+    // already had, not new liquidity being set aside.
+    const envelopeContribs = (movements ?? []).filter(m =>
+      savingsEnvelopeIds.has(m.envelope_id) &&
+      m.movement_type === 'deposito' &&
+      !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test((m as { notes?: string | null }).notes ?? '') &&
+      (m as { date?: string | null }).date?.slice(0, 7) === ym
+    )
+    const envelopeAhorro = envelopeContribs.reduce((s, m) => s + Number(m.amount), 0)
+    for (const m of envelopeContribs) {
+      const name = envelopeNameMap.get(m.envelope_id) ?? 'Sobre'
+      ahorroSourceMap[name] = (ahorroSourceMap[name] ?? 0) + Number(m.amount)
+      monthAhorroMap[name] = (monthAhorroMap[name] ?? 0) + Number(m.amount)
+    }
+
+    const ahorro = txAhorro + envelopeAhorro
     const deposits = ahorro + txInversion + txDeuda
 
     savingsRateTrend.push({
@@ -868,7 +882,6 @@ export default async function ProgresoPage() {
           inversionSources,
           deudaSources,
         }}
-        sobresBalances={sobresBalances}
         lifestyle={{
           inflationRate: inflation,
           curTotal:      liCurTotal,

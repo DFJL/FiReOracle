@@ -46,8 +46,6 @@ type AhorroInversionData = {
   deudaSources: AhorroInversionSource[]
 }
 
-type SobreBalance = { name: string; balance: number; change12m: number }
-
 type PassiveIncomeSubSource = { name: string; amountMonthly: number; pct: number }
 type PassiveIncomeSource = { name: string; amountMonthly: number; pct: number; subSources: PassiveIncomeSubSource[] }
 
@@ -89,7 +87,6 @@ type Props = {
   wealthDelta: WealthDeltaMonth[]
   savingsRateTrend: SavingsRateMonth[]
   ahorroInversionData: AhorroInversionData
-  sobresBalances: SobreBalance[]
   lifestyle: LifestyleData
 }
 
@@ -107,7 +104,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, sobresBalances, lifestyle,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle,
 }: Props) {
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const rate = exchangeRate.sell
@@ -373,15 +370,6 @@ export function ProgresoView({
           actually has market exposure vs. sits liquid */}
       {(ahorroInversionData.ahorroMonthly + ahorroInversionData.inversionMonthly) > 0 && (
         <AhorroInversionSection data={ahorroInversionData} fmt={fmt} />
-      )}
-
-      {/* Saldos en sobres — balance evolution per goal envelope. Kept
-          separate from Ahorro/Inversión above: that section is a flow
-          (transactions, comparable month to month), this is a balance
-          (can reflect a big withdrawal/repayment landing all in one month
-          without meaning much about "how much I saved"). */}
-      {sobresBalances.length > 0 && (
-        <SobresBalanceSection sobres={sobresBalances} fmt={fmt} />
       )}
 
       {/* Combined historical + forecast chart */}
@@ -1222,44 +1210,6 @@ function AhorroInversionSection({
           {hasDeuda && <AhorroInversionSourceList title="Abono extra a deuda" color="#fb923c" sources={displayDeudaSources} fmt={fmt} />}
         </div>
       )}
-    </div>
-  )
-}
-
-function SobresBalanceSection({
-  sobres, fmt,
-}: {
-  sobres: SobreBalance[]
-  fmt: (v: number) => string
-}) {
-  const maxBalance = Math.max(...sobres.map(s => Math.abs(s.balance)), 1)
-  return (
-    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-3">
-      <div>
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Saldos en sobres</p>
-        <p className="text-[9px] text-zinc-600 mt-0.5">Saldo actual de cada meta/fondo y cómo cambió en los últimos 12 meses — no es &quot;ahorro del mes&quot;, es evolución de balance</p>
-      </div>
-      <div className="space-y-1.5">
-        {sobres.slice(0, 10).map(s => {
-          const pct = Math.max((Math.abs(s.balance) / maxBalance) * 100, 1.5)
-          const changeColor = s.change12m > 0 ? '#a3e635' : s.change12m < 0 ? '#f43f5e' : '#71717a'
-          return (
-            <div key={s.name} className="flex items-center gap-2">
-              <span className="text-[10px] text-zinc-400 w-28 shrink-0 truncate">{s.name}</span>
-              <div className="flex-1 h-4 bg-white/[0.04] rounded overflow-hidden">
-                <div
-                  className="h-full rounded"
-                  style={{ width: `${pct}%`, backgroundColor: s.balance >= 0 ? '#60a5fa' : '#f43f5e', opacity: 0.5 }}
-                />
-              </div>
-              <span className="text-[9px] text-zinc-500 w-16 text-right shrink-0 tabular-nums">{fmt(s.balance)}</span>
-              <span className="text-[9px] w-20 text-right shrink-0 tabular-nums" style={{ color: changeColor }}>
-                {s.change12m >= 0 ? '+' : ''}{fmt(s.change12m)}
-              </span>
-            </div>
-          )
-        })}
-      </div>
     </div>
   )
 }

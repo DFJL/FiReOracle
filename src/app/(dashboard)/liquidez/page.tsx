@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { EnvelopeSection } from './EnvelopeSection'
 import { SelfLoansSection } from './SelfLoansSection'
+import { SobresEvolucionSection } from './SobresEvolucionSection'
 import { computeEnvelopeBalances, rollupBalance } from '@/lib/envelopeBalances'
 
 export type SubEnvelope = {
@@ -47,6 +48,13 @@ export type SelfLoan = {
   linked_transaction: { concept: string | null; vendor: string | null; date: string } | null
 }
 
+export type SobreEvolucion = {
+  name: string
+  balance: number
+  change: number
+  since: string   // ISO date — when the comparison window actually starts for this envelope
+}
+
 export default async function LiquidezPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -67,7 +75,7 @@ export default async function LiquidezPage() {
       .order('sort_order'),
     admin
       .from('envelope_movements')
-      .select('envelope_id, amount, movement_type')
+      .select('envelope_id, amount, movement_type, date')
       .eq('user_id', user.id),
     admin
       .from('self_loans')
@@ -164,6 +172,36 @@ export default async function LiquidezPage() {
   const envelopeNameMap: Record<string, string> = {}
   for (const e of envelopes ?? []) envelopeNameMap[e.id] = e.name
 
+  // Balance evolution — current vs. ~12 months ago, or since tracking
+  // began if shorter. A data migration around mid-2026 reset several
+  // envelopes' movement history (bulk "Restauración saldo previo" entries),
+  // so several goal envelopes only have ~4-5 months of real history —
+  // pretending they all have a full 12 months to compare against would be
+  // dishonest, so each envelope shows its own "desde" date.
+  const now = new Date()
+  const rolling12StartStr = new Date(now.getFullYear(), now.getMonth() - 12, now.getDate()).toISOString().slice(0, 10)
+  const firstMovementByEnvelope: Record<string, string> = {}
+  for (const m of movements ?? []) {
+    const d = (m as { date?: string | null }).date
+    if (!d) continue
+    if (!firstMovementByEnvelope[m.envelope_id] || d < firstMovementByEnvelope[m.envelope_id]) {
+      firstMovementByEnvelope[m.envelope_id] = d
+    }
+  }
+  const priorMovements = (movements ?? []).filter(m => {
+    const d = (m as { date?: string | null }).date
+    return d && d < rolling12StartStr
+  })
+  const { ownBalance: priorOwnBalance } = computeEnvelopeBalances(envelopes ?? [], priorMovements)
+  const sobresEvolucion: SobreEvolucion[] = leafEnvelopes
+    .map(e => {
+      const firstDate = firstMovementByEnvelope[e.id] ?? null
+      const since = firstDate && firstDate > rolling12StartStr ? firstDate : rolling12StartStr
+      return { name: e.name, balance: e.balance, change: e.balance - (priorOwnBalance[e.id] ?? 0), since }
+    })
+    .filter(e => e.balance !== 0 || e.change !== 0)
+    .sort((a, b) => b.balance - a.balance)
+
   const enrichedLoans: SelfLoan[] = (loans ?? []).map(l => {
     const rawSplit = l.envelope_split
     let split: { envelope_id: string; name: string; amount: number }[] | null = null
@@ -198,6 +236,9 @@ export default async function LiquidezPage() {
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
       <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} />
+      <div className="border-t border-white/[0.06] pt-8">
+        <SobresEvolucionSection sobres={sobresEvolucion} />
+      </div>
       <div className="border-t border-white/[0.06] pt-8">
         <SelfLoansSection loans={enrichedLoans} envelopes={leafEnvelopes as Envelope[]} />
       </div>
