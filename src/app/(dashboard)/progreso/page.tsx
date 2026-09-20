@@ -26,21 +26,23 @@ function isSavingsCategoryCode(code: string | null | undefined): boolean {
   return code === 'SAVINGS' || (code ?? '').startsWith('SAVINGS_')
 }
 
-// Which envelope_movements rows represent real savings flow for a period.
-// retiro/traslado_in/traslado_out all count (a self-loan origination
-// pulling money OUT should reduce ahorro that period, and its repayment
-// flowing back IN later should restore it — excluding traslado_in alone
-// would break that symmetry and silently undercount every self-loan cycle)
-// — only two things are excluded:
-//   - 'interes'/'apertura': not a savings *flow* (interest is passive
-//     income elsewhere; apertura is a one-time envelope-creation balance).
-//   - a 'deposito' whose notes say "Restauración saldo previo" — found two
-//     of these on the same date (2026-06-01), ~₡1.97M each on two
-//     different envelopes, clearly a backfill/migration artifact rather
-//     than money actually saved that month.
+// Which envelope_movements rows represent real savings flow for a period:
+//   - 'retiro' always counts (negative) — real money leaving the envelope,
+//     whether spent directly or "loaned out" via an autopréstamo to fund
+//     something (e.g. "Autopréstamo: Pago parcial carro VW") — either way
+//     it stopped being savings that month.
+//   - 'deposito' counts (positive) UNLESS notes flag it as a balance
+//     restoration/correction ("Restauración saldo previo" — found two of
+//     these on the same date, ~₡1.97M each on two different envelopes,
+//     clearly a backfill/migration artifact, not money actually saved).
+//   - 'traslado_in'/'traslado_out'/'interes'/'apertura' never count — the
+//     user confirmed an autopréstamo repayment (traslado_in, e.g. "Abono
+//     autopréstamo · Saldo total cancelado") is funded from ANOTHER of
+//     their own envelopes, not fresh income, so it isn't new savings —
+//     it's the same money moving between pots they already had.
 function isNewEnvelopeSaving(m: { movement_type: string | null; notes?: string | null }): boolean {
-  if (m.movement_type === 'interes' || m.movement_type === 'apertura') return false
-  if (m.movement_type !== 'deposito') return true
+  if (m.movement_type === 'retiro') return true
+  if (m.movement_type !== 'deposito') return false
   return !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test(m.notes ?? '')
 }
 

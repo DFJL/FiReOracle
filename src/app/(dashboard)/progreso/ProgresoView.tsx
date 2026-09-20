@@ -1129,8 +1129,13 @@ function AhorroInversionSection({
         </div>
         <div className="flex items-end gap-1.5 h-24">
           {trend.map((m, i) => {
-            const total   = m.ahorro + m.inversion + m.deuda
-            const totalPct = Math.min(total / (maxTotal * 1.05), 1)
+            const total    = m.ahorro + m.inversion + m.deuda
+            // A month can go net-negative for real (e.g. spending down a
+            // travel envelope faster than it's refilled) — render that as
+            // a small red marker at the baseline instead of a negative
+            // (invalid) bar height.
+            const isNegative = total < 0
+            const totalPct = isNegative ? 0 : Math.min(total / (maxTotal * 1.05), 1)
             const invPct   = total > 0 ? m.inversion / total : 0
             const deudaPct = total > 0 ? m.deuda / total : 0
             const isHov   = hovIdx === i
@@ -1145,14 +1150,21 @@ function AhorroInversionSection({
                 onClick={() => setSelectedIdx(isSel ? null : i)}
               >
                 <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
-                  <div
-                    className={`w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity ${isSel ? 'ring-1 ring-white/60' : ''}`}
-                    style={{ height: `${totalPct * 100}%`, opacity: isHov || isSel ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
-                  >
-                    <div style={{ height: `${deudaPct * 100}%`, backgroundColor: '#fb923c' }} />
-                    <div style={{ height: `${invPct * 100}%`, backgroundColor: '#a78bfa' }} />
-                    <div style={{ height: `${(1 - invPct - deudaPct) * 100}%`, backgroundColor: '#22d3ee' }} />
-                  </div>
+                  {isNegative ? (
+                    <div
+                      className={`w-full rounded-sm transition-opacity ${isSel ? 'ring-1 ring-white/60' : ''}`}
+                      style={{ height: '3px', backgroundColor: '#f43f5e', opacity: isHov || isSel ? 0.95 : 0.65 }}
+                    />
+                  ) : (
+                    <div
+                      className={`w-full rounded-t-sm overflow-hidden flex flex-col-reverse transition-opacity ${isSel ? 'ring-1 ring-white/60' : ''}`}
+                      style={{ height: `${totalPct * 100}%`, opacity: isHov || isSel ? 0.95 : 0.65, minHeight: total > 0 ? '2px' : undefined }}
+                    >
+                      <div style={{ height: `${deudaPct * 100}%`, backgroundColor: '#fb923c' }} />
+                      <div style={{ height: `${invPct * 100}%`, backgroundColor: '#a78bfa' }} />
+                      <div style={{ height: `${(1 - invPct - deudaPct) * 100}%`, backgroundColor: '#22d3ee' }} />
+                    </div>
+                  )}
                 </div>
                 <p className={`text-[6px] truncate w-full text-center leading-none mt-0.5 ${isSel ? 'text-zinc-300 font-bold' : 'text-zinc-700'}`}>
                   {i % 2 === 0 || isSel ? m.label.split(' ')[0] : ''}
