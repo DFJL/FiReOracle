@@ -209,7 +209,7 @@ export default async function InversionesPage() {
         color: def.color ?? '#888',
         vendors: [],
         deposits: 0, liquidaciones: 0, rendimientos: 0,
-        passiveValuation: 0, markToMarketLoss: 0,
+        passiveValuation: 0, markToMarketLoss: 0, directSpend: 0,
         balance, valorizationNet: 0,
         balanceNative: snapshotBalanceNative[def.id] ?? undefined,
         balanceHistory: snapshotHistory[def.id] ?? [],
@@ -219,7 +219,7 @@ export default async function InversionesPage() {
       }
     }
 
-    const { deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, balance } =
+    const { deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, directSpend, balance } =
       computeBucketTotals({ ...def, concept_map: def.concept_map as unknown as ConceptMap | null }, txs ?? [])
     return {
       key: def.id,
@@ -227,7 +227,7 @@ export default async function InversionesPage() {
       industry: def.industry ?? '',
       color: def.color ?? '#888',
       vendors: (def.vendors ?? []) as string[],
-      deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss,
+      deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, directSpend,
       balance, valorizationNet: passiveValuation - markToMarketLoss,
     }
   })

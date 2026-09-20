@@ -109,6 +109,7 @@ const TX_META: Record<string, { label: string; color: string; sign: 1 | -1 }> = 
   rendimiento:  { label: 'Rendimiento', color: '#a3e635', sign:  1 },
   valorizacion: { label: 'Valoriz.',    color: '#86efac', sign:  1 },
   perdida:      { label: 'Pérdida',     color: '#fb923c', sign: -1 },
+  gasto_directo:{ label: 'Gasto directo', color: '#c084fc', sign: -1 },
   otro:         { label: 'Otro',        color: '#a1a1aa', sign: -1 },
 }
 
@@ -150,7 +151,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
     vendors: [],
     balance: liquidBalance,
     deposits: 0, liquidaciones: 0, rendimientos: 0,
-    passiveValuation: 0, markToMarketLoss: 0, valorizationNet: 0,
+    passiveValuation: 0, markToMarketLoss: 0, directSpend: 0, valorizationNet: 0,
   }
 
   const allItems = [...buckets, liquidItem]
@@ -330,6 +331,9 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                   { label: 'Depósitos',     crc: sel.deposits,                            display: fmtFull(sel.deposits),   color: 'text-zinc-200',  sub: 'cash in' },
                   { label: 'Liquidaciones', crc: sel.liquidaciones,                       display: fmtFull(sel.liquidaciones), color: 'text-rose-400', sub: 'cash out' },
                   { label: 'Rendimientos',  crc: sel.passiveValuation + sel.rendimientos, display: fmtFull(sel.passiveValuation + sel.rendimientos), color: 'text-[#a3e635]', sub: 'NAV + efectivo' },
+                  ...(sel.directSpend > 0 ? [
+                    { label: 'Gasto directo', crc: sel.directSpend, display: fmtFull(sel.directSpend), color: 'text-purple-400', sub: 'pagado con tarjeta/bucket' },
+                  ] : []),
                 ].map(k => (
                   <div key={k.label} className="rounded-xl bg-white/[0.03] px-3 py-3">
                     <p className={`text-base font-black tabular-nums ${k.color}`}>{k.display}</p>

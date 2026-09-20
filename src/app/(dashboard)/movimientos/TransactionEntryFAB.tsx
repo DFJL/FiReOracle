@@ -395,6 +395,7 @@ export function TransactionEntryFAB({
           is_survival_expense: isSurvival,
           notes: notes || undefined,
           debit_envelope_id: debitEnvelopeId || undefined,
+          investment_bucket_id: investmentBucketId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
@@ -466,6 +467,7 @@ export function TransactionEntryFAB({
           is_survival_expense: isSurvival,
           notes: notes || undefined,
           debit_envelope_id: debitEnvelopeId || undefined,
+          investment_bucket_id: investmentBucketId || undefined,
           loan_id: loanMode && loanMode !== 'new' ? loanMode : undefined,
           new_loan_description: loanMode === 'new' ? (newLoanDesc.trim() || concept.trim() || vendor.trim() || undefined) : undefined,
           mortgage_loan_id: mortgageLoanId || undefined,
@@ -626,7 +628,7 @@ export function TransactionEntryFAB({
             {/* Type selector — hidden in AI mode */}
             {!aiMode && <div className="grid grid-cols-2 gap-1.5">
               {TYPE_OPTIONS.map(opt => (
-                <button key={opt.value} type="button" onClick={() => { setType(opt.value); setError(null) }}
+                <button key={opt.value} type="button" onClick={() => { setType(opt.value); setError(null); setInvestmentBucketId('') }}
                   className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
                     type === opt.value ? 'bg-white/[0.06] border-white/[0.12]' : 'border-transparent hover:bg-white/[0.03]'
                   }`}>
@@ -947,6 +949,18 @@ export function TransactionEntryFAB({
                             {leafEnvelopes.map(env => (
                               <option key={env.id} value={env.id}>{envelopeLabel(env, envelopes)}</option>
                             ))}
+                          </select>
+                        </div>
+                      )}
+                      {type === 'gasto' && buckets.length > 0 && (
+                        <div>
+                          <label className={lbl}>
+                            Pagado con bucket de inversión
+                            <span className="text-zinc-700 normal-case tracking-normal"> (ej. tarjeta de débito crypto — resta del bucket)</span>
+                          </label>
+                          <select value={investmentBucketId} onChange={e => setInvestmentBucketId(e.target.value)} className={inputCls}>
+                            <option value="">— ninguno (pagado con líquido) —</option>
+                            {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                           </select>
                         </div>
                       )}

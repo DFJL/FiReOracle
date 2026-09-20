@@ -84,6 +84,7 @@ export type CreateTransactionInput =
       category_code?: string
       is_settlement?: boolean
       is_survival_expense?: boolean
+      investment_bucket_id?: string  // optional: paid straight from this bucket (e.g. a crypto debit card) — debits it like a liquidación
       notes?: string
     } & CurrencyFields & SideEffects)
   | ({
@@ -267,6 +268,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       concept: input.concept.trim() || null,
       expense_group: input.expense_group,
       category_code: input.category_code ?? null,
+      investment_bucket_id: input.investment_bucket_id ?? null,
       movement_type: 'expense',
       is_passive_income: false,
       is_settlement: input.is_settlement ?? false,

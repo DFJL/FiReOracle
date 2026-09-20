@@ -16,6 +16,7 @@ export interface BucketData {
   rendimientos: number
   passiveValuation: number
   markToMarketLoss: number
+  directSpend: number
   balance: number
   valorizationNet: number
   positions?: BucketPosition[]
@@ -25,7 +26,7 @@ export interface BucketData {
   balanceHistory?: { date: string; balance: number; balanceNative: number | null }[]
 }
 
-export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida' | 'otro'
+export type BucketTxType = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida' | 'gasto_directo' | 'otro'
 
 export interface BucketTx {
   id: string

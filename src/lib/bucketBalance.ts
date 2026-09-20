@@ -51,6 +51,7 @@ export interface BucketTotals {
   rendimientos: number
   passiveValuation: number
   markToMarketLoss: number
+  directSpend: number   // spent straight from the bucket (e.g. a crypto debit card purchase) — reduces balance like a liquidación but never touched cash/Líquido
   balance: number
 }
 
@@ -61,7 +62,7 @@ export function normalizeVendor(v: string): string {
 }
 
 export function computeBucketTotals(def: BucketDef, txs: BucketTxRow[]): BucketTotals {
-  let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0, markToMarketLoss = 0
+  let deposits = 0, liquidaciones = 0, rendimientos = 0, passiveValuation = 0, markToMarketLoss = 0, directSpend = 0
   const baselineDate = def.baseline_date ?? null
 
   for (const tx of txs) {
@@ -80,6 +81,10 @@ export function computeBucketTotals(def: BucketDef, txs: BucketTxRow[]): BucketT
           else rendimientos += amt
         }
         else if (tx.is_passive_income && !tx.movement_type) passiveValuation += amt
+        // A regular expense billed directly to this bucket — e.g. a purchase
+        // paid with a crypto debit card. Never touched cash/Líquido, but it
+        // still leaves the bucket, same as a liquidación.
+        else if (tx.movement_type === 'expense') directSpend += amt
       } else if (ciIncludes(cm.depositConcepts))       deposits += amt
       else if (ciIncludes(cm.rendimientosConcepts))    rendimientos += amt
       else if (ciIncludes(cm.valorizacionConcepts))    passiveValuation += amt
@@ -98,13 +103,13 @@ export function computeBucketTotals(def: BucketDef, txs: BucketTxRow[]): BucketT
   }
 
   const baseline = def.baseline_value_crc ?? 0
-  const balance = baseline + deposits + passiveValuation + rendimientos - liquidaciones
-  return { deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, balance }
+  const balance = baseline + deposits + passiveValuation + rendimientos - liquidaciones - directSpend
+  return { deposits, liquidaciones, rendimientos, passiveValuation, markToMarketLoss, directSpend, balance }
 }
 
 // Same classification used above, exposed standalone for building a per-bucket
 // transaction *history* list (display only — doesn't touch the balance).
-export type BucketTxKind = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida' | 'otro'
+export type BucketTxKind = 'deposit' | 'liquidacion' | 'rendimiento' | 'valorizacion' | 'perdida' | 'gasto_directo' | 'otro'
 
 export function classifyBucketTx(def: BucketDef, tx: BucketTxRow): BucketTxKind | null {
   if (def.bucket_type === 'concept_based' && def.concept_map) {
@@ -117,7 +122,7 @@ export function classifyBucketTx(def: BucketDef, tx: BucketTxRow): BucketTxKind 
       if (tx.is_passive_income && tx.movement_type === 'income')                  return 'rendimiento'
       if (tx.is_passive_income)                                                   return 'valorizacion'
       if (tx.movement_type === 'income')                                          return 'rendimiento'
-      if (tx.movement_type === 'expense')                                         return 'perdida'
+      if (tx.movement_type === 'expense')                                         return 'gasto_directo'
       return null
     }
     if (ci(cm.depositConcepts))       return 'deposit'
