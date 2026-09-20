@@ -9,6 +9,7 @@ import { TelegramManager } from './TelegramManager'
 import { PaymentRemindersManager } from './PaymentRemindersManager'
 import { getPaymentReminders, suggestPaymentReminders } from '@/app/actions/inbox'
 import { getTelegramConfig } from '@/app/actions/telegram'
+import { buildRootCodeMap, cleanLifestyleOutliers, avgMonthlyInWindow } from '@/lib/lifestyleExpenses'
 
 function Section({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -36,6 +37,8 @@ export default async function ConfiguracionPage() {
     { data: accounts },
     { data: fireConfig },
     { data: loans },
+    { data: txs },
+    { data: categories },
     telegramConfig,
     paymentReminders,
     reminderSuggestions,
@@ -59,10 +62,28 @@ export default async function ConfiguracionPage() {
     admin.from('loans')
       .select('id, name, payment_day, currency_code')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
+    // For the FIRE "gasto mensual objetivo" preview — real trailing-12m
+    // average, same outlier-cleaned pipeline as /progreso, so the number
+    // shown here never drifts from what actually drives the FIRE number.
+    admin.from('transactions')
+      .select('date, amount, movement_type, expense_group, category_code, concept, is_survival_expense')
+      .eq('user_id', user.id)
+      .not('amount', 'is', null)
+      .range(0, 49999),
+    admin.from('transaction_categories')
+      .select('code, parent_code')
+      .eq('is_active', true),
     getTelegramConfig(),
     getPaymentReminders(),
     suggestPaymentReminders(),
   ])
+
+  const now = new Date()
+  const rolling12StartStr = new Date(now.getFullYear(), now.getMonth() - 12, 1).toISOString().slice(0, 10)
+  const rolling12EndStr   = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const getRootCode = buildRootCodeMap((categories ?? []) as { code: string; parent_code?: string | null }[])
+  const { cleaned: cleanedLifestyleTxs } = cleanLifestyleOutliers(txs ?? [], getRootCode)
+  const avgMonthlyExpenses = avgMonthlyInWindow(cleanedLifestyleTxs, rolling12StartStr, rolling12EndStr)
 
   return (
     <>
@@ -81,7 +102,7 @@ export default async function ConfiguracionPage() {
 
         {/* ── 1. Perfil & FIRE ─────────────────────── */}
         <Section label="Perfil & FIRE" sub="Parámetros iniciales — actualizalos cuando cambien tus metas o ingresos.">
-          <FireConfigManager existing={fireConfig ?? null} />
+          <FireConfigManager existing={fireConfig ?? null} avgMonthlyExpenses={avgMonthlyExpenses} />
         </Section>
 
         {/* ── 2. Alertas & Recordatorios ───────────── */}

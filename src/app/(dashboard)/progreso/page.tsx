@@ -461,8 +461,11 @@ export default async function ProgresoPage() {
 
   // FIRE metrics
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  // targetExp stays lifestyle-only: in retirement the loans are paid off
-  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgMonthlyExpenses
+  // targetExp is always the real trailing-12m average (lifestyle-only: in
+  // retirement the loans are paid off) — never a manually-typed guess. A
+  // stale hand-entered number here silently understated the FIRE number
+  // for months without anyone noticing it had drifted from real spending.
+  const targetExp  = avgMonthlyExpenses
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0

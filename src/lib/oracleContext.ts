@@ -276,7 +276,9 @@ export async function buildOracleContext(userId: string): Promise<string> {
 
   // ── FIRE metrics ──────────────────────────────────────────────────────────
   const swr        = fireConfig?.fire_withdrawal_rate   ?? 0.04
-  const targetExp  = fireConfig?.fire_target_monthly_exp ?? avgLifestyleExpenses
+  // Always the real trailing-12m average — never a manually-typed target
+  // that can silently drift from actual spending. Kept in sync with /progreso.
+  const targetExp  = avgLifestyleExpenses
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const latestSnap = (snapshots ?? []).slice(-1)[0]

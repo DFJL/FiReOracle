@@ -314,7 +314,9 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
     : avgMonthlyObligations > 0 ? liquidBalance / avgMonthlyObligations : 0
 
   const swr = fireConfig?.fire_withdrawal_rate ?? 0.04
-  const targetExp = fireConfig?.fire_target_monthly_exp ?? avgLifestyleExpenses
+  // Always the real trailing-12m average — never a manually-typed target
+  // that can silently drift from actual spending. Kept in sync with /progreso.
+  const targetExp = avgLifestyleExpenses
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
   const fireProgress = fireNumber > 0 ? (activosInvertibles / fireNumber) * 100 : 0
 
