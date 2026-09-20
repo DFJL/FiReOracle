@@ -20,6 +20,7 @@ function fmtCRC(v: number) { return `₡${Math.round(v).toLocaleString('es-CR')}
 export function FireConfigManager({ existing, avgMonthlyExpenses }: Props) {
   const defaults = {
     fire_withdrawal_rate:    existing?.fire_withdrawal_rate    ?? 0.04,
+    fire_target_monthly_exp: existing?.fire_target_monthly_exp ?? null,
     fire_expected_return:    existing?.fire_expected_return    ?? 0.07,
     fire_inflation_rate:     existing?.fire_inflation_rate     ?? 0.04,
     runway_green_months:     existing?.runway_green_months     ?? 6,
@@ -31,6 +32,7 @@ export function FireConfigManager({ existing, avgMonthlyExpenses }: Props) {
   }
 
   const [withdrawal, setWithdrawal]         = useState(pct(defaults.fire_withdrawal_rate))
+  const [targetExp, setTargetExp]           = useState(defaults.fire_target_monthly_exp?.toString() ?? '')
   const [expectedReturn, setExpectedReturn] = useState(rate(defaults.fire_expected_return))
   const [inflation, setInflation]           = useState(rate(defaults.fire_inflation_rate))
   const [runwayGreen, setRunwayGreen]       = useState(defaults.runway_green_months.toString())
@@ -50,6 +52,7 @@ export function FireConfigManager({ existing, avgMonthlyExpenses }: Props) {
 
     const payload: FinancialConfigData = {
       fire_withdrawal_rate:    parseFloat(withdrawal) / 100,
+      fire_target_monthly_exp: targetExp ? parseFloat(targetExp) : null,
       fire_expected_return:    parseFloat(expectedReturn) / 100,
       fire_inflation_rate:     parseFloat(inflation) / 100,
       runway_green_months:     parseInt(runwayGreen),
@@ -84,12 +87,25 @@ export function FireConfigManager({ existing, avgMonthlyExpenses }: Props) {
           </div>
           <div>
             <label className={labelCls}>Gasto mensual objetivo (₡) <span className="text-zinc-700 normal-case tracking-normal">en retiro</span></label>
-            <div className={`${inputCls} text-zinc-400 pointer-events-none`}>
-              {fmtCRC(avgMonthlyExpenses)}
-            </div>
-            <p className="text-[9px] text-zinc-700 mt-1">
-              Promedio real de tus últimos 12 meses — ya no es editable a mano, para que el FIRE number no quede pegado a un número viejo que dejó de reflejar tu gasto real.
-            </p>
+            {avgMonthlyExpenses > 0 ? (
+              <>
+                <div className={`${inputCls} text-zinc-400 pointer-events-none`}>
+                  {fmtCRC(avgMonthlyExpenses)}
+                </div>
+                <p className="text-[9px] text-zinc-700 mt-1">
+                  Promedio real de tus últimos 12 meses — con historial de gasto, se usa siempre este número en vez de uno puesto a mano, para que el FIRE number no quede pegado a un valor viejo.
+                </p>
+              </>
+            ) : (
+              <>
+                <input type="number" step="1000" min="0" value={targetExp}
+                  onChange={e => setTargetExp(e.target.value)} placeholder="ej. 1,500,000"
+                  className={inputCls} />
+                <p className="text-[9px] text-zinc-700 mt-1">
+                  Todavía no tenés suficiente historial de gasto — este valor es solo un punto de partida. En cuanto haya datos reales de 12 meses, se usa ese número automáticamente y este campo deja de aplicar.
+                </p>
+              </>
+            )}
           </div>
           <div>
             <label className={labelCls}>Retorno esperado anual (%)</label>
@@ -102,11 +118,11 @@ export function FireConfigManager({ existing, avgMonthlyExpenses }: Props) {
               onChange={e => setInflation(e.target.value)} className={inputCls} />
           </div>
         </div>
-        {avgMonthlyExpenses > 0 && (
+        {(avgMonthlyExpenses > 0 || parseFloat(targetExp) > 0) && (
           <p className="text-[10px] text-zinc-600">
             FIRE Number estimado:{' '}
             <span className="text-zinc-400 font-semibold">
-              {fmtCRC((avgMonthlyExpenses * 12) / defaults.fire_withdrawal_rate)}
+              {fmtCRC(((avgMonthlyExpenses > 0 ? avgMonthlyExpenses : parseFloat(targetExp) || 0) * 12) / defaults.fire_withdrawal_rate)}
             </span>
           </p>
         )}

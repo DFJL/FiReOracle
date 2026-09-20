@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 
 export type FinancialConfigData = {
   fire_withdrawal_rate: number
+  fire_target_monthly_exp: number | null
   fire_expected_return: number
   fire_inflation_rate: number
   runway_green_months: number
