@@ -6,6 +6,7 @@ import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
 import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 import { GENERIC_PASSIVE_CATEGORIES, normalizeVendorKey } from '@/lib/passiveIncomeCategory'
+import { countableEnvelopeIds } from '@/lib/envelopeBalances'
 
 type ConceptMap = {
   depositConcepts: string[]
@@ -54,7 +55,6 @@ export default async function ProgresoPage() {
     { data: assetRows },
     { data: snapshotRows },
     { data: categories },
-    { data: savingsBudgets },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('user_investment_buckets')
@@ -82,18 +82,6 @@ export default async function ProgresoPage() {
       .select('code, name, group_gasto, parent_code')
       .eq('is_active', true)
       .order('sort_order'),
-    // Ground truth for "is this envelope actually a savings/investment
-    // goal" — envelope_type is null on most envelopes (only 6 of ~33 carry
-    // emergencia/meta_especifica), but the budget the user built themselves
-    // already tags each envelope-linked budget line as savings/expense/
-    // income. "Ahorro impuestos casa", "Sita paseos", "Vacaciones", etc.
-    // are budget_type='savings' with no envelope_type — real savings the
-    // old emergencia/meta_especifica-only filter was silently dropping.
-    admin.from('budgets')
-      .select('envelope_id')
-      .eq('user_id', user.id)
-      .eq('budget_type', 'savings')
-      .not('envelope_id', 'is', null),
   ])
 
   // FU Money chart: exclude locked retirement funds (ROP & FCL, Pensión
@@ -241,23 +229,27 @@ export default async function ProgresoPage() {
     .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
-  // Savings envelopes: leaf envelopes tagged 'emergencia' or 'meta_especifica'
-  // (e.g. Emma, Mariam, FU Money, Reserva hipoteca SP), UNIONED with any
-  // envelope the user's own budget already tags budget_type='savings' —
-  // most savings envelopes (Ahorro impuestos casa, Sita paseos, Vacaciones,
-  // Felipe Ahorro salidas...) never got an envelope_type set, so the old
-  // type-only filter silently dropped them from every ahorro calculation.
-  const budgetSavingsEnvelopeIds = new Set(
-    (savingsBudgets ?? []).map(b => b.envelope_id).filter((id): id is string => !!id)
-  )
-  const savingsEnvelopeIds = new Set(
-    (envelopes ?? [])
-      .filter(e =>
-        (e as { envelope_type?: string | null }).envelope_type === 'emergencia' ||
-        (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica' ||
-        budgetSavingsEnvelopeIds.has(e.id)
-      )
-      .map(e => e.id)
+  // ALL leaf/countable envelopes (not just "goal" ones tagged emergencia/
+  // meta_especifica or budget_type='savings') — a recurring quincenal
+  // "Plan transferencias" contribution to a sinking fund for a known
+  // recurring expense (Escuela Mariam, Limpieza, CrossFit, Corte pelo
+  // Barba, Seguro carro...) is the exact same behavior — money moving
+  // from Líquido BAC into an envelope on a schedule — as one to a
+  // discretionary goal envelope. Scoping to "savings-flavored" envelopes
+  // only was silently dropping every recurring-expense envelope's real
+  // monthly contribution from the ahorro tally.
+  //
+  // Excluded: "Líquido*" and "Intereses*" envelopes. Those are the
+  // operational/liquid checking float itself (the SOURCE of the quincenal
+  // transfers, e.g. salary landing in Líquido BAC) and interest-accrual
+  // trackers — not savings destinations. Counting their own deposits
+  // as "ahorro" double-counts income that's already the source of the
+  // real transfers, not a new contribution.
+  const contribEnvelopeIds = new Set(
+    [...countableEnvelopeIds(envelopes ?? [])].filter(id => {
+      const name = (envelopes ?? []).find(e => e.id === id)?.name ?? ''
+      return !/^l[ií]quido|^intereses/i.test(name)
+    })
   )
   const envelopeNameMap = new Map(
     (envelopes ?? []).map(e => [e.id, (e as { name?: string | null }).name ?? 'Sobre'])
@@ -275,7 +267,7 @@ export default async function ProgresoPage() {
   // aside this period.
   const avgMonthlyEnvelopeContribs = (movements ?? [])
     .filter(m =>
-      savingsEnvelopeIds.has(m.envelope_id) &&
+      contribEnvelopeIds.has(m.envelope_id) &&
       m.movement_type === 'deposito' &&
       !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test((m as { notes?: string | null }).notes ?? '') &&
       (m as { date?: string | null }).date &&
@@ -787,7 +779,7 @@ export default async function ProgresoPage() {
     // an autopréstamo repayment is money moving between envelopes the user
     // already had, not new liquidity being set aside.
     const envelopeContribs = (movements ?? []).filter(m =>
-      savingsEnvelopeIds.has(m.envelope_id) &&
+      contribEnvelopeIds.has(m.envelope_id) &&
       m.movement_type === 'deposito' &&
       !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test((m as { notes?: string | null }).notes ?? '') &&
       (m as { date?: string | null }).date?.slice(0, 7) === ym
