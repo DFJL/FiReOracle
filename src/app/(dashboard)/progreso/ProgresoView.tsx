@@ -25,6 +25,14 @@ type SavingsRateMonth = {
   income: number
 }
 
+type LiquidityTierItem = { name: string; value: number; isRental?: boolean }
+export type LiquidityBreakdown = {
+  liquid:     { total: number; items: LiquidityTierItem[] }
+  semiLiquid: { total: number; items: LiquidityTierItem[] }
+  locked:     { total: number; items: LiquidityTierItem[] }
+  realEstate: { total: number; items: LiquidityTierItem[] }
+}
+
 type AhorroInversionSource = { name: string; amountMonthly: number; pct: number }
 type AhorroInversionRawSource = { name: string; amount: number }
 
@@ -61,11 +69,9 @@ type PassiveIncomeData = {
 
 type Props = {
   activosInvertibles: number
-  liquidBalance: number
-  totalInvested: number
+  liquidityBreakdown: LiquidityBreakdown
   fireNumber: number
   leanFireNumber: number
-  fireProgress: number
   runway: number
   runwaySurvival: number
   avgMonthlyExpenses: number
@@ -99,8 +105,8 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 }
 
 export function ProgresoView({
-  activosInvertibles, liquidBalance, totalInvested,
-  fireNumber, leanFireNumber, fireProgress, runway, runwaySurvival,
+  activosInvertibles, liquidityBreakdown,
+  fireNumber, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
@@ -149,10 +155,23 @@ export function ProgresoView({
     alerts.push({ level: 'warning', msg: `Tasa de ahorro muy baja: ${(savingsRate * 100).toFixed(0)}%` })
   }
 
+  // Escenarios de liquidez — activosInvertibles por default ya viene como
+  // líquido + semi-líquido (práctica estándar de FIRE: solo lo que podés
+  // retirar a la tasa segura). Bloqueado (ROP & FCL, Pensión Voluntaria —
+  // ~20+ años hasta pensión) y bienes raíces quedan destildados por default;
+  // el usuario los puede sumar para explorar el "qué pasa si los cuento".
+  const [includeLocked, setIncludeLocked] = useState(false)
+  const [includeRealEstate, setIncludeRealEstate] = useState(false)
+  const isDefaultScenario = !includeLocked && !includeRealEstate
+  const effectiveActivos = activosInvertibles
+    + (includeLocked ? liquidityBreakdown.locked.total : 0)
+    + (includeRealEstate ? liquidityBreakdown.realEstate.total : 0)
+  const effectiveFireProgress = fireNumber > 0 ? effectiveActivos / fireNumber : 0
+
   // Radial progress ring
   const R      = 54
   const circ   = 2 * Math.PI * R
-  const pct    = Math.min(fireProgress, 1)
+  const pct    = Math.min(effectiveFireProgress, 1)
   const offset = circ * (1 - pct)
 
   return (
@@ -233,9 +252,11 @@ export function ProgresoView({
           <div className="flex-1 w-full space-y-5 text-center sm:text-left">
             <div>
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-0.5">Activos Invertibles</p>
-              <p className="text-4xl font-black text-white">{fmt(activosInvertibles)}</p>
+              <p className="text-4xl font-black text-white">{fmt(effectiveActivos)}</p>
               <p className="text-[10px] text-zinc-600 mt-1">
-                Líquido {fmt(liquidBalance)} · Invertido {fmt(totalInvested)}
+                Líquido {fmt(liquidityBreakdown.liquid.total)} · Semi-líquido {fmt(liquidityBreakdown.semiLiquid.total)}
+                {includeLocked && ` · Bloqueado ${fmt(liquidityBreakdown.locked.total)}`}
+                {includeRealEstate && ` · Bienes raíces ${fmt(liquidityBreakdown.realEstate.total)}`}
               </p>
             </div>
 
@@ -249,24 +270,33 @@ export function ProgresoView({
               </div>
               <div>
                 <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-0.5">
-                  {fireProgress >= 1 ? 'Alcanzado 🎯' : 'Falta'}
+                  {effectiveFireProgress >= 1 ? 'Alcanzado 🎯' : 'Falta'}
                 </p>
-                <p className={`text-lg font-bold ${fireProgress >= 1 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
-                  {fireProgress >= 1 ? fmt(activosInvertibles - fireNumber) : fmt(fireNumber - activosInvertibles)}
+                <p className={`text-lg font-bold ${effectiveFireProgress >= 1 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                  {effectiveFireProgress >= 1 ? fmt(effectiveActivos - fireNumber) : fmt(fireNumber - effectiveActivos)}
                 </p>
-                {yearsToFire !== null && yearsToFire > 0 && (
+                {isDefaultScenario && yearsToFire !== null && yearsToFire > 0 && (
                   <p className="text-[10px] text-zinc-500">~{yearsToFire} {yearsToFire === 1 ? 'año' : 'años'}</p>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+        <LiquidityScenarioPanel
+          breakdown={liquidityBreakdown}
+          includeLocked={includeLocked}
+          includeRealEstate={includeRealEstate}
+          onToggleLocked={() => setIncludeLocked(v => !v)}
+          onToggleRealEstate={() => setIncludeRealEstate(v => !v)}
+          fmt={fmt}
+        />
       </div>}
 
       {/* FIRE milestones */}
       {fireNumber > 0 && (
         <MilestoneStrip
-          activosInvertibles={activosInvertibles}
+          activosInvertibles={effectiveActivos}
           fireNumber={fireNumber}
           leanFireNumber={leanFireNumber}
           avgMonthlyExpenses={avgMonthlyExpenses}
@@ -448,6 +478,70 @@ function KpiCard({ label, value, unit, sub, color, tooltip }: {
       <p className="text-2xl font-black leading-none" style={{ color }}>{value}</p>
       <p className="text-[10px] text-zinc-500 mt-1">{unit}</p>
       <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>
+    </div>
+  )
+}
+
+function LiquidityScenarioPanel({
+  breakdown, includeLocked, includeRealEstate, onToggleLocked, onToggleRealEstate, fmt,
+}: {
+  breakdown: LiquidityBreakdown
+  includeLocked: boolean
+  includeRealEstate: boolean
+  onToggleLocked: () => void
+  onToggleRealEstate: () => void
+  fmt: (v: number) => string
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  const rows: {
+    key: string; label: string; tier: LiquidityBreakdown['liquid']
+    checked: boolean; fixed: boolean; onToggle?: () => void; note: string
+  }[] = [
+    { key: 'liquid', label: 'Líquido', tier: breakdown.liquid, checked: true, fixed: true, note: 'sobres — disponible ya' },
+    { key: 'semiLiquid', label: 'Semi-líquido', tier: breakdown.semiLiquid, checked: true, fixed: true, note: 'portafolio — vendible en días/semanas' },
+    { key: 'locked', label: 'Bloqueado', tier: breakdown.locked, checked: includeLocked, fixed: false, onToggle: onToggleLocked, note: 'retiro — no disponible hasta pensión (~20+ años)' },
+    { key: 'realEstate', label: 'Bienes raíces', tier: breakdown.realEstate, checked: includeRealEstate, fixed: false, onToggle: onToggleRealEstate, note: 'ilíquido — requiere vender (o generar renta, si aplica)' },
+  ]
+
+  return (
+    <div className="mt-6 pt-5 border-t border-white/[0.06]">
+      <button onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] hover:text-zinc-400 transition-colors">
+        <span>Escenarios · qué cuenta como &quot;activos invertibles&quot;</span>
+        <span>{expanded ? '−' : '+'}</span>
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-2">
+          {rows.map(r => (
+            <label key={r.key}
+              className={`flex items-start gap-2.5 px-3 py-2.5 rounded-xl border transition-colors ${
+                r.fixed
+                  ? 'bg-white/[0.02] border-white/[0.04]'
+                  : `cursor-pointer hover:border-white/[0.12] ${r.checked ? 'bg-[#a3e635]/[0.06] border-[#a3e635]/20' : 'bg-white/[0.02] border-white/[0.04]'}`
+              }`}>
+              <input type="checkbox" checked={r.checked} disabled={r.fixed} onChange={r.onToggle}
+                className="mt-0.5 shrink-0 accent-[#a3e635]" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-zinc-200">{r.label}</p>
+                  <p className="text-xs font-black tabular-nums text-zinc-300">{fmt(r.tier.total)}</p>
+                </div>
+                <p className="text-[9px] text-zinc-600">{r.note}</p>
+                {r.tier.items.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {r.tier.items.map(it => (
+                      <span key={it.name} className="text-[9px] text-zinc-600 tabular-nums">
+                        {it.name}{it.isRental ? ' (alquiler)' : ''}: {fmt(it.value)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

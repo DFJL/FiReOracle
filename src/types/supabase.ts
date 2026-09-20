@@ -240,6 +240,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_investable: boolean
+          is_rental: boolean
           name: string
           notes: string | null
           sort_order: number
@@ -254,6 +255,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_investable?: boolean
+          is_rental?: boolean
           name: string
           notes?: string | null
           sort_order?: number
@@ -268,6 +270,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_investable?: boolean
+          is_rental?: boolean
           name?: string
           notes?: string | null
           sort_order?: number
@@ -2265,6 +2268,7 @@ export type Database = {
           id: string
           industry: string | null
           is_active: boolean | null
+          liquidity_tier: string
           name: string
           sort_order: number | null
           updated_at: string | null
@@ -2283,6 +2287,7 @@ export type Database = {
           id?: string
           industry?: string | null
           is_active?: boolean | null
+          liquidity_tier?: string
           name: string
           sort_order?: number | null
           updated_at?: string | null
@@ -2301,6 +2306,7 @@ export type Database = {
           id?: string
           industry?: string | null
           is_active?: boolean | null
+          liquidity_tier?: string
           name?: string
           sort_order?: number | null
           updated_at?: string | null

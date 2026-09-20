@@ -51,7 +51,7 @@ export default async function ProgresoPage() {
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('user_investment_buckets')
-      .select('id, name, bucket_type, vendors, concept_map, account_id, baseline_date, baseline_value_crc')
+      .select('id, name, bucket_type, vendors, concept_map, account_id, baseline_date, baseline_value_crc, liquidity_tier')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('transactions')
       .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes, detail')
@@ -65,7 +65,7 @@ export default async function ProgresoPage() {
       .select('id, name, parent_envelope_id, envelope_type, counts_as_ahorro')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('assets')
-      .select('value_crc, is_investable')
+      .select('name, value_crc, is_investable, is_rental')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('net_worth_snapshots')
       .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
@@ -77,12 +77,11 @@ export default async function ProgresoPage() {
       .order('sort_order'),
   ])
 
-  // FU Money chart: exclude locked retirement funds (ROP & FCL, Pensión
-  // Voluntaria — not accessible before retirement age without penalty) from
-  // the "invertido" side of the numerator. Everything else stays untouched
-  // (FIRE number, activos invertibles, etc. still count them as real net worth).
+  // FU Money chart: exclude locked retirement funds (liquidity_tier='locked'
+  // — ROP & FCL, Pensión Voluntaria: not accessible before retirement age
+  // without penalty) from the "invertido" side of the numerator.
   const lockedBucketIds = (bucketRows ?? [])
-    .filter(b => b.name === 'ROP & FCL' || b.name === 'Pensión Voluntaria')
+    .filter(b => b.liquidity_tier === 'locked')
     .map(b => b.id)
   const { data: lockedYieldRows } = lockedBucketIds.length > 0
     ? await admin.from('investment_yield_history')
@@ -126,23 +125,49 @@ export default async function ProgresoPage() {
   // split is_passive_income into rendimientos/passiveValuation, and had no
   // path for a plain expense billed to a bucket (e.g. a crypto debit card
   // purchase) to reduce it.
-  let totalInvested = 0
-  for (const def of bucketRows ?? []) {
-    if (def.bucket_type === 'snapshot_based') {
-      totalInvested += snapshotBalances[def.id] ?? 0
-      continue
-    }
-    totalInvested += computeBucketTotals(
-      { ...def, concept_map: def.concept_map as unknown as ConceptMap | null },
-      txs ?? []
-    ).balance
-  }
+  const bucketBalances = (bucketRows ?? []).map(def => {
+    const balance = def.bucket_type === 'snapshot_based'
+      ? snapshotBalances[def.id] ?? 0
+      : computeBucketTotals(
+          { ...def, concept_map: def.concept_map as unknown as ConceptMap | null },
+          txs ?? []
+        ).balance
+    return { id: def.id, name: def.name, tier: def.liquidity_tier, balance }
+  })
+  const semiLiquidInvested = bucketBalances.filter(b => b.tier === 'semi_liquid').reduce((s, b) => s + b.balance, 0)
+  const lockedInvested     = bucketBalances.filter(b => b.tier === 'locked').reduce((s, b) => s + b.balance, 0)
 
-  const iliquidInvestable = (assetRows ?? [])
+  const realEstateAssets = (assetRows ?? [])
     .filter(a => a.is_investable)
-    .reduce((s, a) => s + Number(a.value_crc), 0)
+    .map(a => ({ name: a.name, value: Number(a.value_crc), isRental: a.is_rental }))
+  const iliquidInvestable = realEstateAssets.reduce((s, a) => s + a.value, 0)
 
-  const activosInvertibles = liquidBalance + totalInvested + iliquidInvestable
+  // Activos invertibles — el denominador del % FIRE. Práctica estándar: solo
+  // líquido + semi-líquido (lo que de verdad podés retirar a la tasa segura).
+  // "Bloqueado" (ROP & FCL, Pensión Voluntaria — inaccesibles ~20+ años hasta
+  // pensión) y bienes raíces quedan fuera del número por default — se
+  // muestran aparte en liquidityBreakdown para que el usuario pueda explorar
+  // el escenario "qué pasa si los cuento" desde la UI.
+  const activosInvertibles = liquidBalance + semiLiquidInvested
+
+  const liquidityBreakdown = {
+    liquid: {
+      total: liquidBalance,
+      items: [{ name: 'Líquido (sobres)', value: liquidBalance }],
+    },
+    semiLiquid: {
+      total: semiLiquidInvested,
+      items: bucketBalances.filter(b => b.tier === 'semi_liquid').map(b => ({ name: b.name, value: b.balance })),
+    },
+    locked: {
+      total: lockedInvested,
+      items: bucketBalances.filter(b => b.tier === 'locked').map(b => ({ name: b.name, value: b.balance })),
+    },
+    realEstate: {
+      total: iliquidInvestable,
+      items: realEstateAssets.map(a => ({ name: a.name, value: a.value, isRental: a.isRental })),
+    },
+  }
 
   // Strictly last 12 complete months
   const recent = (txs ?? []).filter(tx =>
@@ -441,7 +466,6 @@ export default async function ProgresoPage() {
   const expReturn  = fireConfig?.fire_expected_return   ?? 0.07
   const inflation  = fireConfig?.fire_inflation_rate    ?? 0.04
   const fireNumber = targetExp > 0 ? (targetExp * 12) / swr : 0
-  const fireProgress = fireNumber > 0 ? activosInvertibles / fireNumber : 0
   // Runway uses total monthly obligations: lifestyle + loan payments.
   // Only the regular scheduled installment counts here — extraordinary/
   // discretionary principal paydowns are the first thing to stop in a
@@ -792,11 +816,9 @@ export default async function ProgresoPage() {
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
       <ProgresoView
         activosInvertibles={activosInvertibles}
-        liquidBalance={liquidBalance}
-        totalInvested={totalInvested}
+        liquidityBreakdown={liquidityBreakdown}
         fireNumber={fireNumber}
         leanFireNumber={leanFireNumber}
-        fireProgress={fireProgress}
         runway={runway}
         runwaySurvival={runwaySurvival}
         avgMonthlyExpenses={avgMonthlyExpenses}
