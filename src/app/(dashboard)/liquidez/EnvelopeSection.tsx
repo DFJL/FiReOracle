@@ -92,6 +92,47 @@ function EnvelopeName({ id, name, className }: { id: string; name: string; class
   )
 }
 
+// ─── AhorroCheck ───────────────────────────────────────────────────────────────
+// Inline checkbox marking whether this envelope's deposits count as "ahorro"
+// in /progreso's Ahorro/Inversión flow — classified here, right where
+// envelopes already get created and managed, instead of a separate list
+// that's easy to forget about when a new envelope shows up.
+
+function AhorroCheck({ id, checked }: { id: string; checked: boolean }) {
+  const [value, setValue]   = useState(checked)
+  const [isPending, start]  = useTransition()
+
+  function toggle(e: React.MouseEvent | React.KeyboardEvent) {
+    e.stopPropagation()
+    const next = !value
+    setValue(next)
+    start(async () => {
+      const res = await updateEnvelope(id, { counts_as_ahorro: next })
+      if (res?.error) setValue(!next)
+    })
+  }
+
+  return (
+    <span
+      role="checkbox"
+      aria-checked={value}
+      tabIndex={0}
+      onClick={toggle}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggle(e) }}
+      title={value ? 'Cuenta como ahorro en Progreso' : 'No cuenta como ahorro en Progreso'}
+      className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[9px] font-black transition-all ${
+        isPending ? 'opacity-50' : ''
+      } ${
+        value
+          ? 'bg-[#a3e635] border-[#a3e635] text-black'
+          : 'border-zinc-700 text-transparent hover:border-zinc-500'
+      }`}
+    >
+      ✓
+    </span>
+  )
+}
+
 // ─── AddMovementPanel ──────────────────────────────────────────────────────────
 
 function AddMovementPanel({
@@ -583,6 +624,7 @@ function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
           isOpen ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
         }`}>
         <span className="w-1.5 h-1.5 rounded-full shrink-0 opacity-70" style={{ background: sub.color ?? '#888' }} />
+        <AhorroCheck id={sub.id} checked={sub.counts_as_ahorro} />
         <EnvelopeName id={sub.id} name={sub.name} className="flex-1 text-[11px] text-zinc-400" />
         <div className="shrink-0 flex flex-col items-end gap-0.5">
           <span className={`text-[11px] font-black tabular-nums ${
@@ -900,6 +942,7 @@ export function EnvelopeSection({
                 {hasChildren && (
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
                 )}
+                {!hasChildren && <AhorroCheck id={env.id} checked={env.counts_as_ahorro} />}
                 <EnvelopeName id={env.id} name={env.name} className="flex-1 text-xs text-zinc-300" />
                 <span className="text-[9px] font-bold text-zinc-600 px-1.5 py-0.5 rounded bg-white/[0.04] shrink-0">
                   {env.custodio}

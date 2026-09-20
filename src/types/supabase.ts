@@ -1609,6 +1609,7 @@ export type Database = {
         Row: {
           annual_rate: number | null
           color: string | null
+          counts_as_ahorro: boolean
           created_at: string | null
           custodio: string
           envelope_type: string | null
@@ -1624,6 +1625,7 @@ export type Database = {
         Insert: {
           annual_rate?: number | null
           color?: string | null
+          counts_as_ahorro?: boolean
           created_at?: string | null
           custodio: string
           envelope_type?: string | null
@@ -1639,6 +1641,7 @@ export type Database = {
         Update: {
           annual_rate?: number | null
           color?: string | null
+          counts_as_ahorro?: boolean
           created_at?: string | null
           custodio?: string
           envelope_type?: string | null

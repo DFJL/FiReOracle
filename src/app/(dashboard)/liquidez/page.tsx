@@ -17,6 +17,7 @@ export type SubEnvelope = {
   parent_envelope_id: string
   balance: number   // principal only (excludes interes movements)
   interest: number  // sum of interes movements (reference only)
+  counts_as_ahorro: boolean
   grandchildren: { id: string; name: string; balance: number; interest: number }[]
 }
 
@@ -31,6 +32,7 @@ export type Envelope = {
   parent_envelope_id: null
   balance: number   // principal only; sum of children if has children
   interest: number  // reference only; sum of children if has children
+  counts_as_ahorro: boolean
   children: SubEnvelope[]
 }
 
@@ -69,7 +71,7 @@ export default async function LiquidezPage() {
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id')
+      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id, counts_as_ahorro')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -125,6 +127,7 @@ export default async function LiquidezPage() {
       // rolled up: an intermediate parent's balance includes its grandchildren
       balance: rollupBalance(e.id, childrenByParent, ownBalance, countableIds),
       interest: ownInterest[e.id] ?? 0,
+      counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
       grandchildren: [],
     })
   }
@@ -159,6 +162,7 @@ export default async function LiquidezPage() {
         parent_envelope_id: null,
         balance,
         interest,
+        counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
         children,
       }
     })

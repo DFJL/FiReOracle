@@ -13,6 +13,7 @@ type EnvelopeData = {
   annual_rate: number | null
   initial_balance?: number | null
   envelope_type?: EnvelopeType | null
+  counts_as_ahorro?: boolean
 }
 
 export async function createEnvelope(data: EnvelopeData) {
@@ -89,6 +90,7 @@ export async function updateEnvelope(id: string, data: Partial<EnvelopeData>) {
       ...(data.color !== undefined && { color: data.color }),
       ...(data.annual_rate !== undefined && { annual_rate: data.annual_rate }),
       ...(data.envelope_type !== undefined && { envelope_type: data.envelope_type ?? null }),
+      ...(data.counts_as_ahorro !== undefined && { counts_as_ahorro: data.counts_as_ahorro }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -97,6 +99,7 @@ export async function updateEnvelope(id: string, data: Partial<EnvelopeData>) {
   if (error) return { error: error.message }
   revalidatePath('/liquidez')
   revalidatePath('/configuracion')
+  revalidatePath('/progreso')
 }
 
 export async function createSubEnvelope(parentId: string, data: {

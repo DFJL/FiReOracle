@@ -54,7 +54,6 @@ export default async function ProgresoPage() {
     { data: assetRows },
     { data: snapshotRows },
     { data: categories },
-    { data: savingsBudgets },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('user_investment_buckets')
@@ -69,7 +68,7 @@ export default async function ProgresoPage() {
       .select('amount, movement_type, envelope_id, date, notes')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
-      .select('id, name, parent_envelope_id, envelope_type')
+      .select('id, name, parent_envelope_id, envelope_type, counts_as_ahorro')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('assets')
       .select('value_crc, is_investable')
@@ -82,18 +81,6 @@ export default async function ProgresoPage() {
       .select('code, name, group_gasto, parent_code')
       .eq('is_active', true)
       .order('sort_order'),
-    // Ground truth for "is this envelope actually a savings/investment
-    // goal" — envelope_type is null on most envelopes (only 6 of ~33 carry
-    // emergencia/meta_especifica), but the budget the user built themselves
-    // already tags each envelope-linked budget line as savings/expense/
-    // income. "Ahorro impuestos casa", "Sita paseos", "Vacaciones", etc.
-    // are budget_type='savings' with no envelope_type — real savings the
-    // old emergencia/meta_especifica-only filter was silently dropping.
-    admin.from('budgets')
-      .select('envelope_id')
-      .eq('user_id', user.id)
-      .eq('budget_type', 'savings')
-      .not('envelope_id', 'is', null),
   ])
 
   // FU Money chart: exclude locked retirement funds (ROP & FCL, Pensión
@@ -241,22 +228,14 @@ export default async function ProgresoPage() {
     .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
-  // Savings envelopes: leaf envelopes tagged 'emergencia' or 'meta_especifica'
-  // (e.g. Emma, Mariam, FU Money, Reserva hipoteca SP), UNIONED with any
-  // envelope the user's own budget already tags budget_type='savings' —
-  // most savings envelopes (Ahorro impuestos casa, Sita paseos, Vacaciones,
-  // Felipe Ahorro salidas...) never got an envelope_type set, so the old
-  // type-only filter silently dropped them from every ahorro calculation.
-  const budgetSavingsEnvelopeIds = new Set(
-    (savingsBudgets ?? []).map(b => b.envelope_id).filter((id): id is string => !!id)
-  )
+  // Savings envelopes: explicitly classified via counts_as_ahorro (toggled
+  // in /liquidez, right next to each envelope's own header) — the user's
+  // own call on which envelopes represent real "ahorro" flow, rather than
+  // an inferred rule (envelope_type / budget_type) that silently included
+  // or excluded envelopes the user never actually reviewed.
   const savingsEnvelopeIds = new Set(
     (envelopes ?? [])
-      .filter(e =>
-        (e as { envelope_type?: string | null }).envelope_type === 'emergencia' ||
-        (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica' ||
-        budgetSavingsEnvelopeIds.has(e.id)
-      )
+      .filter(e => (e as { counts_as_ahorro?: boolean }).counts_as_ahorro === true)
       .map(e => e.id)
   )
   const envelopeNameMap = new Map(
