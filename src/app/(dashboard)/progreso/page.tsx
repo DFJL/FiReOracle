@@ -26,6 +26,24 @@ function isSavingsCategoryCode(code: string | null | undefined): boolean {
   return code === 'SAVINGS' || (code ?? '').startsWith('SAVINGS_')
 }
 
+// Which envelope_movements rows represent real savings flow for a period.
+// retiro/traslado_in/traslado_out all count (a self-loan origination
+// pulling money OUT should reduce ahorro that period, and its repayment
+// flowing back IN later should restore it — excluding traslado_in alone
+// would break that symmetry and silently undercount every self-loan cycle)
+// — only two things are excluded:
+//   - 'interes'/'apertura': not a savings *flow* (interest is passive
+//     income elsewhere; apertura is a one-time envelope-creation balance).
+//   - a 'deposito' whose notes say "Restauración saldo previo" — found two
+//     of these on the same date (2026-06-01), ~₡1.97M each on two
+//     different envelopes, clearly a backfill/migration artifact rather
+//     than money actually saved that month.
+function isNewEnvelopeSaving(m: { movement_type: string | null; notes?: string | null }): boolean {
+  if (m.movement_type === 'interes' || m.movement_type === 'apertura') return false
+  if (m.movement_type !== 'deposito') return true
+  return !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test(m.notes ?? '')
+}
+
 // Within objetivos_financieros, which SAVINGS_* codes have market exposure
 // (inversión, expected return) vs just sit liquid (ahorro puro).
 const INVERSION_CATEGORY_CODES = new Set(['SAVINGS_INVESTMENT', 'SAVINGS_PENSION'])
@@ -53,6 +71,7 @@ export default async function ProgresoPage() {
     { data: assetRows },
     { data: snapshotRows },
     { data: categories },
+    { data: savingsBudgets },
   ] = await Promise.all([
     admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
     admin.from('user_investment_buckets')
@@ -64,7 +83,7 @@ export default async function ProgresoPage() {
       .not('amount', 'is', null)
       .range(0, 49999),
     admin.from('envelope_movements')
-      .select('amount, movement_type, envelope_id, date')
+      .select('amount, movement_type, envelope_id, date, notes')
       .eq('user_id', user.id),
     admin.from('savings_envelopes')
       .select('id, name, parent_envelope_id, envelope_type')
@@ -80,6 +99,18 @@ export default async function ProgresoPage() {
       .select('code, name, group_gasto, parent_code')
       .eq('is_active', true)
       .order('sort_order'),
+    // Ground truth for "is this envelope actually a savings/investment
+    // goal" — envelope_type is null on most envelopes (only 6 of ~33 carry
+    // emergencia/meta_especifica), but the budget the user built themselves
+    // already tags each envelope-linked budget line as savings/expense/
+    // income. "Ahorro impuestos casa", "Sita paseos", "Vacaciones", etc.
+    // are budget_type='savings' with no envelope_type — real savings the
+    // old emergencia/meta_especifica-only filter was silently dropping.
+    admin.from('budgets')
+      .select('envelope_id')
+      .eq('user_id', user.id)
+      .eq('budget_type', 'savings')
+      .not('envelope_id', 'is', null),
   ])
 
   // FU Money chart: exclude locked retirement funds (ROP & FCL, Pensión
@@ -228,13 +259,21 @@ export default async function ProgresoPage() {
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
 
   // Savings envelopes: leaf envelopes tagged 'emergencia' or 'meta_especifica'
-  // (e.g. Emma, Mariam, FU Money, Reserva hipoteca SP) — liquidity the user
-  // deliberately fences off for a goal, never routed through a transaction
-  // with a SAVINGS_* category_code, so it was invisible to avgMonthlyDeposits.
+  // (e.g. Emma, Mariam, FU Money, Reserva hipoteca SP), UNIONED with any
+  // envelope the user's own budget already tags budget_type='savings' —
+  // most savings envelopes (Ahorro impuestos casa, Sita paseos, Vacaciones,
+  // Felipe Ahorro salidas...) never got an envelope_type set, so the old
+  // type-only filter silently dropped them from every ahorro calculation.
+  const budgetSavingsEnvelopeIds = new Set(
+    (savingsBudgets ?? []).map(b => b.envelope_id).filter((id): id is string => !!id)
+  )
   const savingsEnvelopeIds = new Set(
     (envelopes ?? [])
-      .filter(e => (e as { envelope_type?: string | null }).envelope_type === 'emergencia'
-                || (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica')
+      .filter(e =>
+        (e as { envelope_type?: string | null }).envelope_type === 'emergencia' ||
+        (e as { envelope_type?: string | null }).envelope_type === 'meta_especifica' ||
+        budgetSavingsEnvelopeIds.has(e.id)
+      )
       .map(e => e.id)
   )
   const envelopeNameMap = new Map(
@@ -243,7 +282,7 @@ export default async function ProgresoPage() {
   const avgMonthlyEnvelopeSavings = (movements ?? [])
     .filter(m =>
       savingsEnvelopeIds.has(m.envelope_id) &&
-      m.movement_type !== 'interes' &&
+      isNewEnvelopeSaving(m) &&
       (m as { date?: string | null }).date &&
       (m as { date: string }).date >= rolling12StartStr &&
       (m as { date: string }).date < rolling12EndStr
@@ -746,7 +785,7 @@ export default async function ProgresoPage() {
     const envelopeMovs = (movements ?? [])
       .filter(m =>
         savingsEnvelopeIds.has(m.envelope_id) &&
-        m.movement_type !== 'interes' &&
+        isNewEnvelopeSaving(m) &&
         (m as { date?: string | null }).date?.slice(0, 7) === ym
       )
     const envelopeDeposits = envelopeMovs.reduce((s, m) => s + Number(m.amount), 0)
