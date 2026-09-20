@@ -52,7 +52,7 @@ export default async function ConfiguracionPage() {
       .select('id, name, custodio, color, annual_rate, sort_order, envelope_type')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     admin.from('user_investment_buckets')
-      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order')
+      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order, liquidity_tier')
       .eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     admin.from('financial_accounts')
       .select('id, name, account_type, currency_code')

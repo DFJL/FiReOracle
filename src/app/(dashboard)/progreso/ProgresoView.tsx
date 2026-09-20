@@ -68,7 +68,6 @@ type PassiveIncomeData = {
 }
 
 type Props = {
-  activosInvertibles: number
   liquidityBreakdown: LiquidityBreakdown
   fireNumber: number
   leanFireNumber: number
@@ -105,7 +104,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 }
 
 export function ProgresoView({
-  activosInvertibles, liquidityBreakdown,
+  liquidityBreakdown,
   fireNumber, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
@@ -121,7 +120,16 @@ export function ProgresoView({
   const monthlySavings = avgMonthlyDeposits
 
   const passiveMonthlyAvg = passiveIncome12m / 12
-  const fiRatio = avgMonthlyExpenses > 0 ? passiveMonthlyAvg / avgMonthlyExpenses : 0
+  // FI uses avgMonthlyObligations (lifestyle + loan payments), not raw
+  // avgMonthlyExpenses — avgMonthlyExpenses categorically excludes ALL loan
+  // payments (root category LOANS), while avgMonthlySurvivalExpenses
+  // deliberately INCLUDES the recurring loan installment (a real obligation
+  // you can't skip, even bare-minimum). Comparing FI against a number that
+  // excludes debt service while FS includes it could make FI > FS whenever
+  // loan payments are a meaningful chunk of spend — backwards, since
+  // reaching bare survival should always be easier (lower bar) than full
+  // independence.
+  const fiRatio = avgMonthlyObligations > 0 ? passiveMonthlyAvg / avgMonthlyObligations : 0
   const fsRatio = avgMonthlySurvivalExpenses > 0 ? passiveMonthlyAvg / avgMonthlySurvivalExpenses : 0
 
   const runwayColor =
@@ -155,17 +163,21 @@ export function ProgresoView({
     alerts.push({ level: 'warning', msg: `Tasa de ahorro muy baja: ${(savingsRate * 100).toFixed(0)}%` })
   }
 
-  // Escenarios de liquidez — activosInvertibles por default ya viene como
-  // líquido + semi-líquido (práctica estándar de FIRE: solo lo que podés
-  // retirar a la tasa segura). Bloqueado (ROP & FCL, Pensión Voluntaria —
-  // ~20+ años hasta pensión) y bienes raíces quedan destildados por default;
-  // el usuario los puede sumar para explorar el "qué pasa si los cuento".
-  const [includeLocked, setIncludeLocked] = useState(false)
+  // Escenarios de liquidez — los 4 tiers son tildables. Por default: líquido +
+  // semi-líquido prendidos (práctica estándar de FIRE: solo lo que podés
+  // retirar a la tasa segura), bloqueado (ROP & FCL, Pensión Voluntaria —
+  // ~20+ años hasta pensión) y bienes raíces apagados. El usuario puede
+  // prender/apagar cualquiera para explorar el "qué pasa si cuento esto".
+  const [includeLiquid, setIncludeLiquid]         = useState(true)
+  const [includeSemiLiquid, setIncludeSemiLiquid] = useState(true)
+  const [includeLocked, setIncludeLocked]         = useState(false)
   const [includeRealEstate, setIncludeRealEstate] = useState(false)
-  const isDefaultScenario = !includeLocked && !includeRealEstate
-  const effectiveActivos = activosInvertibles
-    + (includeLocked ? liquidityBreakdown.locked.total : 0)
-    + (includeRealEstate ? liquidityBreakdown.realEstate.total : 0)
+  const isDefaultScenario = includeLiquid && includeSemiLiquid && !includeLocked && !includeRealEstate
+  const effectiveActivos =
+    (includeLiquid     ? liquidityBreakdown.liquid.total     : 0) +
+    (includeSemiLiquid ? liquidityBreakdown.semiLiquid.total : 0) +
+    (includeLocked     ? liquidityBreakdown.locked.total     : 0) +
+    (includeRealEstate ? liquidityBreakdown.realEstate.total : 0)
   const effectiveFireProgress = fireNumber > 0 ? effectiveActivos / fireNumber : 0
 
   // Radial progress ring
@@ -254,9 +266,12 @@ export function ProgresoView({
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-0.5">Activos Invertibles</p>
               <p className="text-4xl font-black text-white">{fmt(effectiveActivos)}</p>
               <p className="text-[10px] text-zinc-600 mt-1">
-                Líquido {fmt(liquidityBreakdown.liquid.total)} · Semi-líquido {fmt(liquidityBreakdown.semiLiquid.total)}
-                {includeLocked && ` · Bloqueado ${fmt(liquidityBreakdown.locked.total)}`}
-                {includeRealEstate && ` · Bienes raíces ${fmt(liquidityBreakdown.realEstate.total)}`}
+                {[
+                  includeLiquid     && `Líquido ${fmt(liquidityBreakdown.liquid.total)}`,
+                  includeSemiLiquid && `Semi-líquido ${fmt(liquidityBreakdown.semiLiquid.total)}`,
+                  includeLocked     && `Bloqueado ${fmt(liquidityBreakdown.locked.total)}`,
+                  includeRealEstate && `Bienes raíces ${fmt(liquidityBreakdown.realEstate.total)}`,
+                ].filter(Boolean).join(' · ') || 'Ningún tier seleccionado'}
               </p>
             </div>
 
@@ -285,8 +300,12 @@ export function ProgresoView({
 
         <LiquidityScenarioPanel
           breakdown={liquidityBreakdown}
+          includeLiquid={includeLiquid}
+          includeSemiLiquid={includeSemiLiquid}
           includeLocked={includeLocked}
           includeRealEstate={includeRealEstate}
+          onToggleLiquid={() => setIncludeLiquid(v => !v)}
+          onToggleSemiLiquid={() => setIncludeSemiLiquid(v => !v)}
           onToggleLocked={() => setIncludeLocked(v => !v)}
           onToggleRealEstate={() => setIncludeRealEstate(v => !v)}
           fmt={fmt}
@@ -368,10 +387,10 @@ export function ProgresoView({
         <KpiCard
           label="Independencia (FI)"
           value={`${(fiRatio * 100).toFixed(0)}%`}
-          unit="pasivo / gastos totales"
-          sub={avgMonthlyExpenses > 0 ? `meta: ${fmt(avgMonthlyExpenses)}/mes` : 'sin datos'}
+          unit="pasivo / gastos + deuda"
+          sub={avgMonthlyObligations > 0 ? `meta: ${fmt(avgMonthlyObligations)}/mes` : 'sin datos'}
           color={fiRatio >= 1 ? '#a3e635' : fiRatio >= 0.5 ? '#f59e0b' : '#71717a'}
-          tooltip="Financial Independence: % de tus gastos totales cubiertos por ingresos pasivos. Al llegar al 100% sos financieramente independiente — no necesitás trabajar."
+          tooltip="Financial Independence: % de tus gastos totales (incluyendo cuotas de préstamos) cubiertos por ingresos pasivos. Al llegar al 100% sos financieramente independiente — no necesitás trabajar."
         />
 
         <KpiCard
@@ -483,11 +502,16 @@ function KpiCard({ label, value, unit, sub, color, tooltip }: {
 }
 
 function LiquidityScenarioPanel({
-  breakdown, includeLocked, includeRealEstate, onToggleLocked, onToggleRealEstate, fmt,
+  breakdown, includeLiquid, includeSemiLiquid, includeLocked, includeRealEstate,
+  onToggleLiquid, onToggleSemiLiquid, onToggleLocked, onToggleRealEstate, fmt,
 }: {
   breakdown: LiquidityBreakdown
+  includeLiquid: boolean
+  includeSemiLiquid: boolean
   includeLocked: boolean
   includeRealEstate: boolean
+  onToggleLiquid: () => void
+  onToggleSemiLiquid: () => void
   onToggleLocked: () => void
   onToggleRealEstate: () => void
   fmt: (v: number) => string
@@ -496,12 +520,12 @@ function LiquidityScenarioPanel({
 
   const rows: {
     key: string; label: string; tier: LiquidityBreakdown['liquid']
-    checked: boolean; fixed: boolean; onToggle?: () => void; note: string
+    checked: boolean; onToggle: () => void; note: string
   }[] = [
-    { key: 'liquid', label: 'Líquido', tier: breakdown.liquid, checked: true, fixed: true, note: 'sobres — disponible ya' },
-    { key: 'semiLiquid', label: 'Semi-líquido', tier: breakdown.semiLiquid, checked: true, fixed: true, note: 'portafolio — vendible en días/semanas' },
-    { key: 'locked', label: 'Bloqueado', tier: breakdown.locked, checked: includeLocked, fixed: false, onToggle: onToggleLocked, note: 'retiro — no disponible hasta pensión (~20+ años)' },
-    { key: 'realEstate', label: 'Bienes raíces', tier: breakdown.realEstate, checked: includeRealEstate, fixed: false, onToggle: onToggleRealEstate, note: 'ilíquido — requiere vender (o generar renta, si aplica)' },
+    { key: 'liquid', label: 'Líquido', tier: breakdown.liquid, checked: includeLiquid, onToggle: onToggleLiquid, note: 'sobres — disponible ya' },
+    { key: 'semiLiquid', label: 'Semi-líquido', tier: breakdown.semiLiquid, checked: includeSemiLiquid, onToggle: onToggleSemiLiquid, note: 'portafolio — vendible en días/semanas' },
+    { key: 'locked', label: 'Bloqueado', tier: breakdown.locked, checked: includeLocked, onToggle: onToggleLocked, note: 'retiro — no disponible hasta pensión (~20+ años)' },
+    { key: 'realEstate', label: 'Bienes raíces', tier: breakdown.realEstate, checked: includeRealEstate, onToggle: onToggleRealEstate, note: 'ilíquido — requiere vender (o generar renta, si aplica)' },
   ]
 
   return (
@@ -515,12 +539,10 @@ function LiquidityScenarioPanel({
         <div className="mt-3 space-y-2">
           {rows.map(r => (
             <label key={r.key}
-              className={`flex items-start gap-2.5 px-3 py-2.5 rounded-xl border transition-colors ${
-                r.fixed
-                  ? 'bg-white/[0.02] border-white/[0.04]'
-                  : `cursor-pointer hover:border-white/[0.12] ${r.checked ? 'bg-[#a3e635]/[0.06] border-[#a3e635]/20' : 'bg-white/[0.02] border-white/[0.04]'}`
+              className={`flex items-start gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:border-white/[0.12] transition-colors ${
+                r.checked ? 'bg-[#a3e635]/[0.06] border-[#a3e635]/20' : 'bg-white/[0.02] border-white/[0.04]'
               }`}>
-              <input type="checkbox" checked={r.checked} disabled={r.fixed} onChange={r.onToggle}
+              <input type="checkbox" checked={r.checked} onChange={r.onToggle}
                 className="mt-0.5 shrink-0 accent-[#a3e635]" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">

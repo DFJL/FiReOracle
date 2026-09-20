@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { createBucket, updateBucket, deactivateBucket, type BucketFormData } from '@/app/actions/investmentBuckets'
+import { createBucket, updateBucket, deactivateBucket, type BucketFormData, type LiquidityTier } from '@/app/actions/investmentBuckets'
 import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 
 type Bucket = {
@@ -14,6 +14,18 @@ type Bucket = {
   concept_map: unknown
   account_id: string | null
   sort_order: number | null
+  liquidity_tier: string
+}
+
+const TIER_LABELS: Record<LiquidityTier, string> = {
+  liquid: 'Líquido',
+  semi_liquid: 'Semi-líquido',
+  locked: 'Bloqueado',
+}
+const TIER_HINTS: Record<LiquidityTier, string> = {
+  liquid: 'disponible ya',
+  semi_liquid: 'vendible en días/semanas — el default para portafolio',
+  locked: 'no disponible hasta pensión u otro plazo fijo (ej. retiro)',
 }
 
 type Account = { id: string; name: string; account_type: string; currency_code?: string }
@@ -56,6 +68,7 @@ function BucketForm({
   const [valorizacionC, setValorizacionC] = useState(cm?.valorizacionConcepts?.join('\n') ?? '')
   const [liquidacionC, setLiquidacionC] = useState(cm?.liquidacionConcepts?.join('\n') ?? '')
   const [accountId, setAccountId] = useState(initial?.account_id ?? '')
+  const [tier, setTier] = useState<LiquidityTier>((initial?.liquidity_tier as LiquidityTier) ?? 'semi_liquid')
   const [error, setError]     = useState('')
   const [isPending, start]    = useTransition()
 
@@ -76,6 +89,7 @@ function BucketForm({
         liquidacionConcepts:   splitLines(liquidacionC),
       } : null,
       account_id: type === 'snapshot_based' ? accountId : null,
+      liquidity_tier: tier,
     }
     start(async () => { await onSave(data) })
   }
@@ -125,6 +139,23 @@ function BucketForm({
               style={{ background: c }} />
           ))}
         </div>
+      </div>
+
+      <div>
+        <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1.5">
+          Liquidez <span className="text-zinc-700 normal-case tracking-normal">— define si cuenta para el FIRE number en /progreso</span>
+        </p>
+        <div className="flex gap-1 flex-wrap">
+          {(['liquid', 'semi_liquid', 'locked'] as const).map(t => (
+            <button key={t} type="button" onClick={() => setTier(t)}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                tier === t ? 'bg-[#a3e635] text-black' : 'bg-white/[0.06] text-zinc-400 hover:text-zinc-200'
+              }`}>
+              {TIER_LABELS[t]}
+            </button>
+          ))}
+        </div>
+        <p className="text-[9px] text-zinc-700 mt-1">{TIER_HINTS[tier]}</p>
       </div>
 
       {/* Type-specific fields */}
@@ -268,6 +299,7 @@ export function BucketManager({ buckets: initial, accounts }: { buckets: Bucket[
                   <p className="text-[10px] text-zinc-600">
                     {b.industry ?? ''}
                     {b.industry ? ' · ' : ''}{BUCKET_TYPE_LABELS[b.bucket_type] ?? b.bucket_type}
+                    {' · '}{TIER_LABELS[b.liquidity_tier as LiquidityTier] ?? b.liquidity_tier}
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">

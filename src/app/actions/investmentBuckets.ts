@@ -11,6 +11,8 @@ type ConceptMap = {
   liquidacionConcepts: string[]
 }
 
+export type LiquidityTier = 'liquid' | 'semi_liquid' | 'locked'
+
 export type BucketFormData = {
   bucket_type: 'vendor_based' | 'concept_based' | 'snapshot_based'
   name: string
@@ -19,12 +21,14 @@ export type BucketFormData = {
   vendors?: string[]
   concept_map?: ConceptMap | null
   account_id?: string | null
+  liquidity_tier: LiquidityTier
 }
 
 function revalidate() {
   revalidatePath('/inversiones')
   revalidatePath('/configuracion')
   revalidatePath('/patrimonio')
+  revalidatePath('/progreso')
 }
 
 export async function createBucket(data: BucketFormData) {
@@ -55,6 +59,7 @@ export async function createBucket(data: BucketFormData) {
       vendors: data.bucket_type === 'vendor_based' ? (data.vendors ?? []) : [],
       concept_map: data.bucket_type === 'concept_based' ? (data.concept_map ?? null) : null,
       account_id: data.bucket_type === 'snapshot_based' ? (data.account_id ?? null) : null,
+      liquidity_tier: data.liquidity_tier,
       sort_order,
       is_active: true,
     })
@@ -78,6 +83,7 @@ export async function updateBucket(id: string, data: Partial<BucketFormData>) {
       ...(data.vendors !== undefined && { vendors: data.vendors }),
       ...(data.concept_map !== undefined && { concept_map: data.concept_map }),
       ...(data.account_id !== undefined && { account_id: data.account_id }),
+      ...(data.liquidity_tier !== undefined && { liquidity_tier: data.liquidity_tier }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
