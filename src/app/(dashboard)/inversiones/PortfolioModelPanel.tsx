@@ -13,6 +13,7 @@ import {
   savePortfolioModelTargets,
   updateBucketModelCategory,
   updateAssetModelCategory,
+  updatePositionModelCategory,
 } from '@/app/actions/portfolioModel'
 
 function fmtCRC(n: number) {
@@ -41,6 +42,9 @@ const DEFAULT_INCLUDED: Record<PortfolioModelCategory, boolean> = {
   pension_locked: false,
 }
 
+type SortMode = 'gap' | 'size' | 'name'
+const SORT_LABELS: Record<SortMode, string> = { gap: 'Gap', size: 'Tamaño', name: 'Nombre' }
+
 export interface BucketOption {
   id: string
   name: string
@@ -55,23 +59,39 @@ export interface AssetOption {
   category: PortfolioModelCategory | null
 }
 
+// A snapshot_based bucket is a real brokerage account (e.g. IBKR) that can
+// hold several asset classes at once — a stock ETF and a gold ETF both sit
+// in the same account — so the category lives on the position, not the
+// bucket. bucketName is only for the display label ("IBKR · VXUS").
+export interface PositionOption {
+  id: string
+  symbol: string
+  bucketName: string
+  amount: number
+  category: PortfolioModelCategory | null
+}
+
 type HoldingRow =
   | { kind: 'bucket'; id: string; name: string; amount: number }
   | { kind: 'asset'; id: string; name: string; amount: number }
+  | { kind: 'position'; id: string; name: string; amount: number }
   | { kind: 'cash'; id: null; name: string; amount: number }
 
 export function PortfolioModelPanel({
   buckets,
   assets,
+  positions,
   cashAmount,
   targets: initialTargets,
 }: {
   buckets: BucketOption[]
   assets: AssetOption[]
+  positions: PositionOption[]
   cashAmount: number
   targets: { category: PortfolioModelCategory; target_pct: number }[]
 }) {
   const [included, setIncluded] = useState(DEFAULT_INCLUDED)
+  const [sortMode, setSortMode] = useState<SortMode>('gap')
 
   const initialDrafts = useMemo(
     () => Object.fromEntries(
@@ -87,8 +107,9 @@ export function PortfolioModelPanel({
   const holdings: ModelHolding[] = useMemo(() => [
     ...buckets.map(b => ({ name: b.name, category: b.category, amount: b.balance })),
     ...assets.map(a => ({ name: a.name, category: a.category, amount: a.netEquity })),
+    ...positions.map(p => ({ name: `${p.bucketName} · ${p.symbol}`, category: p.category, amount: p.amount })),
     { name: 'Liquidez', category: 'cash' as PortfolioModelCategory, amount: cashAmount },
-  ], [buckets, assets, cashAmount])
+  ], [buckets, assets, positions, cashAmount])
 
   const rawTotals = useMemo(() => {
     const t: Partial<Record<PortfolioModelCategory, number>> = {}
@@ -99,12 +120,14 @@ export function PortfolioModelPanel({
   const uncategorized: HoldingRow[] = [
     ...buckets.filter(b => !b.category).map(b => ({ kind: 'bucket' as const, id: b.id, name: b.name, amount: b.balance })),
     ...assets.filter(a => !a.category).map(a => ({ kind: 'asset' as const, id: a.id, name: a.name, amount: a.netEquity })),
+    ...positions.filter(p => !p.category).map(p => ({ kind: 'position' as const, id: p.id, name: `${p.bucketName} · ${p.symbol}`, amount: p.amount })),
   ]
 
   function holdingsFor(category: PortfolioModelCategory): HoldingRow[] {
     return [
       ...buckets.filter(b => b.category === category).map(b => ({ kind: 'bucket' as const, id: b.id, name: b.name, amount: b.balance })),
       ...assets.filter(a => a.category === category).map(a => ({ kind: 'asset' as const, id: a.id, name: a.name, amount: a.netEquity })),
+      ...positions.filter(p => p.category === category).map(p => ({ kind: 'position' as const, id: p.id, name: `${p.bucketName} · ${p.symbol}`, amount: p.amount })),
       ...(category === 'cash' ? [{ kind: 'cash' as const, id: null, name: 'Liquidez', amount: cashAmount }] : []),
     ]
   }
@@ -129,6 +152,25 @@ export function PortfolioModelPanel({
   const rawTargetSum = ACTIONABLE_CATEGORIES.reduce((s, c) => s + (parseFloat(drafts[c]) || 0), 0)
   const dirty = ACTIONABLE_CATEGORIES.some(c => drafts[c] !== savedDrafts[c])
 
+  // Six categories — cheap enough to just recompute on every render rather
+  // than fight the compiler over memoizing a Map that's rebuilt each render anyway.
+  const orderedCategories = (() => {
+    const withMetrics = ACTIONABLE_CATEGORIES.map(c => {
+      const row = visibleByCategory.get(c)
+      return {
+        category: c,
+        gap: included[c] ? Math.abs(row?.gapPct ?? 0) : -1,
+        size: included[c] ? (row?.actual ?? 0) : (rawTotals[c] ?? 0),
+        label: CATEGORY_LABELS[c],
+      }
+    })
+    const sorted = [...withMetrics]
+    if (sortMode === 'gap') sorted.sort((a, b) => b.gap - a.gap)
+    else if (sortMode === 'size') sorted.sort((a, b) => b.size - a.size)
+    else sorted.sort((a, b) => a.label.localeCompare(b.label))
+    return sorted.map(x => x.category)
+  })()
+
   function saveTargets() {
     setSaveError(null)
     startSaving(async () => {
@@ -142,17 +184,32 @@ export function PortfolioModelPanel({
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 space-y-5">
-      <div>
-        <h3 className="text-sm font-black text-zinc-100">Modelo de portafolio</h3>
-        <p className="text-xs text-zinc-500 mt-1">
-          Tu asignación real comparada contra tus propias metas — mapeado a tus instrumentos tal
-          cual son, no a &quot;acciones/bonos/oro&quot; genéricos (inspirado en Golden Butterfly).
-          Desmarcá lo que no querés que cuente ahora mismo.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-black text-zinc-100">Modelo de portafolio</h3>
+          <p className="text-xs text-zinc-500 mt-1 max-w-md">
+            Tu asignación real comparada contra tus propias metas — mapeado a tus instrumentos tal
+            cual son, no a &quot;acciones/bonos/oro&quot; genéricos (inspirado en Golden Butterfly).
+            Desmarcá lo que no querés que cuente ahora mismo.
+          </p>
+        </div>
+        <div className="flex items-center gap-1 bg-zinc-900 rounded-lg p-0.5 shrink-0">
+          {(['gap', 'size', 'name'] as SortMode[]).map(m => (
+            <button
+              key={m}
+              onClick={() => setSortMode(m)}
+              className={`px-2 py-1 rounded-md text-[10px] font-black tracking-wide transition-all ${
+                sortMode === m ? 'bg-lime-400 text-zinc-950' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {SORT_LABELS[m]}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-4">
-        {ACTIONABLE_CATEGORIES.map(category => {
+        {orderedCategories.map(category => {
           const isChecked = included[category]
           const row = visibleByCategory.get(category)
           const rawAmount = rawTotals[category] ?? 0
@@ -298,7 +355,8 @@ function HoldingRowView({ holding }: { holding: HoldingRow }) {
             if (!value) return
             startTransition(async () => {
               if (holding.kind === 'bucket') await updateBucketModelCategory(holding.id, value)
-              else await updateAssetModelCategory(holding.id, value)
+              else if (holding.kind === 'asset') await updateAssetModelCategory(holding.id, value)
+              else await updatePositionModelCategory(holding.id, value)
             })
           }}
           className="bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 shrink-0"

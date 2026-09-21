@@ -63,6 +63,30 @@ export async function updateBucketModelCategory(
   return { error: null }
 }
 
+// Position-level, not bucket-level: a snapshot_based bucket is a real
+// brokerage account that can hold several asset classes at once (e.g. a
+// stock ETF and a gold ETF both sitting in IBKR), so each position needs its
+// own category instead of forcing the whole account into one bucket.
+export async function updatePositionModelCategory(
+  positionId: string,
+  category: PortfolioModelCategory | null,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('account_positions')
+    .update({ portfolio_model_category: category })
+    .eq('id', positionId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidate()
+  return { error: null }
+}
+
 export async function updateAssetModelCategory(
   assetId: string,
   category: PortfolioModelCategory | null,

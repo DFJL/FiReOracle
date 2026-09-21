@@ -70,6 +70,7 @@ export type Database = {
           avg_cost_usd: number | null
           id: string
           market_value_usd: number
+          portfolio_model_category: string | null
           quantity: number
           symbol: string
           unrealized_pl_usd: number | null
@@ -81,6 +82,7 @@ export type Database = {
           avg_cost_usd?: number | null
           id?: string
           market_value_usd?: number
+          portfolio_model_category?: string | null
           quantity?: number
           symbol: string
           unrealized_pl_usd?: number | null
@@ -92,6 +94,7 @@ export type Database = {
           avg_cost_usd?: number | null
           id?: string
           market_value_usd?: number
+          portfolio_model_category?: string | null
           quantity?: number
           symbol?: string
           unrealized_pl_usd?: number | null

@@ -7,7 +7,7 @@ import { PortfolioHistory } from './PortfolioHistory'
 import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
 import { PortfolioYield } from './PortfolioYield'
 import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type EnvelopeCluster } from './PortfolioAnalysis'
-import { PortfolioModelPanel, type BucketOption, type AssetOption } from './PortfolioModelPanel'
+import { PortfolioModelPanel, type BucketOption, type AssetOption, type PositionOption } from './PortfolioModelPanel'
 import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
@@ -154,13 +154,14 @@ export default async function InversionesPage() {
           .order('snapshot_date', { ascending: false }),
         admin
           .from('account_positions')
-          .select('symbol, quantity, market_value_usd, avg_cost_usd')
+          .select('id, symbol, quantity, market_value_usd, avg_cost_usd, portfolio_model_category')
           .eq('account_id', b.account_id!)
           .order('market_value_usd', { ascending: false }),
       ])
       const latest = history?.[0]
       return {
         id: b.id,
+        bucketName: b.name,
         balance: latest?.real_balance ? Number(latest.real_balance) : 0,
         balanceNative: latest?.real_balance_native != null ? Number(latest.real_balance_native) : null,
         history: (history ?? []).map(h => ({
@@ -169,10 +170,12 @@ export default async function InversionesPage() {
           balanceNative: h.real_balance_native != null ? Number(h.real_balance_native) : null,
         })),
         positions: (positions ?? []).map(p => ({
+          id: p.id,
           symbol: p.symbol,
           quantity: Number(p.quantity),
           market_value_usd: Number(p.market_value_usd),
           avg_cost_usd: p.avg_cost_usd != null ? Number(p.avg_cost_usd) : null,
+          category: (p.portfolio_model_category ?? null) as PortfolioModelCategory | null,
         })),
       }
     })
@@ -495,17 +498,38 @@ export default async function InversionesPage() {
       l.currency_code === 'USD' ? Number(l.current_balance) * exchangeRate.sell : Number(l.current_balance),
     ])
   )
+  // Snapshot_based buckets (real brokerage accounts) are excluded here and
+  // represented via modelPositions instead — a brokerage account can hold
+  // several asset classes at once (a stock ETF and a gold ETF both in IBKR),
+  // so the model category has to live on the position, not the whole bucket.
   const modelBuckets: BucketOption[] = buckets
     .filter(b => b.key !== LIQUID_KEY)
-    .map(b => {
+    .flatMap(b => {
       const def = (bucketRows ?? []).find(d => d.id === b.key)
-      return {
+      if (def?.bucket_type === 'snapshot_based') return []
+      return [{
         id: b.key,
         name: b.name,
         balance: b.balance,
         category: (def?.portfolio_model_category ?? null) as PortfolioModelCategory | null,
-      }
+      }]
     })
+  const modelPositions: PositionOption[] = snapshotResults.flatMap(r =>
+    r.positions.map(p => ({
+      id: p.id,
+      symbol: p.symbol,
+      bucketName: r.bucketName,
+      amount: p.market_value_usd * exchangeRate.sell,
+      category: p.category,
+    }))
+  )
+  // Cash sitting idle in a brokerage account (not tied to any position) is
+  // still cash — folded into the same liquidity figure rather than shown as
+  // an unclassifiable phantom holding.
+  const brokerageIdleCash = snapshotResults.reduce((s, r) => {
+    const posTotal = r.positions.reduce((x, p) => x + p.market_value_usd * exchangeRate.sell, 0)
+    return s + Math.max(0, r.balance - posTotal)
+  }, 0)
   const modelAssets: AssetOption[] = (assetRows ?? [])
     .filter(a => a.is_investable)
     .map(a => {
@@ -562,7 +586,8 @@ export default async function InversionesPage() {
       <PortfolioModelPanel
         buckets={modelBuckets}
         assets={modelAssets}
-        cashAmount={liquidBalance}
+        positions={modelPositions}
+        cashAmount={liquidBalance + brokerageIdleCash}
         targets={modelTargets}
       />
     </div>
