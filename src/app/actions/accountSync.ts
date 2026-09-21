@@ -76,20 +76,37 @@ export async function syncAccountBalance(accountId: string, input: {
   )
   if (snapError) return { error: snapError.message }
 
+  // Carry the portfolio-model category forward by symbol — this sync
+  // replaces every row (positions have no stable external id to upsert
+  // against), and a delete+insert with no carryover would silently wipe out
+  // whatever the user had classified a position as (e.g. "GLD → oro") on
+  // every single refresh.
+  const { data: existingPositions } = await admin
+    .from('account_positions')
+    .select('symbol, portfolio_model_category')
+    .eq('account_id', accountId)
+  const categoryBySymbol = new Map(
+    (existingPositions ?? []).map(p => [p.symbol, p.portfolio_model_category])
+  )
+
   const { error: delError } = await admin.from('account_positions').delete().eq('account_id', accountId)
   if (delError) return { error: delError.message }
 
   const cleanPositions = input.positions.filter(p => p.symbol.trim())
   if (cleanPositions.length > 0) {
     const { error: insError } = await admin.from('account_positions').insert(
-      cleanPositions.map(p => ({
-        user_id: user.id,
-        account_id: accountId,
-        symbol: p.symbol.trim().toUpperCase(),
-        quantity: p.quantity,
-        market_value_usd: p.market_value_usd,
-        avg_cost_usd: p.avg_cost_usd ?? null,
-      }))
+      cleanPositions.map(p => {
+        const symbol = p.symbol.trim().toUpperCase()
+        return {
+          user_id: user.id,
+          account_id: accountId,
+          symbol,
+          quantity: p.quantity,
+          market_value_usd: p.market_value_usd,
+          avg_cost_usd: p.avg_cost_usd ?? null,
+          portfolio_model_category: categoryBySymbol.get(symbol) ?? null,
+        }
+      })
     )
     if (insError) return { error: insError.message }
   }
