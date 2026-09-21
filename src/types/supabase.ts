@@ -1063,6 +1063,30 @@ export type Database = {
         }
         Relationships: []
       }
+      life_events: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          label: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          id?: string
+          label: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          label?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       loan_payments: {
         Row: {
           amount: number

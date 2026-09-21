@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { Info } from 'lucide-react'
+import { useState, useRef, useTransition } from 'react'
+import { Info, X } from 'lucide-react'
 import Link from 'next/link'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import { createLifeEvent, deleteLifeEvent } from '@/app/actions/lifeEvents'
+
+export type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
 
 export type WealthDeltaMonth = {
   ym: string; label: string
@@ -37,7 +40,7 @@ type AhorroInversionSource = { name: string; amountMonthly: number; pct: number 
 type AhorroInversionRawSource = { name: string; amount: number }
 
 type AhorroInversionMonth = {
-  label: string; ahorro: number; inversion: number; deuda: number
+  label: string; ym: string; ahorro: number; inversion: number; deuda: number
   ahorroSources: AhorroInversionRawSource[]
   inversionSources: AhorroInversionRawSource[]
   deudaSources: AhorroInversionRawSource[]
@@ -93,6 +96,7 @@ type Props = {
   savingsRateTrend: SavingsRateMonth[]
   ahorroInversionData: AhorroInversionData
   lifestyle: LifestyleData
+  milestones: Milestone[]
 }
 
 function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
@@ -109,7 +113,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle, milestones,
 }: Props) {
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const rate = exchangeRate.sell
@@ -418,7 +422,7 @@ export function ProgresoView({
       {/* Ahorro vs. inversión — of what you set aside each month, how much
           actually has market exposure vs. sits liquid */}
       {(ahorroInversionData.ahorroMonthly + ahorroInversionData.inversionMonthly) > 0 && (
-        <AhorroInversionSection data={ahorroInversionData} fmt={fmt} />
+        <AhorroInversionSection data={ahorroInversionData} fmt={fmt} milestones={milestones} />
       )}
 
       {/* Combined historical + forecast chart */}
@@ -430,7 +434,10 @@ export function ProgresoView({
         leanFireNumber={leanFireNumber}
         currency={currency}
         rate={rate}
+        milestones={milestones}
       />
+
+      <MilestonesPanel milestones={milestones} />
 
       {/* FU Money chart */}
       <FuMoneyChart
@@ -1168,16 +1175,23 @@ function rawSourcesToDisplay(raw: AhorroInversionRawSource[], total: number): Ah
 }
 
 function AhorroInversionSection({
-  data, fmt,
+  data, fmt, milestones,
 }: {
   data: AhorroInversionData
   fmt: (v: number) => string
+  milestones: Milestone[]
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [expanded, setExpanded] = useState(false)
   const { trend, ahorroMonthly, inversionMonthly, deudaMonthly, inversionShare, ahorroSources, inversionSources, deudaSources } = data
   const maxTotal = Math.max(...trend.map(m => m.ahorro + m.inversion + m.deuda), 1)
+  const milestonesByYm = new Map<string, Milestone[]>()
+  for (const m of milestones) {
+    const ym = m.date.slice(0, 7)
+    if (!milestonesByYm.has(ym)) milestonesByYm.set(ym, [])
+    milestonesByYm.get(ym)!.push(m)
+  }
   const hov = hovIdx !== null ? trend[hovIdx] : null
   const selected = selectedIdx !== null ? trend[selectedIdx] : null
   const sharePct = inversionShare * 100
@@ -1265,6 +1279,15 @@ function AhorroInversionSection({
                 onMouseLeave={() => setHovIdx(null)}
                 onClick={() => setSelectedIdx(isSel ? null : i)}
               >
+                {milestonesByYm.has(m.ym) && (
+                  <span
+                    className="absolute top-0 text-[8px] leading-none"
+                    style={{ color: MILESTONE_COLOR[milestonesByYm.get(m.ym)![0].kind] }}
+                    title={milestonesByYm.get(m.ym)!.map(ev => ev.label).join(' · ')}
+                  >
+                    {MILESTONE_ICON[milestonesByYm.get(m.ym)![0].kind]}
+                  </span>
+                )}
                 <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
                   {isNegative ? (
                     <div
@@ -1622,8 +1645,19 @@ function WealthDeltaSection({
   )
 }
 
+const MILESTONE_COLOR: Record<Milestone['kind'], string> = {
+  auto: '#f59e0b',
+  fire: '#a3e635',
+  manual: '#f472b6',
+}
+const MILESTONE_ICON: Record<Milestone['kind'], string> = {
+  auto: '●',
+  fire: '★',
+  manual: '◆',
+}
+
 function CombinedChart({
-  snapshots, forecast, fireNumber, leanFireNumber, currency, rate,
+  snapshots, forecast, fireNumber, leanFireNumber, currency, rate, milestones,
 }: {
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
   forecast: { year: number; balance: number }[]
@@ -1631,6 +1665,7 @@ function CombinedChart({
   leanFireNumber: number
   currency: 'CRC' | 'USD'
   rate: number
+  milestones: Milestone[]
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverMs, setHoverMs] = useState<number | null>(null)
@@ -1764,6 +1799,15 @@ function CombinedChart({
         </div>
       </div>
 
+      {milestones.length > 0 && (
+        <div className="flex items-center gap-3 text-[8px] text-zinc-600">
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.auto }}>{MILESTONE_ICON.auto}</span> Movimiento grande</span>
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.fire }}>{MILESTONE_ICON.fire}</span> Hito FIRE</span>
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.manual }}>{MILESTONE_ICON.manual}</span> Nota tuya</span>
+          <span className="text-zinc-700">· pasá el mouse sobre los puntos</span>
+        </div>
+      )}
+
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -1839,6 +1883,22 @@ function CombinedChart({
           </>
         )}
 
+        {/* Milestone markers — auto-detected big transactions, FIRE crossings, manual notes */}
+        {milestones
+          .map(m => ({ ...m, ms: new Date(m.date + 'T12:00:00').getTime() }))
+          .filter(m => m.ms >= minMs && m.ms <= maxMs)
+          .map((m, i) => {
+            const x = xOf(m.ms)
+            const color = MILESTONE_COLOR[m.kind]
+            return (
+              <g key={`${m.kind}-${m.date}-${i}`} opacity={0.85}>
+                <title>{`${new Date(m.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })} — ${m.label}`}</title>
+                <line x1={x} x2={x} y1={padT} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={0.35} />
+                <circle cx={x} cy={padT + chartH + 6} r={3} fill={color} />
+              </g>
+            )
+          })}
+
         {/* FIRE hit marker */}
         {fireHitFc && (
           <g>
@@ -1868,6 +1928,101 @@ function CombinedChart({
           </text>
         ))}
       </svg>
+    </div>
+  )
+}
+
+// ── MilestonesPanel ───────────────────────────────────────────────────────────
+// Manage manual life-event notes ("Cambio de trabajo", "Compra casa Vila") —
+// these show up as ◆ markers alongside auto-detected big transactions (●)
+// and FIRE crossings (★) on the charts above.
+
+function MilestonesPanel({ milestones }: { milestones: Milestone[] }) {
+  const [expanded, setExpanded]   = useState(false)
+  const [showAdd, setShowAdd]     = useState(false)
+  const [newDate, setNewDate]     = useState(new Date().toISOString().slice(0, 10))
+  const [newLabel, setNewLabel]   = useState('')
+  const [error, setError]         = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  const manual = milestones.filter(m => m.kind === 'manual')
+
+  function handleAdd() {
+    if (!newLabel.trim()) { setError('Escribí una etiqueta'); return }
+    setError(null)
+    startTransition(async () => {
+      const res = await createLifeEvent({ date: newDate, label: newLabel.trim() })
+      if (res?.error) { setError(res.error); return }
+      setNewLabel(''); setShowAdd(false)
+    })
+  }
+
+  function handleDelete(id: string) {
+    startTransition(async () => { await deleteLifeEvent(id) })
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 space-y-3">
+      <button onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] hover:text-zinc-400 transition-colors">
+        <span>Notas y milestones {milestones.length > 0 ? `(${milestones.length})` : ''}</span>
+        <span>{expanded ? '−' : '+'}</span>
+      </button>
+      {expanded && (
+        <div className="space-y-2">
+          {milestones.length === 0 && (
+            <p className="text-xs text-zinc-600">Sin milestones todavía — ni grandes movimientos detectados ni notas tuyas.</p>
+          )}
+          {[...milestones].reverse().map((m, i) => (
+            <div key={`${m.kind}-${m.date}-${i}`} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-white/[0.02]">
+              <span className="shrink-0" style={{ color: MILESTONE_COLOR[m.kind] }}>{MILESTONE_ICON[m.kind]}</span>
+              <span className="text-[10px] text-zinc-500 shrink-0 tabular-nums">
+                {new Date(m.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: '2-digit' })}
+              </span>
+              <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{m.label}</span>
+              {m.kind === 'manual' && m.id && (
+                <button onClick={() => handleDelete(m.id!)} disabled={isPending}
+                  className="shrink-0 text-zinc-700 hover:text-rose-400 transition-colors">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+
+          {showAdd ? (
+            <div className="flex flex-wrap gap-2 items-end pt-1">
+              <div>
+                <label className="block text-[9px] text-zinc-600 mb-1">Fecha</label>
+                <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
+                  className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40" />
+              </div>
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-[9px] text-zinc-600 mb-1">Nota</label>
+                <input type="text" value={newLabel} onChange={e => setNewLabel(e.target.value)}
+                  placeholder="Cambio de trabajo, compra casa…"
+                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+              </div>
+              <button onClick={handleAdd} disabled={isPending}
+                className="px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50 transition-opacity">
+                {isPending ? '…' : 'Agregar'}
+              </button>
+              <button onClick={() => { setShowAdd(false); setError(null) }}
+                className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAdd(true)}
+              className="text-[10px] font-black text-[#a3e635]/70 hover:text-[#a3e635] transition-colors">
+              + Nota manual
+            </button>
+          )}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          {manual.length === 0 && !showAdd && (
+            <p className="text-[9px] text-zinc-700">Agregá eventos de vida (cambio de trabajo, mudanza…) para verlos marcados en los gráficos.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

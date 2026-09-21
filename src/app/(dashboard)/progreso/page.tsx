@@ -50,6 +50,7 @@ export default async function ProgresoPage() {
       { data: snapshotRows },
       { data: categories },
       { data: loanRows },
+      { data: lifeEventRows },
     ],
     exchangeRate,
   ] = await Promise.all([
@@ -83,6 +84,10 @@ export default async function ProgresoPage() {
       admin.from('loans')
         .select('id, current_balance, currency_code')
         .eq('user_id', user.id),
+      admin.from('life_events')
+        .select('id, date, label')
+        .eq('user_id', user.id)
+        .order('date', { ascending: true }),
     ]),
     fetchExchangeRate(),
   ])
@@ -549,6 +554,78 @@ export default async function ProgresoPage() {
     }
   }
 
+  // ── Milestones: context markers for the trend charts ──────────────────────
+  // Three sources merged into one timeline: (1) auto-detected outsized
+  // transactions, (2) the exact date net worth first crossed each FIRE
+  // milestone threshold, from real snapshot history; (3) the user's own
+  // manual notes (life_events) for context a transaction can't capture
+  // (job change, a birth, a move).
+  type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
+  const milestones: Milestone[] = []
+
+  // Auto-detected: a transaction unusually large FOR ITS OWN category (same
+  // IQR-fence formula as the Lifestyle Inflation outlier cleaning above,
+  // reused so both mean the same thing) — not just "biggest transaction
+  // that month". A flat/global threshold would flag routine biweekly salary
+  // every single month, since it's consistently the largest line item; the
+  // per-category fence only fires when something is abnormal for THAT
+  // category, e.g. a car purchase (one-off in CAR_EXPENSES) or a big
+  // investment liquidation, while leaving routine salary/rent alone.
+  const MILESTONE_MIN_AMOUNT = 500_000
+  const milestoneWindowStartStr = new Date(now.getFullYear(), now.getMonth() - 24, 1).toISOString().slice(0, 10)
+  const milestoneCandidates = (txs ?? []).filter(tx =>
+    tx.date && tx.date >= milestoneWindowStartStr && tx.amount != null &&
+    (tx.movement_type === 'expense' || tx.movement_type === 'income' || tx.movement_type === 'cash_withdrawal') &&
+    tx.expense_group !== 'objetivos_financieros' &&
+    !(isLoanPayment(tx.vendor, tx.concept, tx.category_code) && !isExtraLoanPrincipalPayment(tx.concept, tx.category_code))
+  )
+  const milestoneGlobalP95 = computeGlobalP95(milestoneCandidates)
+  const milestoneRootAmounts: Record<string, number[]> = {}
+  for (const tx of milestoneCandidates) {
+    const root = getRootCode(tx.category_code ?? '__na__')
+    ;(milestoneRootAmounts[root] ??= []).push(Number(tx.amount ?? 0))
+  }
+  const milestoneRootFences = Object.fromEntries(
+    Object.entries(milestoneRootAmounts).map(([root, amounts]) => [root, outlierFence(amounts, milestoneGlobalP95)])
+  )
+  const monthlyBiggest = new Map<string, { amount: number; date: string; vendor: string | null; concept: string | null }>()
+  for (const tx of milestoneCandidates) {
+    const amt = Math.abs(Number(tx.amount ?? 0))
+    if (amt < MILESTONE_MIN_AMOUNT) continue
+    const root = getRootCode(tx.category_code ?? '__na__')
+    if (amt <= (milestoneRootFences[root] ?? Infinity)) continue
+    const ym = tx.date!.slice(0, 7)
+    const existing = monthlyBiggest.get(ym)
+    if (!existing || amt > existing.amount) {
+      monthlyBiggest.set(ym, { amount: amt, date: tx.date!, vendor: tx.vendor, concept: tx.concept })
+    }
+  }
+  for (const { amount, date, vendor, concept } of monthlyBiggest.values()) {
+    milestones.push({
+      date,
+      label: `${concept || vendor || 'Movimiento grande'} · ₡${Math.round(amount).toLocaleString('es-CR')}`,
+      kind: 'auto',
+      amount,
+    })
+  }
+
+  const fireThresholds = [
+    leanFireNumber > 0 ? { val: leanFireNumber, label: 'Lean FI alcanzado' } : null,
+    fireNumber > 0 ? { val: fireNumber * 0.5, label: '50% del FIRE number' } : null,
+    fireNumber > 0 ? { val: fireNumber, label: 'FIRE number alcanzado 🎯' } : null,
+  ].filter((t): t is { val: number; label: string } => t !== null)
+  const sortedSnaps = [...(snapshotRows ?? [])].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+  for (const th of fireThresholds) {
+    const hit = sortedSnaps.find(s => Number(s.net_worth_crc) >= th.val)
+    if (hit) milestones.push({ date: hit.snapshot_date, label: th.label, kind: 'fire' })
+  }
+
+  for (const ev of lifeEventRows ?? []) {
+    milestones.push({ date: ev.date, label: ev.label, kind: 'manual', id: ev.id })
+  }
+
+  milestones.sort((a, b) => a.date.localeCompare(b.date))
+
   // ── Lifestyle Inflation ────────────────────────────────────────────────────
   // (category hierarchy + outlier-cleaned tx set now built earlier — see
   // "cleanedLifestyleTxs prep" above — and reused by Runway/FIRE too)
@@ -729,7 +806,7 @@ export default async function ProgresoPage() {
 
   const savingsRateTrend: { label: string; rate: number; deposits: number; income: number }[] = []
   const ahorroInversionTrend: {
-    label: string; ahorro: number; inversion: number; deuda: number
+    label: string; ym: string; ahorro: number; inversion: number; deuda: number
     ahorroSources: { name: string; amount: number }[]
     inversionSources: { name: string; amount: number }[]
     deudaSources: { name: string; amount: number }[]
@@ -818,6 +895,7 @@ export default async function ProgresoPage() {
     })
     ahorroInversionTrend.push({
       label:     `${MONTH_LABELS_ES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+      ym,
       inversion: txInversion,
       ahorro,
       deuda:     txDeuda,
@@ -842,6 +920,7 @@ export default async function ProgresoPage() {
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
       <ProgresoView
         liquidityBreakdown={liquidityBreakdown}
+        milestones={milestones}
         fireNumber={fireNumber}
         leanFireNumber={leanFireNumber}
         runway={runway}
