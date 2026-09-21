@@ -11,6 +11,7 @@ import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
+import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
 
 const LIQUID_KEY = '__liquidez__'
 
@@ -29,6 +30,8 @@ export default async function InversionesPage() {
     { data: yieldRows },
     { data: fireConfig },
     { data: incomeTxs },
+    { data: categories },
+    { data: lifeEventRows },
   ] = await Promise.all([
     admin
       .from('user_investment_buckets')
@@ -73,7 +76,19 @@ export default async function InversionesPage() {
       .eq('movement_type', 'income')
       .not('amount', 'is', null)
       .range(0, 49999),
+    admin.from('transaction_categories')
+      .select('code, parent_code')
+      .eq('is_active', true),
+    admin.from('life_events')
+      .select('id, date, label')
+      .eq('user_id', user.id)
+      .order('date', { ascending: true }),
   ])
+
+  const milestones = mergeMilestones(
+    computeAutoMilestones(txs ?? [], categories ?? []),
+    manualMilestones(lifeEventRows ?? []),
+  )
 
   // Authoritative history. Replaying transaction deltas cannot reconstruct what
   // a bucket held before it existed: ROP & FCL and Pensión Voluntaria carry years
@@ -480,6 +495,7 @@ export default async function InversionesPage() {
         points={historyPoints}
         series={historySeries}
         exchangeRate={exchangeRate}
+        milestones={milestones}
       />
       <PortfolioYield
         rows={(yieldRows ?? []).map(r => ({

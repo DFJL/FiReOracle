@@ -7,6 +7,7 @@ import { isLoanPayment } from '../resumen/categoryUtils'
 import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
 import { GENERIC_PASSIVE_CATEGORIES, normalizeVendorKey } from '@/lib/passiveIncomeCategory'
 import { computeBucketTotals, type ConceptMap } from '@/lib/bucketBalance'
+import { computeAutoMilestones, computeFireMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
 
 function isValuation(concept: string | null) {
   return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
@@ -555,87 +556,14 @@ export default async function ProgresoPage() {
   }
 
   // ── Milestones: context markers for the trend charts ──────────────────────
-  // Three sources merged into one timeline: (1) auto-detected outsized
-  // transactions, (2) the exact date net worth first crossed each FIRE
-  // milestone threshold, from real snapshot history; (3) the user's own
-  // manual notes (life_events) for context a transaction can't capture
-  // (job change, a birth, a move).
-  type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
-  const milestones: Milestone[] = []
-
-  // Auto-detected: a transaction unusually large FOR ITS OWN category (same
-  // IQR-fence formula as the Lifestyle Inflation outlier cleaning above,
-  // reused so both mean the same thing) — not just "biggest transaction
-  // that month". A flat/global threshold would flag routine biweekly salary
-  // every single month, since it's consistently the largest line item; the
-  // per-category fence only fires when something is abnormal for THAT
-  // category, e.g. a car purchase (one-off in CAR_EXPENSES) or a big
-  // investment liquidation, while leaving routine salary/rent alone.
-  // Raised threshold + hard cap (top 6 by amount): the per-category outlier
-  // fence alone still let through too many markers to read on a chart that
-  // spans several years — they all bunch up in the last ~12-24 months at
-  // that x-axis scale. Keep only the genuinely stand-out ones.
-  const MILESTONE_MIN_AMOUNT = 1_500_000
-  const MILESTONE_AUTO_CAP = 6
-  const milestoneWindowStartStr = new Date(now.getFullYear(), now.getMonth() - 24, 1).toISOString().slice(0, 10)
-  const milestoneCandidates = (txs ?? []).filter(tx =>
-    tx.date && tx.date >= milestoneWindowStartStr && tx.amount != null &&
-    (tx.movement_type === 'expense' || tx.movement_type === 'income' || tx.movement_type === 'cash_withdrawal') &&
-    tx.expense_group !== 'objetivos_financieros' &&
-    !(isLoanPayment(tx.vendor, tx.concept, tx.category_code) && !isExtraLoanPrincipalPayment(tx.concept, tx.category_code))
+  // Shared with /patrimonio and /inversiones via @/lib/milestones so the
+  // same event shows up consistently everywhere instead of three drifting
+  // copies of the same detection logic.
+  const milestones = mergeMilestones(
+    computeAutoMilestones(txs ?? [], categories ?? [], { now }),
+    computeFireMilestones(snapshotRows ?? [], fireNumber, leanFireNumber),
+    manualMilestones(lifeEventRows ?? []),
   )
-  const milestoneGlobalP95 = computeGlobalP95(milestoneCandidates)
-  const milestoneRootAmounts: Record<string, number[]> = {}
-  for (const tx of milestoneCandidates) {
-    const root = getRootCode(tx.category_code ?? '__na__')
-    ;(milestoneRootAmounts[root] ??= []).push(Number(tx.amount ?? 0))
-  }
-  const milestoneRootFences = Object.fromEntries(
-    Object.entries(milestoneRootAmounts).map(([root, amounts]) => [root, outlierFence(amounts, milestoneGlobalP95)])
-  )
-  const monthlyBiggest = new Map<string, { amount: number; date: string; vendor: string | null; concept: string | null }>()
-  for (const tx of milestoneCandidates) {
-    const amt = Math.abs(Number(tx.amount ?? 0))
-    if (amt < MILESTONE_MIN_AMOUNT) continue
-    const root = getRootCode(tx.category_code ?? '__na__')
-    if (amt <= (milestoneRootFences[root] ?? Infinity)) continue
-    const ym = tx.date!.slice(0, 7)
-    const existing = monthlyBiggest.get(ym)
-    if (!existing || amt > existing.amount) {
-      monthlyBiggest.set(ym, { amount: amt, date: tx.date!, vendor: tx.vendor, concept: tx.concept })
-    }
-  }
-  const topAuto = [...monthlyBiggest.values()].sort((a, b) => b.amount - a.amount).slice(0, MILESTONE_AUTO_CAP)
-  for (const { amount, date, vendor, concept } of topAuto) {
-    milestones.push({
-      date,
-      label: `${concept || vendor || 'Movimiento grande'} · ₡${Math.round(amount).toLocaleString('es-CR')}`,
-      kind: 'auto',
-      amount,
-    })
-  }
-
-  // Crossing detection uses liquid_crc + invested_crc, NOT net_worth_crc —
-  // net_worth_crc includes illiquid real estate (iliquid_crc), which isn't
-  // part of what fireNumber is measured against (activosInvertibles is
-  // liquid + semi-liquid only). Comparing a FIRE threshold against total net
-  // worth would flag "FIRE reached" earlier than actually true.
-  const fireThresholds = [
-    leanFireNumber > 0 ? { val: leanFireNumber, label: 'Lean FI alcanzado' } : null,
-    fireNumber > 0 ? { val: fireNumber * 0.5, label: '50% del FIRE number' } : null,
-    fireNumber > 0 ? { val: fireNumber, label: 'FIRE number alcanzado 🎯' } : null,
-  ].filter((t): t is { val: number; label: string } => t !== null)
-  const sortedSnaps = [...(snapshotRows ?? [])].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
-  for (const th of fireThresholds) {
-    const hit = sortedSnaps.find(s => Number(s.liquid_crc ?? 0) + Number(s.invested_crc ?? 0) >= th.val)
-    if (hit) milestones.push({ date: hit.snapshot_date, label: th.label, kind: 'fire' })
-  }
-
-  for (const ev of lifeEventRows ?? []) {
-    milestones.push({ date: ev.date, label: ev.label, kind: 'manual', id: ev.id })
-  }
-
-  milestones.sort((a, b) => a.date.localeCompare(b.date))
 
   // ── Lifestyle Inflation ────────────────────────────────────────────────────
   // (category hierarchy + outlier-cleaned tx set now built earlier — see

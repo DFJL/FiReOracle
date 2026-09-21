@@ -7,6 +7,7 @@ import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, type ConceptMap } from '@/lib/bucketBalance'
+import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
 
 export default async function PatrimonioPage() {
   const supabase = await createClient()
@@ -25,13 +26,15 @@ export default async function PatrimonioPage() {
     { data: loansRaw },
     { data: snapshotRows },
     { data: itemRows },
+    { data: categories },
+    { data: lifeEventRows },
   ] = await Promise.all([
     admin.from('user_investment_buckets')
       .select('id, name, bucket_type, vendors, concept_map, account_id, display_category, baseline_date, baseline_value_crc')
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
+      .select('vendor, concept, category_code, movement_type, expense_group, is_settlement, is_passive_income, amount, date, investment_bucket_id')
       .eq('user_id', user.id)
       .not('amount', 'is', null)
       // PostgREST caps unpaginated selects at 1000 rows silently — this user
@@ -67,7 +70,19 @@ export default async function PatrimonioPage() {
       .eq('user_id', user.id)
       .order('snapshot_date', { ascending: false })
       .limit(500),
+    admin.from('transaction_categories')
+      .select('code, parent_code')
+      .eq('is_active', true),
+    admin.from('life_events')
+      .select('id, date, label')
+      .eq('user_id', user.id)
+      .order('date', { ascending: true }),
   ])
+
+  const milestones = mergeMilestones(
+    computeAutoMilestones(txs ?? [], categories ?? []),
+    manualMilestones(lifeEventRows ?? []),
+  )
 
   // Snapshot bucket balances (fetch in parallel for all snapshot buckets)
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
@@ -264,6 +279,7 @@ export default async function PatrimonioPage() {
         bucketBreakdown={bucketBreakdown}
         pensionesBreakdown={pensionesBreakdown}
         totalPensiones={totalPensiones}
+        milestones={milestones}
       />
     </div>
   )

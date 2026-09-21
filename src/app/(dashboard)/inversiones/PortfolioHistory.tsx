@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import type { Milestone } from '@/lib/milestones'
 
 export type HistoryPoint = {
   month: string  // "YYYY-MM"
@@ -47,19 +48,25 @@ const RANGE_OPTIONS = [
   { label: 'Todo',months: 999},
 ] as const
 
+const MILESTONE_COLOR: Record<Milestone['kind'], string> = { auto: '#f59e0b', fire: '#a3e635', manual: '#f472b6' }
+const MILESTONE_ICON: Record<Milestone['kind'], string> = { auto: '●', fire: '★', manual: '◆' }
+
 export function PortfolioHistory({
   points,
   series,
   exchangeRate,
+  milestones,
 }: {
   points: HistoryPoint[]
   series: HistorySeries[]
   exchangeRate: ExchangeRate
+  milestones: Milestone[]
 }) {
   const [rangeMonths, setRangeMonths] = useState<number>(12)
   const [visible, setVisible]         = useState<Set<string>>(new Set([TOTAL_KEY, INVESTED_KEY]))
   const [currency, setCurrency]       = useState<'CRC' | 'USD'>('USD')
   const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
+  const [selectedMilestone, setSelectedMilestone] = useState<Milestone | null>(null)
   const svgRef                        = useRef<SVGSVGElement>(null)
 
   if (points.length < 2) return null
@@ -130,6 +137,13 @@ export function PortfolioHistory({
   const labelStep = Math.ceil(N / 8)
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxV)
 
+  // Match each milestone to the closest month present in the (range-filtered)
+  // data — data points are discrete months, so index-matching by year-month
+  // is exact when the month exists and simply drops milestones out of range.
+  const milestoneMarkers = milestones
+    .map(m => ({ ...m, idx: data.findIndex(d => d.month === m.date.slice(0, 7)) }))
+    .filter(m => m.idx >= 0)
+
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5 space-y-4">
       {/* Header */}
@@ -156,6 +170,28 @@ export function PortfolioHistory({
           </div>
         </div>
       </div>
+
+      {milestoneMarkers.length > 0 && (
+        <div className="flex items-center gap-3 text-[8px] text-zinc-600">
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.auto }}>{MILESTONE_ICON.auto}</span> Movimiento grande</span>
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.fire }}>{MILESTONE_ICON.fire}</span> Hito FIRE</span>
+          <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.manual }}>{MILESTONE_ICON.manual}</span> Nota tuya</span>
+          <span className="text-zinc-700">· tocá un punto para ver el detalle</span>
+        </div>
+      )}
+
+      {selectedMilestone && (
+        <div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 bg-white/[0.04] border border-white/[0.08]">
+          <p className="text-xs text-zinc-200 min-w-0">
+            <span style={{ color: MILESTONE_COLOR[selectedMilestone.kind] }}>{MILESTONE_ICON[selectedMilestone.kind]}</span>{' '}
+            <span className="text-zinc-500">
+              {new Date(selectedMilestone.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })}:
+            </span>{' '}
+            {selectedMilestone.label}
+          </p>
+          <button onClick={() => setSelectedMilestone(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors">✕</button>
+        </div>
+      )}
 
       {/* SVG Chart + Tooltip */}
       <div className="relative">
@@ -228,6 +264,28 @@ export function PortfolioHistory({
               fill={hoverIdx === i ? '#71717a' : '#3f3f46'}>
               {monthLabel(p.month)}
             </text>
+          )
+        })}
+
+        {/* Milestone markers — tap/click target enlarged (invisible r=10)
+            since the visible dot is tiny; native <title> doesn't fire on
+            mobile touch, so click also shows the label as visible text
+            above the chart. */}
+        {milestoneMarkers.map((m, i) => {
+          const x = xOf(m.idx)
+          const color = MILESTONE_COLOR[m.kind]
+          const isSelected = selectedMilestone?.kind === m.kind && selectedMilestone?.date === m.date && selectedMilestone?.label === m.label
+          return (
+            <g key={`${m.kind}-${m.date}-${i}`}
+              opacity={0.85}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setSelectedMilestone(isSelected ? null : m)}
+            >
+              <title>{`${new Date(m.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })} — ${m.label}`}</title>
+              <line x1={x} x2={x} y1={padT} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={isSelected ? 0.7 : 0.3} />
+              <circle cx={x} cy={padT + chartH + 4} r={10} fill="transparent" />
+              <circle cx={x} cy={padT + chartH + 4} r={isSelected ? 5 : 3} fill={color} />
+            </g>
           )
         })}
 
