@@ -432,28 +432,20 @@ export default async function InversionesPage() {
 
   // ── Portfolio analysis data ─────────────────────────────────────────────────
 
-  // Monthly contributions per bucket (deposits only, not returns)
+  // Monthly contributions per bucket (deposits only, not returns) — uses the
+  // same canonical classifyBucketTx rule as the per-bucket transaction history
+  // above. Used to be a hand-copied loop restricted to bucketDefs (non-snapshot
+  // buckets only), so IBKR — a snapshot_based bucket that gets real wire
+  // deposits — always showed "sin aportes" regardless of what actually
+  // happened; classifyBucketTx already knows how to match a snapshot_based
+  // bucket's deposits (by investment_bucket_id or vendor name).
   const contributions: MonthlyContribution[] = []
-  for (const def of bucketDefs) {
+  for (const def of bucketRows ?? []) {
     for (const tx of txs ?? []) {
       if (!tx.date) continue
-      const amt = Number(tx.amount ?? 0)
-      let isDeposit = false
-      if (def.bucket_type === 'concept_based' && def.concept_map) {
-        const cm = def.concept_map as unknown as { depositConcepts: string[] }
-        const c = (tx.concept ?? '').toLowerCase()
-        if (
-          ((tx as { investment_bucket_id?: string | null }).investment_bucket_id === def.id &&
-            tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) ||
-          cm.depositConcepts.some(s => s.toLowerCase() === c)
-        ) isDeposit = true
-      } else if (def.bucket_type === 'vendor_based') {
-        const v = normalizeVendor(tx.vendor ?? '')
-        const vs = (def.vendors ?? []).map((s: string) => normalizeVendor(s))
-        if (vs.includes(v) && tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) isDeposit = true
-      }
-      if (isDeposit) {
-        contributions.push({ month: tx.date.slice(0, 7), bucketId: def.id, amount: amt })
+      const txType = classifyBucketTx({ ...def, concept_map: def.concept_map as unknown as ConceptMap | null }, tx)
+      if (txType === 'deposit') {
+        contributions.push({ month: tx.date.slice(0, 7), bucketId: def.id, amount: Number(tx.amount ?? 0) })
       }
     }
   }
@@ -540,6 +532,7 @@ export default async function InversionesPage() {
         exchangeRate={exchangeRate}
         liquidBreakdown={liquidBreakdown}
         bucketTransactions={bucketTransactions}
+        targets={portfolioTargets}
       />
       <PortfolioHistory
         points={historyPoints}
@@ -561,8 +554,6 @@ export default async function InversionesPage() {
       />
       <PortfolioAnalysis
         buckets={buckets.filter(b => b.key !== LIQUID_KEY)}
-        liquidBalance={liquidBalance}
-        totalPatrimony={totalPatrimony}
         contributions={contributions}
         income={monthlyIncome}
         clusters={clusters}

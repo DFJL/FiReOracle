@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { upsertPortfolioTarget, deletePortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
+import { useState } from 'react'
+import type { PortfolioTarget } from '@/app/actions/portfolio'
 import type { BucketData } from './buckets'
-import type { ExchangeRate } from '@/lib/exchange-rate'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -167,85 +166,6 @@ function ContributionChart({
   )
 }
 
-// ── Allocation gap bars ────────────────────────────────────────────────────────
-
-function AllocationGap({
-  buckets, liquidBalance, targets, totalPatrimony,
-}: {
-  buckets: BucketData[]
-  liquidBalance: number
-  targets: PortfolioTarget[]
-  totalPatrimony: number
-}) {
-  const rows = [
-    ...buckets.map(b => ({
-      key: b.key,
-      label: b.name,
-      color: b.color,
-      balance: b.balance,
-      currentPct: totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0,
-      target: targets.find(t => t.bucketKey === b.key),
-    })),
-    {
-      key: '__liquidez__',
-      label: 'Liquidez',
-      color: '#60a5fa',
-      balance: liquidBalance,
-      currentPct: totalPatrimony > 0 ? (liquidBalance / totalPatrimony) * 100 : 0,
-      target: targets.find(t => t.bucketKey === '__liquidez__'),
-    },
-  ]
-
-  return (
-    <div className="space-y-3">
-      {rows.map(r => {
-        const targetPct = r.target?.targetPctPortfolio ?? null
-        const gap = targetPct != null ? r.currentPct - targetPct : null
-        const status = gap == null ? null : gap > 3 ? 'over' : gap < -3 ? 'under' : 'ok'
-        return (
-          <div key={r.key}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full" style={{ background: r.color }} />
-                <span className="text-xs text-zinc-300">{r.label}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-300 font-black">{fmtPct(r.currentPct)}</span>
-                {targetPct != null && (
-                  <span className="text-[9px] text-zinc-600">meta {fmtPct(targetPct)}</span>
-                )}
-                {status === 'over'  && <span className="text-[9px] font-black text-amber-400">▲ sobre</span>}
-                {status === 'under' && <span className="text-[9px] font-black text-rose-400">▼ sub</span>}
-                {status === 'ok'    && <span className="text-[9px] font-black text-[#a3e635]">✓</span>}
-              </div>
-            </div>
-            <div className="relative h-2 bg-white/[0.04] rounded-full overflow-hidden">
-              <div
-                className="absolute left-0 top-0 h-full rounded-full transition-all"
-                style={{ width: `${Math.min(r.currentPct, 100)}%`, background: r.color, opacity: 0.8 }}
-              />
-              {targetPct != null && (
-                <div
-                  className="absolute top-0 h-full w-0.5 bg-white/40"
-                  style={{ left: `${Math.min(targetPct, 100)}%` }}
-                />
-              )}
-            </div>
-            <div className="flex justify-between mt-0.5">
-              <span className="text-[9px] text-zinc-600">{fmtM(r.balance)}</span>
-              {gap != null && (
-                <span className={`text-[9px] ${Math.abs(gap) > 3 ? 'text-amber-400' : 'text-zinc-600'}`}>
-                  {gap > 0 ? '+' : ''}{fmtPct(gap)} vs meta
-                </span>
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // ── Envelope cluster breakdown ────────────────────────────────────────────────
 
 function EnvelopeClusters({ clusters }: { clusters: EnvelopeCluster[] }) {
@@ -285,159 +205,19 @@ function EnvelopeClusters({ clusters }: { clusters: EnvelopeCluster[] }) {
   )
 }
 
-// ── Target editor ─────────────────────────────────────────────────────────────
-
-function TargetEditor({
-  buckets, liquidBalance, targets: initial,
-}: {
-  buckets: BucketData[]
-  liquidBalance: number
-  targets: PortfolioTarget[]
-}) {
-  const [targets, setTargets] = useState(initial)
-  const [editing, setEditing] = useState(false)
-  const [pending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
-
-  type Draft = { bucketKey: string; label: string; pctPortfolio: string; pctIncome: string }
-
-  const rows: { key: string; label: string; color: string }[] = [
-    ...buckets.map(b => ({ key: b.key, label: b.name, color: b.color })),
-    { key: '__liquidez__', label: 'Liquidez (sobres)', color: '#60a5fa' },
-  ]
-
-  const [drafts, setDrafts] = useState<Draft[]>(() =>
-    rows.map(r => {
-      const t = initial.find(t => t.bucketKey === r.key)
-      return {
-        bucketKey: r.key,
-        label: r.label,
-        pctPortfolio: t?.targetPctPortfolio?.toString() ?? '',
-        pctIncome:    t?.targetPctIncome?.toString()    ?? '',
-      }
-    })
-  )
-
-  function totalPctPortfolio() { return drafts.reduce((s, d) => s + (parseFloat(d.pctPortfolio) || 0), 0) }
-  function totalPctIncome()    { return drafts.reduce((s, d) => s + (parseFloat(d.pctIncome)    || 0), 0) }
-
-  function save() {
-    setError(null)
-    startTransition(async () => {
-      for (const d of drafts) {
-        const pp = d.pctPortfolio ? parseFloat(d.pctPortfolio) : null
-        const pi = d.pctIncome    ? parseFloat(d.pctIncome)    : null
-        if (pp == null && pi == null) continue
-        const res = await upsertPortfolioTarget(d.bucketKey, d.label, pp, pi)
-        if (res.error) { setError(res.error); return }
-      }
-      setEditing(false)
-    })
-  }
-
-  if (!editing) {
-    const totalP = targets.reduce((s, t) => s + (t.targetPctPortfolio ?? 0), 0)
-    const totalI = targets.reduce((s, t) => s + (t.targetPctIncome ?? 0), 0)
-    return (
-      <div>
-        {targets.length === 0 ? (
-          <p className="text-[10px] text-zinc-600 mb-3">Sin metas configuradas todavía.</p>
-        ) : (
-          <div className="space-y-1 mb-3">
-            {targets.map(t => (
-              <div key={t.id} className="flex items-center gap-2 text-[10px]">
-                <span className="flex-1 text-zinc-400">{t.label}</span>
-                {t.targetPctPortfolio != null && <span className="text-zinc-500">portafolio <span className="text-zinc-300">{fmtPct(t.targetPctPortfolio)}</span></span>}
-                {t.targetPctIncome    != null && <span className="text-zinc-500">ingreso <span className="text-zinc-300">{fmtPct(t.targetPctIncome)}</span></span>}
-              </div>
-            ))}
-            <div className="border-t border-white/[0.06] pt-1 flex gap-4 text-[9px] text-zinc-600 mt-1">
-              {totalP > 0 && <span>Total portafolio: <span className={totalP > 100 ? 'text-rose-400' : 'text-zinc-400'}>{fmtPct(totalP)}</span></span>}
-              {totalI > 0 && <span>Total ingreso: <span className="text-zinc-400">{fmtPct(totalI)}</span></span>}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setEditing(true)}
-          className="text-[10px] text-[#a3e635]/70 hover:text-[#a3e635] transition-colors font-black">
-          {targets.length === 0 ? '+ Configurar metas' : 'Editar metas'}
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-2 items-center">
-        <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Bucket</span>
-        <span className="text-[9px] text-zinc-600 uppercase tracking-wider text-center">% portafolio</span>
-        <span className="text-[9px] text-zinc-600 uppercase tracking-wider text-center">% ingreso/mes</span>
-
-        {drafts.map((d, i) => {
-          const row = rows.find(r => r.key === d.bucketKey)
-          return (
-            <>
-              <div key={`${d.bucketKey}-label`} className="flex items-center gap-1.5">
-                {row && <div className="w-2 h-2 rounded-full" style={{ background: row.color }} />}
-                <span className="text-xs text-zinc-300">{d.label}</span>
-              </div>
-              <input
-                key={`${d.bucketKey}-pp`}
-                type="number" min="0" max="100" step="0.5"
-                value={d.pctPortfolio}
-                onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, pctPortfolio: e.target.value } : x))}
-                placeholder="—"
-                className="w-16 bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-white text-center placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
-              />
-              <input
-                key={`${d.bucketKey}-pi`}
-                type="number" min="0" max="100" step="0.5"
-                value={d.pctIncome}
-                onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, pctIncome: e.target.value } : x))}
-                placeholder="—"
-                className="w-16 bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-white text-center placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
-              />
-            </>
-          )
-        })}
-
-        <div className="text-[9px] text-zinc-600 font-black">Total</div>
-        <div className={`text-[9px] text-center font-black ${totalPctPortfolio() > 100 ? 'text-rose-400' : 'text-zinc-400'}`}>{fmtPct(totalPctPortfolio())}</div>
-        <div className="text-[9px] text-zinc-400 text-center font-black">{fmtPct(totalPctIncome())}</div>
-      </div>
-
-      {error && <p className="text-xs text-rose-400">{error}</p>}
-
-      <div className="flex gap-2">
-        <button onClick={save} disabled={pending}
-          className="px-4 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50">
-          {pending ? '...' : 'Guardar'}
-        </button>
-        <button onClick={() => setEditing(false)}
-          className="px-4 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-xs">
-          Cancelar
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── Main component ─────────────────────────────────────────────────────────────
 
-const TABS = ['Contribuciones', 'Asignación', 'Sobres'] as const
+const TABS = ['Contribuciones', 'Sobres'] as const
 type Tab = typeof TABS[number]
 
 export function PortfolioAnalysis({
   buckets,
-  liquidBalance,
-  totalPatrimony,
   contributions,
   income,
   clusters,
   targets,
 }: {
   buckets: BucketData[]
-  liquidBalance: number
-  totalPatrimony: number
   contributions: MonthlyContribution[]
   income: MonthlyIncome[]
   clusters: EnvelopeCluster[]
@@ -450,7 +230,7 @@ export function PortfolioAnalysis({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-black text-white tracking-tight">Análisis de portafolio</h2>
-          <p className="text-[10px] text-zinc-600 mt-0.5">Contribuciones históricas · Asignación · Liquidez</p>
+          <p className="text-[10px] text-zinc-600 mt-0.5">Contribuciones históricas · Liquidez — metas de asignación en Distribución</p>
         </div>
       </div>
 
@@ -548,22 +328,6 @@ export function PortfolioAnalysis({
                 </div>
               )
             })}
-          </div>
-        </div>
-      )}
-
-      {/* Asignación tab */}
-      {tab === 'Asignación' && (
-        <div className="space-y-5">
-          <AllocationGap
-            buckets={buckets}
-            liquidBalance={liquidBalance}
-            targets={targets}
-            totalPatrimony={totalPatrimony}
-          />
-          <div className="border-t border-white/[0.06] pt-4">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-3">Metas de asignación</p>
-            <TargetEditor buckets={buckets} liquidBalance={liquidBalance} targets={targets} />
           </div>
         </div>
       )}

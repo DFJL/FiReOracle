@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { AccountSyncPanel } from '@/components/AccountSyncPanel'
+import { upsertPortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -98,6 +99,106 @@ function CurrencyToggle({ currency, onChange }: { currency: 'CRC' | 'USD'; onCha
   )
 }
 
+// ── Target editor ─────────────────────────────────────────────────────────────
+// Single place to set allocation goals — both % of portfolio (drives the gap
+// markers below) and % of income/month (drives the target line on the
+// Contribuciones tab). Used to be duplicated as a whole separate "Asignación"
+// tab with its own current-vs-target bars, which just re-rendered this same
+// Distribución list a second time with a target overlay.
+
+function TargetEditor({
+  rows, targets: initial, onSaved,
+}: {
+  rows: { key: string; label: string; color: string }[]
+  targets: PortfolioTarget[]
+  onSaved: (targets: PortfolioTarget[]) => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  type Draft = { bucketKey: string; label: string; pctPortfolio: string; pctIncome: string }
+
+  const [drafts, setDrafts] = useState<Draft[]>(() =>
+    rows.map(r => {
+      const t = initial.find(t => t.bucketKey === r.key)
+      return {
+        bucketKey: r.key,
+        label: r.label,
+        pctPortfolio: t?.targetPctPortfolio?.toString() ?? '',
+        pctIncome:    t?.targetPctIncome?.toString()    ?? '',
+      }
+    })
+  )
+
+  const totalPctPortfolio = drafts.reduce((s, d) => s + (parseFloat(d.pctPortfolio) || 0), 0)
+  const totalPctIncome    = drafts.reduce((s, d) => s + (parseFloat(d.pctIncome)    || 0), 0)
+
+  function save() {
+    setError(null)
+    startTransition(async () => {
+      const saved: PortfolioTarget[] = []
+      for (const d of drafts) {
+        const pp = d.pctPortfolio ? parseFloat(d.pctPortfolio) : null
+        const pi = d.pctIncome    ? parseFloat(d.pctIncome)    : null
+        if (pp == null && pi == null) continue
+        const res = await upsertPortfolioTarget(d.bucketKey, d.label, pp, pi)
+        if (res.error) { setError(res.error); return }
+        saved.push({ id: d.bucketKey, bucketKey: d.bucketKey, label: d.label, targetPctPortfolio: pp, targetPctIncome: pi })
+      }
+      onSaved(saved)
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-2 items-center">
+        <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Bucket</span>
+        <span className="text-[9px] text-zinc-600 uppercase tracking-wider text-center">% portafolio</span>
+        <span className="text-[9px] text-zinc-600 uppercase tracking-wider text-center">% ingreso/mes</span>
+
+        {drafts.map((d, i) => {
+          const row = rows.find(r => r.key === d.bucketKey)
+          return (
+            <>
+              <div key={`${d.bucketKey}-label`} className="flex items-center gap-1.5">
+                {row && <div className="w-2 h-2 rounded-full" style={{ background: row.color }} />}
+                <span className="text-xs text-zinc-300">{d.label}</span>
+              </div>
+              <input
+                key={`${d.bucketKey}-pp`}
+                type="number" min="0" max="100" step="0.5"
+                value={d.pctPortfolio}
+                onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, pctPortfolio: e.target.value } : x))}
+                placeholder="—"
+                className="w-16 bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-white text-center placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
+              />
+              <input
+                key={`${d.bucketKey}-pi`}
+                type="number" min="0" max="100" step="0.5"
+                value={d.pctIncome}
+                onChange={e => setDrafts(prev => prev.map((x, j) => j === i ? { ...x, pctIncome: e.target.value } : x))}
+                placeholder="—"
+                className="w-16 bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-white text-center placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/40"
+              />
+            </>
+          )
+        })}
+
+        <div className="text-[9px] text-zinc-600 font-black">Total</div>
+        <div className={`text-[9px] text-center font-black ${totalPctPortfolio > 100 ? 'text-rose-400' : 'text-zinc-400'}`}>{fmtPct(totalPctPortfolio)}</div>
+        <div className="text-[9px] text-zinc-400 text-center font-black">{fmtPct(totalPctIncome)}</div>
+      </div>
+
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+
+      <button onClick={save} disabled={pending}
+        className="px-4 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50">
+        {pending ? '...' : 'Guardar metas'}
+      </button>
+    </div>
+  )
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 type EnvEntry = { id: string; name: string; color: string | null; balance: number }
@@ -113,7 +214,7 @@ const TX_META: Record<string, { label: string; color: string; sign: 1 | -1 }> = 
   otro:         { label: 'Otro',        color: '#a1a1aa', sign: -1 },
 }
 
-export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions }: {
+export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions, targets: initialTargets }: {
   buckets: BucketData[]
   liquidBalance: number
   totalInvested: number
@@ -121,11 +222,14 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   exchangeRate: ExchangeRate
   liquidBreakdown: CustodioGroup[]
   bucketTransactions: Record<string, BucketTx[]>
+  targets: PortfolioTarget[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
   const [showAllTx, setShowAllTx] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [targets, setTargets] = useState(initialTargets)
+  const [editingTargets, setEditingTargets] = useState(false)
 
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate
@@ -154,7 +258,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
     passiveValuation: 0, markToMarketLoss: 0, directSpend: 0, valorizationNet: 0,
   }
 
-  const allItems = [...buckets, liquidItem]
+  // Largest first — same order the donut segments follow.
+  const allItems = [...buckets, liquidItem].sort((a, b) => b.balance - a.balance)
 
   function toggle(key: string) {
     setSelected(prev => prev === key ? null : key)
@@ -169,6 +274,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   }))
 
   const sel = selected ? allItems.find(b => b.key === selected) ?? null : null
+
+  const targetRows = allItems.map(b => ({ key: b.key, label: b.name, color: b.color }))
 
   const now        = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()
@@ -212,14 +319,23 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
 
       {/* Donut + item list */}
       <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
-        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em] mb-4">Distribución</p>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Distribución</p>
+          <button onClick={() => setEditingTargets(v => !v)}
+            className="text-[9px] font-black text-zinc-500 hover:text-zinc-300 transition-colors">
+            {editingTargets ? 'Cerrar' : targets.length === 0 ? '+ Metas' : 'Editar metas'}
+          </button>
+        </div>
         <div className="flex gap-6 items-center flex-wrap">
           <Donut slices={donutSlices} selected={selected} onSelect={toggle} />
           <div className="flex-1 min-w-0 space-y-1.5">
             {allItems.map(b => {
               const pct    = totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0
               const active = selected === b.key
-              const isLiquid = b.key === LIQUID_KEY
+              const target = targets.find(t => t.bucketKey === b.key)
+              const targetPct = target?.targetPctPortfolio ?? null
+              const gap = targetPct != null ? pct - targetPct : null
+              const status = gap == null ? null : gap > 3 ? 'over' : gap < -3 ? 'under' : 'ok'
               return (
                 <button key={b.key} onClick={() => toggle(b.key)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
@@ -235,17 +351,38 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-xs font-black tabular-nums text-zinc-100">{bucketBalanceLabel(b)}</p>
-                      <p className="text-[9px] tabular-nums" style={{ color: b.color }}>{pct.toFixed(1)}%</p>
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <p className="text-[9px] tabular-nums" style={{ color: b.color }}>{pct.toFixed(1)}%</p>
+                        {targetPct != null && <p className="text-[8px] text-zinc-700">meta {targetPct.toFixed(1)}%</p>}
+                        {status === 'over'  && <span className="text-[8px] font-black text-amber-400">▲</span>}
+                        {status === 'under' && <span className="text-[8px] font-black text-rose-400">▼</span>}
+                      </div>
                     </div>
                   </div>
-                  <div className="mt-1.5 h-1 bg-white/[0.04] rounded-full overflow-hidden">
+                  <div className="relative mt-1.5 h-1 bg-white/[0.04] rounded-full overflow-hidden">
                     <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: b.color, opacity: active ? 0.9 : 0.55 }} />
+                    {targetPct != null && (
+                      <div className="absolute top-0 h-full w-0.5 bg-white/40" style={{ left: `${Math.min(targetPct, 100)}%` }} />
+                    )}
                   </div>
                 </button>
               )
             })}
           </div>
         </div>
+
+        {editingTargets && (
+          <div className="mt-4 pt-4 border-t border-white/[0.06]">
+            <TargetEditor
+              rows={targetRows}
+              targets={targets}
+              onSaved={saved => {
+                setTargets(prev => [...prev.filter(t => !saved.some(s => s.bucketKey === t.bucketKey)), ...saved])
+                setEditingTargets(false)
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Detail panel */}
