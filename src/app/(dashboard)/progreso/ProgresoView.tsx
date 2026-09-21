@@ -1669,6 +1669,7 @@ function CombinedChart({
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverMs, setHoverMs] = useState<number | null>(null)
+  const [selectedMilestone, setSelectedMilestone] = useState<Milestone | null>(null)
 
   const W = 800, H = 260
   const padL = 60, padR = 20, padT = 16, padB = 40
@@ -1687,10 +1688,14 @@ function CombinedChart({
 
   const now = new Date()
 
-  // Historical points — use net_worth_crc so scale matches the forecast
+  // Historical points — liquid_crc + invested_crc, NOT net_worth_crc. The
+  // forecast starts from activosInvertibles (liquid + semi-liquid only —
+  // excludes illiquid real estate and locked retirement funds), so plotting
+  // full net worth here created a visible cliff at "Hoy": the historical
+  // line included ~₡190M of real estate equity the forecast never did.
   const histPoints = snapshots
-    .filter(s => s.net_worth_crc > 0)
-    .map(s => ({ ms: new Date(s.snapshot_date + 'T12:00:00').getTime(), val: s.net_worth_crc }))
+    .map(s => ({ ms: new Date(s.snapshot_date + 'T12:00:00').getTime(), val: Number(s.liquid_crc ?? 0) + Number(s.invested_crc ?? 0) }))
+    .filter(p => p.val > 0)
     .sort((a, b) => a.ms - b.ms)
 
   // Forecast points — anchor year 0 at today
@@ -1779,11 +1784,11 @@ function CombinedChart({
   return (
     <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Patrimonio histórico + Proyección FIRE</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Líquido + invertido · histórico y proyección FIRE</p>
         <div className="flex items-center gap-4 text-[9px] text-zinc-500">
           {histPoints.length >= 2 && (
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-0.5 rounded bg-[#22d3ee]" />Patrimonio neto
+              <span className="inline-block w-3 h-0.5 rounded bg-[#22d3ee]" />Líquido + invertido
             </span>
           )}
           {forecastPoints.length >= 2 && (
@@ -1804,7 +1809,22 @@ function CombinedChart({
           <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.auto }}>{MILESTONE_ICON.auto}</span> Movimiento grande</span>
           <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.fire }}>{MILESTONE_ICON.fire}</span> Hito FIRE</span>
           <span className="flex items-center gap-1"><span style={{ color: MILESTONE_COLOR.manual }}>{MILESTONE_ICON.manual}</span> Nota tuya</span>
-          <span className="text-zinc-700">· pasá el mouse sobre los puntos</span>
+          <span className="text-zinc-700">· tocá un punto para ver el detalle</span>
+        </div>
+      )}
+
+      {selectedMilestone && (
+        <div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 bg-white/[0.04] border border-white/[0.08]">
+          <p className="text-xs text-zinc-200 min-w-0">
+            <span style={{ color: MILESTONE_COLOR[selectedMilestone.kind] }}>{MILESTONE_ICON[selectedMilestone.kind]}</span>{' '}
+            <span className="text-zinc-500">
+              {new Date(selectedMilestone.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })}:
+            </span>{' '}
+            {selectedMilestone.label}
+          </p>
+          <button onClick={() => setSelectedMilestone(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors">
+            <X size={12} />
+          </button>
         </div>
       )}
 
@@ -1883,18 +1903,28 @@ function CombinedChart({
           </>
         )}
 
-        {/* Milestone markers — auto-detected big transactions, FIRE crossings, manual notes */}
+        {/* Milestone markers — auto-detected big transactions, FIRE crossings,
+            manual notes. Native <title> tooltips don't fire on mobile touch,
+            so a click/tap also selects the milestone and shows it as visible
+            text above the chart — with a generously sized invisible circle
+            as the actual tap target, since the visible dot is tiny. */}
         {milestones
           .map(m => ({ ...m, ms: new Date(m.date + 'T12:00:00').getTime() }))
           .filter(m => m.ms >= minMs && m.ms <= maxMs)
           .map((m, i) => {
             const x = xOf(m.ms)
             const color = MILESTONE_COLOR[m.kind]
+            const isSelected = selectedMilestone?.kind === m.kind && selectedMilestone?.date === m.date && selectedMilestone?.label === m.label
             return (
-              <g key={`${m.kind}-${m.date}-${i}`} opacity={0.85}>
+              <g key={`${m.kind}-${m.date}-${i}`}
+                opacity={0.85}
+                style={{ cursor: 'pointer' }}
+                onClick={() => setSelectedMilestone(isSelected ? null : m)}
+              >
                 <title>{`${new Date(m.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })} — ${m.label}`}</title>
-                <line x1={x} x2={x} y1={padT} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={0.35} />
-                <circle cx={x} cy={padT + chartH + 6} r={3} fill={color} />
+                <line x1={x} x2={x} y1={padT} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={isSelected ? 0.7 : 0.35} />
+                <circle cx={x} cy={padT + chartH + 6} r={10} fill="transparent" />
+                <circle cx={x} cy={padT + chartH + 6} r={isSelected ? 5 : 3} fill={color} />
               </g>
             )
           })}

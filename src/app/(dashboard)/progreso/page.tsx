@@ -571,7 +571,12 @@ export default async function ProgresoPage() {
   // per-category fence only fires when something is abnormal for THAT
   // category, e.g. a car purchase (one-off in CAR_EXPENSES) or a big
   // investment liquidation, while leaving routine salary/rent alone.
-  const MILESTONE_MIN_AMOUNT = 500_000
+  // Raised threshold + hard cap (top 6 by amount): the per-category outlier
+  // fence alone still let through too many markers to read on a chart that
+  // spans several years — they all bunch up in the last ~12-24 months at
+  // that x-axis scale. Keep only the genuinely stand-out ones.
+  const MILESTONE_MIN_AMOUNT = 1_500_000
+  const MILESTONE_AUTO_CAP = 6
   const milestoneWindowStartStr = new Date(now.getFullYear(), now.getMonth() - 24, 1).toISOString().slice(0, 10)
   const milestoneCandidates = (txs ?? []).filter(tx =>
     tx.date && tx.date >= milestoneWindowStartStr && tx.amount != null &&
@@ -600,7 +605,8 @@ export default async function ProgresoPage() {
       monthlyBiggest.set(ym, { amount: amt, date: tx.date!, vendor: tx.vendor, concept: tx.concept })
     }
   }
-  for (const { amount, date, vendor, concept } of monthlyBiggest.values()) {
+  const topAuto = [...monthlyBiggest.values()].sort((a, b) => b.amount - a.amount).slice(0, MILESTONE_AUTO_CAP)
+  for (const { amount, date, vendor, concept } of topAuto) {
     milestones.push({
       date,
       label: `${concept || vendor || 'Movimiento grande'} · ₡${Math.round(amount).toLocaleString('es-CR')}`,
@@ -609,6 +615,11 @@ export default async function ProgresoPage() {
     })
   }
 
+  // Crossing detection uses liquid_crc + invested_crc, NOT net_worth_crc —
+  // net_worth_crc includes illiquid real estate (iliquid_crc), which isn't
+  // part of what fireNumber is measured against (activosInvertibles is
+  // liquid + semi-liquid only). Comparing a FIRE threshold against total net
+  // worth would flag "FIRE reached" earlier than actually true.
   const fireThresholds = [
     leanFireNumber > 0 ? { val: leanFireNumber, label: 'Lean FI alcanzado' } : null,
     fireNumber > 0 ? { val: fireNumber * 0.5, label: '50% del FIRE number' } : null,
@@ -616,7 +627,7 @@ export default async function ProgresoPage() {
   ].filter((t): t is { val: number; label: string } => t !== null)
   const sortedSnaps = [...(snapshotRows ?? [])].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
   for (const th of fireThresholds) {
-    const hit = sortedSnaps.find(s => Number(s.net_worth_crc) >= th.val)
+    const hit = sortedSnaps.find(s => Number(s.liquid_crc ?? 0) + Number(s.invested_crc ?? 0) >= th.val)
     if (hit) milestones.push({ date: hit.snapshot_date, label: th.label, kind: 'fire' })
   }
 
