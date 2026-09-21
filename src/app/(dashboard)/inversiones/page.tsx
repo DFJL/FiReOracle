@@ -7,11 +7,13 @@ import { PortfolioHistory } from './PortfolioHistory'
 import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
 import { PortfolioYield } from './PortfolioYield'
 import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type EnvelopeCluster } from './PortfolioAnalysis'
+import { PortfolioModelPanel, type BucketOption, type AssetOption } from './PortfolioModelPanel'
 import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
+import type { PortfolioModelCategory } from '@/lib/portfolioModel'
 
 const LIQUID_KEY = '__liquidez__'
 
@@ -32,10 +34,13 @@ export default async function InversionesPage() {
     { data: incomeTxs },
     { data: categories },
     { data: lifeEventRows },
+    { data: assetRows },
+    { data: loanRows },
+    { data: modelTargetRows },
   ] = await Promise.all([
     admin
       .from('user_investment_buckets')
-      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order, baseline_date, baseline_value_crc')
+      .select('id, bucket_type, name, industry, color, vendors, concept_map, account_id, sort_order, baseline_date, baseline_value_crc, portfolio_model_category')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -83,6 +88,15 @@ export default async function InversionesPage() {
       .select('id, date, label')
       .eq('user_id', user.id)
       .order('date', { ascending: true }),
+    admin.from('assets')
+      .select('id, name, value_crc, is_investable, loan_id, portfolio_model_category')
+      .eq('user_id', user.id).eq('is_active', true),
+    admin.from('loans')
+      .select('id, current_balance, currency_code')
+      .eq('user_id', user.id),
+    admin.from('portfolio_model_targets')
+      .select('category, target_pct')
+      .eq('user_id', user.id),
   ])
 
   const milestones = mergeMilestones(
@@ -480,6 +494,42 @@ export default async function InversionesPage() {
   // Portfolio targets
   const portfolioTargets = await getPortfolioTargets()
 
+  // ── Tropicalized portfolio model (Golden Butterfly CR) ──────────────────────
+  // Real estate counts as NET equity (value minus any linked mortgage), same
+  // rule as /progreso and /patrimonio — linked by loan_id, not name-matching.
+  const loanBalanceById = new Map(
+    (loanRows ?? []).map(l => [
+      l.id,
+      l.currency_code === 'USD' ? Number(l.current_balance) * exchangeRate.sell : Number(l.current_balance),
+    ])
+  )
+  const modelBuckets: BucketOption[] = buckets
+    .filter(b => b.key !== LIQUID_KEY)
+    .map(b => {
+      const def = (bucketRows ?? []).find(d => d.id === b.key)
+      return {
+        id: b.key,
+        name: b.name,
+        balance: b.balance,
+        category: (def?.portfolio_model_category ?? null) as PortfolioModelCategory | null,
+      }
+    })
+  const modelAssets: AssetOption[] = (assetRows ?? [])
+    .filter(a => a.is_investable)
+    .map(a => {
+      const loanBalance = a.loan_id ? loanBalanceById.get(a.loan_id) ?? 0 : 0
+      return {
+        id: a.id,
+        name: a.name,
+        netEquity: Number(a.value_crc) - loanBalance,
+        category: (a.portfolio_model_category ?? null) as PortfolioModelCategory | null,
+      }
+    })
+  const modelTargets = (modelTargetRows ?? []).map(t => ({
+    category: t.category as PortfolioModelCategory,
+    target_pct: Number(t.target_pct),
+  }))
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PortfolioView
@@ -517,6 +567,12 @@ export default async function InversionesPage() {
         income={monthlyIncome}
         clusters={clusters}
         targets={portfolioTargets}
+      />
+      <PortfolioModelPanel
+        buckets={modelBuckets}
+        assets={modelAssets}
+        cashAmount={liquidBalance}
+        targets={modelTargets}
       />
     </div>
   )

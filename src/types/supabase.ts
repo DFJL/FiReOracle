@@ -244,6 +244,7 @@ export type Database = {
           loan_id: string | null
           name: string
           notes: string | null
+          portfolio_model_category: string | null
           sort_order: number
           updated_at: string
           user_id: string
@@ -260,6 +261,7 @@ export type Database = {
           loan_id?: string | null
           name: string
           notes?: string | null
+          portfolio_model_category?: string | null
           sort_order?: number
           updated_at?: string
           user_id: string
@@ -276,6 +278,7 @@ export type Database = {
           loan_id?: string | null
           name?: string
           notes?: string | null
+          portfolio_model_category?: string | null
           sort_order?: number
           updated_at?: string
           user_id?: string
@@ -1498,6 +1501,36 @@ export type Database = {
         }
         Relationships: []
       }
+      portfolio_model_targets: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          sort_order: number
+          target_pct: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          sort_order?: number
+          target_pct?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          sort_order?: number
+          target_pct?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       portfolio_targets: {
         Row: {
           bucket_key: string
@@ -2318,6 +2351,7 @@ export type Database = {
           is_active: boolean | null
           liquidity_tier: string
           name: string
+          portfolio_model_category: string | null
           sort_order: number | null
           updated_at: string | null
           user_id: string
@@ -2337,6 +2371,7 @@ export type Database = {
           is_active?: boolean | null
           liquidity_tier?: string
           name: string
+          portfolio_model_category?: string | null
           sort_order?: number | null
           updated_at?: string | null
           user_id: string
@@ -2356,6 +2391,7 @@ export type Database = {
           is_active?: boolean | null
           liquidity_tier?: string
           name?: string
+          portfolio_model_category?: string | null
           sort_order?: number | null
           updated_at?: string | null
           user_id?: string
