@@ -2071,12 +2071,14 @@ export type Database = {
           id: string
           investment_bucket_id: string | null
           is_passive_income: boolean
+          is_receipt_group: boolean
           is_settlement: boolean
           is_survival_expense: boolean
           loan_id: string | null
           month: number | null
           movement_type: string | null
           notes: string | null
+          parent_transaction_id: string | null
           period_cut: string | null
           raw_label: string | null
           source: string
@@ -2106,12 +2108,14 @@ export type Database = {
           id?: string
           investment_bucket_id?: string | null
           is_passive_income?: boolean
+          is_receipt_group?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
           loan_id?: string | null
           month?: number | null
           movement_type?: string | null
           notes?: string | null
+          parent_transaction_id?: string | null
           period_cut?: string | null
           raw_label?: string | null
           source?: string
@@ -2141,12 +2145,14 @@ export type Database = {
           id?: string
           investment_bucket_id?: string | null
           is_passive_income?: boolean
+          is_receipt_group?: boolean
           is_settlement?: boolean
           is_survival_expense?: boolean
           loan_id?: string | null
           month?: number | null
           movement_type?: string | null
           notes?: string | null
+          parent_transaction_id?: string | null
           period_cut?: string | null
           raw_label?: string | null
           source?: string
@@ -2190,6 +2196,13 @@ export type Database = {
             columns: ["loan_id"]
             isOneToOne: false
             referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_parent_transaction_id_fkey"
+            columns: ["parent_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]

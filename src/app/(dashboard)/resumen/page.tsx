@@ -17,6 +17,7 @@ export default async function ResumenPage() {
       .from('transactions')
       .select('id, movement_type, amount, date, vendor, concept, category_code, expense_group, is_settlement, is_passive_income, is_survival_expense, notes, detail, investment_bucket_id, created_at')
       .eq('user_id', user.id)
+      .eq('is_receipt_group', false)
       .not('amount', 'is', null)
       .not('date', 'is', null)
       .order('date', { ascending: true }),

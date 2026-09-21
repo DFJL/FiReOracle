@@ -394,6 +394,93 @@ export async function createTransaction(input: CreateTransactionInput) {
   return { error: null }
 }
 
+export type ReceiptItemInput = {
+  concept: string
+  amount: number
+  category_code?: string
+}
+
+// A multi-item receipt (supermarket run, pharmacy, hardware store…) becomes
+// one lightweight "parent" record (movement_type: null — same convention
+// already used for valorización rows: no cash-flow impact, invisible to
+// every existing sum/report across the app without touching a single one
+// of them) plus one real 'expense' transaction per line item, each tagged
+// parent_transaction_id so the receipt can still be reconstructed later.
+export async function createReceiptTransactions(input: {
+  date: string
+  vendor: string
+  items: ReceiptItemInput[]
+  notes?: string
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const items = input.items.filter(it => it.concept.trim() && it.amount > 0)
+  if (items.length === 0) return { error: 'Agregá al menos un ítem con monto' }
+
+  const admin = createAdminClient()
+
+  const categoryCodes = [...new Set(items.map(it => it.category_code).filter((c): c is string => !!c))]
+  const groupByCode: Record<string, string> = {}
+  if (categoryCodes.length > 0) {
+    const { data: cats } = await admin
+      .from('transaction_categories')
+      .select('code, group_gasto')
+      .in('code', categoryCodes)
+    for (const c of cats ?? []) groupByCode[c.code] = c.group_gasto ?? 'personal'
+  }
+
+  const total = items.reduce((s, it) => s + it.amount, 0)
+  const parentId = crypto.randomUUID()
+
+  const { error: parentErr } = await admin.from('transactions').insert({
+    id: parentId,
+    user_id: user.id,
+    date: input.date,
+    amount: total,
+    currency_code: 'CRC',
+    vendor: input.vendor.trim() || null,
+    concept: `Recibo · ${items.length} ítems`,
+    expense_group: 'na',
+    movement_type: null,
+    is_receipt_group: true,
+    is_passive_income: false,
+    is_settlement: false,
+    is_survival_expense: false,
+    source: 'manual',
+    notes: input.notes?.trim() || null,
+  })
+  if (parentErr) return { error: parentErr.message }
+
+  const { error: itemsErr } = await admin.from('transactions').insert(
+    items.map(it => ({
+      user_id: user.id,
+      date: input.date,
+      amount: it.amount,
+      currency_code: 'CRC',
+      vendor: input.vendor.trim() || null,
+      concept: it.concept.trim(),
+      category_code: it.category_code || null,
+      expense_group: it.category_code ? (groupByCode[it.category_code] ?? 'personal') : 'personal',
+      movement_type: 'expense',
+      parent_transaction_id: parentId,
+      is_passive_income: false,
+      is_settlement: false,
+      is_survival_expense: false,
+      source: 'manual',
+    }))
+  )
+  if (itemsErr) return { error: itemsErr.message }
+
+  revalidatePath('/resumen')
+  revalidatePath('/flujo')
+  revalidatePath('/progreso')
+  revalidatePath('/inversiones')
+  revalidatePath('/patrimonio')
+  return { error: null, parentId }
+}
+
 export type UpdateTransactionInput = {
   date?: string
   amount?: number

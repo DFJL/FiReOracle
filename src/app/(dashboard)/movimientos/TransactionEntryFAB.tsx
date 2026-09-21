@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useRef } from 'react'
 import { Plus, X, Sparkles, Camera, FileText, Loader2, ChevronDown } from 'lucide-react'
-import { createTransaction, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
+import { createTransaction, createReceiptTransactions, checkDuplicateTransaction, type TxEntryType, type DuplicateHit } from '@/app/actions/transactions'
 import { linkTransactionToLoan } from '@/app/actions/loans'
 import { CONCEPT_CATALOG, lookupConcept } from '@/lib/concept-catalog'
 
@@ -160,6 +160,46 @@ export function TransactionEntryFAB({
   const galleryInputRef               = useRef<HTMLInputElement>(null)
   const pdfInputRef                   = useRef<HTMLInputElement>(null)
 
+  // ── Receipt mode (multi-item) ────────────────────────────────────────────────
+  // The AI decides on its own whether a photo/PDF is a single expense
+  // (normal aiMode prefill) or a multi-item receipt — in which case it comes
+  // back here instead, for review before creating one transaction per item.
+  type ReceiptItem = { concept: string; amount: number; category_code: string }
+  const [receiptMode, setReceiptMode]     = useState(false)
+  const [receiptVendor, setReceiptVendor] = useState('')
+  const [receiptDate, setReceiptDate]     = useState(today())
+  const [receiptItems, setReceiptItems]   = useState<ReceiptItem[]>([])
+  const [receiptParsedTotal, setReceiptParsedTotal] = useState(0)
+  const [receiptSaving, setReceiptSaving] = useState(false)
+  const [receiptError, setReceiptError]   = useState<string | null>(null)
+
+  function updateReceiptItem(i: number, patch: Partial<ReceiptItem>) {
+    setReceiptItems(items => items.map((it, idx) => idx === i ? { ...it, ...patch } : it))
+  }
+  function removeReceiptItem(i: number) {
+    setReceiptItems(items => items.filter((_, idx) => idx !== i))
+  }
+  function addReceiptItem() {
+    setReceiptItems(items => [...items, { concept: '', amount: 0, category_code: '' }])
+  }
+  const receiptItemsTotal = receiptItems.reduce((s, it) => s + (it.amount || 0), 0)
+
+  function saveReceipt() {
+    setReceiptError(null)
+    if (receiptItems.length === 0) { setReceiptError('Agregá al menos un ítem'); return }
+    setReceiptSaving(true)
+    startTransition(async () => {
+      const result = await createReceiptTransactions({
+        date: receiptDate,
+        vendor: receiptVendor,
+        items: receiptItems.map(it => ({ concept: it.concept, amount: it.amount, category_code: it.category_code || undefined })),
+      })
+      setReceiptSaving(false)
+      if (result?.error) { setReceiptError(result.error); return }
+      close()
+    })
+  }
+
   // All active envelopes — shown in every dropdown so users can assign to any level
   const leafEnvelopes = envelopes
 
@@ -233,6 +273,9 @@ export function TransactionEntryFAB({
     setAiError(null); setAiPrefilled(false)
     setDupHits([]); setDupDismissed(false)
     setShowOpcionales(false)
+    // reset receipt state
+    setReceiptMode(false); setReceiptVendor(''); setReceiptDate(today())
+    setReceiptItems([]); setReceiptParsedTotal(0); setReceiptError(null)
   }
 
   function close() { reset(); setOpen(false) }
@@ -282,14 +325,34 @@ export function TransactionEntryFAB({
       }
 
       const data = await res.json() as {
-        status: 'complete' | 'question' | 'error'
+        status: 'complete' | 'multi' | 'question' | 'error'
         fields?: Record<string, unknown>
         partial?: Record<string, unknown>
         question?: string
         message?: string
+        vendor?: string
+        date?: string
+        total?: number
+        items?: { concept?: string; amount?: number; category_code?: string }[]
       }
 
-      if (data.status === 'complete' && data.fields) {
+      if (data.status === 'multi' && Array.isArray(data.items)) {
+        setReceiptVendor(typeof data.vendor === 'string' ? data.vendor : '')
+        setReceiptDate(typeof data.date === 'string' ? data.date : today())
+        setReceiptParsedTotal(typeof data.total === 'number' ? data.total : 0)
+        setReceiptItems(data.items
+          .filter((it): it is { concept: string; amount: number; category_code?: string } =>
+            typeof it.concept === 'string' && typeof it.amount === 'number')
+          .map(it => ({
+            concept: it.concept,
+            amount: it.amount,
+            category_code: it.category_code || resolveCategory(it.concept, 'expense'),
+          })))
+        setReceiptMode(true)
+        setAiMode(false)
+        setAiMessages([])
+        setAiQuestion(null)
+      } else if (data.status === 'complete' && data.fields) {
         const f = data.fields
         if (typeof f.type === 'string') setType(f.type as TxEntryType)
         if (typeof f.date === 'string') setDate(f.date)
@@ -547,13 +610,13 @@ export function TransactionEntryFAB({
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
                   <button type="button"
-                    onClick={() => { setAiMode(false); setAiError(null) }}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${!aiMode ? 'bg-white/[0.10] text-white' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    onClick={() => { setAiMode(false); setAiError(null); setReceiptMode(false) }}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${!aiMode && !receiptMode ? 'bg-white/[0.10] text-white' : 'text-zinc-600 hover:text-zinc-400'}`}>
                     Manual
                   </button>
                   <button type="button"
-                    onClick={() => { setAiMode(true); setAiError(null) }}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${aiMode ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    onClick={() => { setAiMode(true); setAiError(null); setReceiptMode(false) }}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${aiMode && !receiptMode ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
                     <Sparkles size={10} />
                     IA
                   </button>
@@ -563,7 +626,7 @@ export function TransactionEntryFAB({
             </div>
 
             {/* ── AI panel ── */}
-            {aiMode && (
+            {aiMode && !receiptMode && (
               <div className="space-y-3">
                 {aiQuestion && (
                   <div className="flex gap-2 bg-[#a3e635]/[0.08] border border-[#a3e635]/20 rounded-xl p-3">
@@ -625,8 +688,98 @@ export function TransactionEntryFAB({
               </div>
             )}
 
+            {/* ── Receipt review (multi-item) ── */}
+            {receiptMode && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 bg-[#a3e635]/[0.08] border border-[#a3e635]/20 rounded-xl p-3">
+                  <Sparkles size={14} className="text-[#a3e635] flex-shrink-0" />
+                  <p className="text-xs text-[#a3e635]/90 leading-snug">
+                    Recibo detectado con {receiptItems.length} ítems — revisá y corregí antes de guardar. Se crea 1 transacción por ítem, todas vinculadas al recibo.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={lbl}>Comercio</label>
+                    <input type="text" value={receiptVendor} onChange={e => setReceiptVendor(e.target.value)}
+                      placeholder="AutoMercado…" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={lbl}>Fecha</label>
+                    <input type="date" value={receiptDate} onChange={e => setReceiptDate(e.target.value)} className={inputCls} />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={lbl}>Ítems ({receiptItems.length})</label>
+                    <button type="button" onClick={addReceiptItem}
+                      className="text-[10px] font-black text-[#a3e635]/70 hover:text-[#a3e635] transition-colors">
+                      + Ítem
+                    </button>
+                  </div>
+                  <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-0.5">
+                    {receiptItems.map((it, i) => (
+                      <div key={i} className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5 space-y-1.5">
+                        <div className="flex gap-1.5">
+                          <input type="text" value={it.concept}
+                            onChange={e => updateReceiptItem(i, { concept: e.target.value })}
+                            placeholder="Concepto"
+                            className="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                          <input type="number" min="0" step="any" value={it.amount || ''}
+                            onChange={e => updateReceiptItem(i, { amount: parseFloat(e.target.value) || 0 })}
+                            placeholder="₡"
+                            className="w-24 shrink-0 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                          <button type="button" onClick={() => removeReceiptItem(i)}
+                            className="shrink-0 px-1.5 text-zinc-600 hover:text-rose-400 transition-colors">
+                            <X size={13} />
+                          </button>
+                        </div>
+                        <CategorySelect categories={categories} value={it.category_code}
+                          onChange={v => updateReceiptItem(i, { category_code: v })}
+                          typeFilter="expense"
+                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40" />
+                      </div>
+                    ))}
+                    {receiptItems.length === 0 && (
+                      <p className="text-xs text-zinc-600 text-center py-4">Sin ítems — agregá uno con &quot;+ Ítem&quot;.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs text-zinc-500">Suma de ítems</span>
+                  <span className={`text-sm font-black tabular-nums ${
+                    receiptParsedTotal > 0 && Math.abs(receiptItemsTotal - receiptParsedTotal) > 1 ? 'text-amber-400' : 'text-zinc-200'
+                  }`}>
+                    ₡{receiptItemsTotal.toLocaleString('es-CR')}
+                  </span>
+                </div>
+                {receiptParsedTotal > 0 && Math.abs(receiptItemsTotal - receiptParsedTotal) > 1 && (
+                  <p className="text-[10px] text-amber-400 px-1">
+                    El recibo dice ₡{receiptParsedTotal.toLocaleString('es-CR')} — revisá que los ítems sumen bien (puede haber impuestos o algo sin desglosar).
+                  </p>
+                )}
+
+                {receiptError && (
+                  <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{receiptError}</p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { setReceiptMode(false); setReceiptItems([]) }}
+                    className="py-3 rounded-xl bg-white/[0.06] border border-white/[0.10] text-white text-sm font-black tracking-wide hover:bg-white/[0.10] transition-colors">
+                    Cancelar
+                  </button>
+                  <button type="button" onClick={saveReceipt} disabled={receiptSaving || receiptItems.length === 0}
+                    className="py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black tracking-wide hover:bg-[#b4f040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    {receiptSaving ? 'Guardando…' : `Guardar ${receiptItems.length} ítems`}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Type selector — hidden in AI mode */}
-            {!aiMode && <div className="grid grid-cols-2 gap-1.5">
+            {!aiMode && !receiptMode && <div className="grid grid-cols-2 gap-1.5">
               {TYPE_OPTIONS.map(opt => (
                 <button key={opt.value} type="button" onClick={() => { setType(opt.value); setError(null); setInvestmentBucketId('') }}
                   className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
@@ -638,7 +791,7 @@ export function TransactionEntryFAB({
               ))}
             </div>}
 
-            {!aiMode && <form id="tx-form" onSubmit={submit} className="space-y-3">
+            {!aiMode && !receiptMode && <form id="tx-form" onSubmit={submit} className="space-y-3">
 
               {/* Revisión IA banner */}
               {aiPrefilled && (
@@ -1067,7 +1220,7 @@ export function TransactionEntryFAB({
           </div>{/* end scrollable */}
 
           {/* ── Sticky footer: error + submit buttons ── */}
-          {!aiMode && (
+          {!aiMode && !receiptMode && (
             <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/[0.06] space-y-2">
               {showBucketWarning && !investmentBucketId && (
                 <div className="bg-blue-400/[0.08] border border-blue-400/25 rounded-xl px-3 py-2.5 space-y-2">

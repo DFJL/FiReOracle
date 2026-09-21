@@ -78,10 +78,25 @@ REGLAS:
 - Preferí siempre la categoría más ESPECÍFICA disponible sobre una genérica tipo "Ingreso Pasivo" u "Otros ingresos" — ej: un rendimiento de un fondo de inversión o protocolo crypto conocido va en su categoría de rendimientos específica, no en la genérica, aunque ambas parezcan aplicar
 - Hacé máximo UNA pregunta si algo crítico es ambiguo; nunca hagas múltiples preguntas
 
+RECIBOS/FACTURAS CON VARIOS ÍTEMS: cuando la imagen/PDF es un recibo o
+factura con una lista de productos/servicios claramente distintos y con
+precio propio cada uno (ej: recibo de supermercado, farmacia, ferretería,
+factura de compra con desglose) — NO lo conviertas en un solo gasto
+genérico como "Supermercado". Extraé CADA ítem por separado con su propia
+category_code (ej: leche/queso → FOOD_SUPER, shampoo/jabón → PERSONAL_CARE,
+medicamento → HEALTH_MEDS), agrupando ítems idénticos o de la misma
+categoría si son muchas líneas repetidas. NO uses este modo para un gasto
+de un solo concepto (restaurante con un total, gasolina, una suscripción,
+una factura de servicios) aunque tenga impuestos o cargos desglosados —
+esos siguen siendo "complete" normal.
+
 FORMATO — respondé SOLO con JSON sin texto adicional:
 
-Cuando tenés datos suficientes:
+Cuando tenés datos suficientes para UN solo gasto/ingreso:
 {"status":"complete","fields":{"type":"gasto","date":"${today}","amount":15000,"currency":"CRC","vendor":"Spoon","concept":"Almuerzo","category_code":"FOOD_OUT","is_passive_income":false,"is_settlement":false,"is_survival_expense":false}}
+
+Cuando es un recibo/factura con varios ítems distintos:
+{"status":"multi","vendor":"AutoMercado","date":"${today}","total":45230,"currency":"CRC","items":[{"concept":"Leche + lácteos","amount":8500,"category_code":"FOOD_SUPER"},{"concept":"Shampoo","amount":4200,"category_code":"PERSONAL_CARE"}]}
 
 Cuando necesitás UNA aclaración:
 {"status":"question","question":"¿Ese pago en PriceSmart fue por comestibles o artículos del hogar?","partial":{"amount":26500,"vendor":"PriceSmart","type":"gasto"}}`
@@ -132,7 +147,7 @@ Cuando necesitás UNA aclaración:
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 512,
+    max_tokens: 2048,
     system: systemPrompt,
     messages: anthropicMessages,
   })
@@ -159,6 +174,15 @@ Cuando necesitás UNA aclaración:
           parsed.fields.category_code = hit.categoryCode
           const cat = (body.categories ?? []).find(c => c.code === hit.categoryCode)
           if (cat) parsed.fields.is_passive_income = cat.is_passive_income
+        }
+      }
+
+      // Same catalog override, applied per line item for a multi-item receipt.
+      if (parsed?.status === 'multi' && Array.isArray(parsed.items)) {
+        for (const item of parsed.items) {
+          if (typeof item?.concept !== 'string') continue
+          const hit = lookupConcept(item.concept)
+          if (hit && hit.type === 'expense') item.category_code = hit.categoryCode
         }
       }
 
