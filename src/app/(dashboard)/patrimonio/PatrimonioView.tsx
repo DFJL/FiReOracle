@@ -5,6 +5,7 @@ import { Plus, RefreshCw, Trash2, TrendingUp, Download, Upload, Camera } from 'l
 import {
   createAsset,
   updateAssetValue,
+  updateAssetLoan,
   deactivateAsset,
   createLiability,
   updateLiabilityBalance,
@@ -24,6 +25,7 @@ type Asset = {
   id: string; name: string; asset_type: string
   value_crc: number; as_of_date: string
   is_investable: boolean; notes: string | null
+  loan_id: string | null
 }
 
 type Liability = {
@@ -588,6 +590,7 @@ export function PatrimonioView({
   const rate = exchangeRate.sell
   const fmt = (v: number) => fmtAmt(v, currency, rate)
   const fmtFull = (v: number) => fmtAmtFull(v, currency, rate)
+  const loanById = Object.fromEntries(loans.map(l => [l.id, l]))
 
   // Asset CRUD state
   const [showAddAsset, setShowAddAsset]       = useState(false)
@@ -598,8 +601,10 @@ export function PatrimonioView({
   const [newAssetDate, setNewAssetDate]       = useState(today())
   const [newAssetInv, setNewAssetInv]         = useState(false)
   const [newAssetNotes, setNewAssetNotes]     = useState('')
+  const [newAssetLoanId, setNewAssetLoanId]   = useState('')
   const [assetNewVal, setAssetNewVal]         = useState('')
   const [assetNewDate, setAssetNewDate]       = useState(today())
+  const [linkingLoanAsset, setLinkingLoanAsset] = useState<string | null>(null)
 
   // Liability CRUD state
   const [showAddLiab, setShowAddLiab]         = useState(false)
@@ -637,11 +642,21 @@ export function PatrimonioView({
         as_of_date: newAssetDate,
         is_investable: newAssetInv,
         notes: newAssetNotes || undefined,
+        loan_id: newAssetLoanId || undefined,
       })
       if (result.error) { setError(result.error); return }
       setShowAddAsset(false)
       setNewAssetName(''); setNewAssetValue(''); setNewAssetDate(today())
-      setNewAssetInv(false); setNewAssetNotes('')
+      setNewAssetInv(false); setNewAssetNotes(''); setNewAssetLoanId('')
+    })
+  }
+
+  function handleLinkLoan(assetId: string, loanId: string) {
+    setError(null)
+    startTransition(async () => {
+      const result = await updateAssetLoan(assetId, loanId || null)
+      if (result.error) { setError(result.error); return }
+      setLinkingLoanAsset(null)
     })
   }
 
@@ -1103,6 +1118,17 @@ export function PatrimonioView({
                 className="w-3.5 h-3.5 rounded accent-[#a3e635]" />
               <span className="text-xs text-zinc-400">Activo invertible — cuenta para el número FIRE</span>
             </label>
+            {loans.length > 0 && (
+              <div>
+                <label className={lbl}>
+                  Préstamo vinculado <span className="text-zinc-700 normal-case tracking-normal">(opcional — resta del equity en /progreso)</span>
+                </label>
+                <select value={newAssetLoanId} onChange={e => setNewAssetLoanId(e.target.value)} className={inputCls}>
+                  <option value="">— ninguno —</option>
+                  {loans.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            )}
             <div className="flex gap-2">
               <button type="submit" disabled={isPending}
                 className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
@@ -1138,6 +1164,11 @@ export function PatrimonioView({
                           Invertible
                         </span>
                       )}
+                      {asset.loan_id && loanById[asset.loan_id] && (
+                        <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.1em] px-2 py-0.5 rounded-full bg-rose-400/10 text-rose-400">
+                          − {loanById[asset.loan_id].name}
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] text-zinc-600 mt-0.5">Valuado al {asset.as_of_date}</p>
                     {asset.notes && <p className="text-[10px] text-zinc-600 mt-0.5">{asset.notes}</p>}
@@ -1151,6 +1182,17 @@ export function PatrimonioView({
                     >
                       <RefreshCw size={13} />
                     </button>
+                    {loans.length > 0 && (
+                      <button
+                        onClick={() => setLinkingLoanAsset(linkingLoanAsset === asset.id ? null : asset.id)}
+                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                          linkingLoanAsset === asset.id ? 'bg-rose-400/15 text-rose-400' : 'text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10'
+                        }`}
+                        title="Vincular préstamo"
+                      >
+                        🏦
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeleteAsset(asset.id)} disabled={isPending}
                       className="p-1.5 rounded-lg text-zinc-700 hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
@@ -1160,6 +1202,19 @@ export function PatrimonioView({
                     </button>
                   </div>
                 </div>
+
+                {linkingLoanAsset === asset.id && (
+                  <div className="mt-3 pt-3 border-t border-white/[0.06] flex flex-wrap gap-2 items-end">
+                    <div>
+                      <label className={lbl}>Préstamo vinculado <span className="text-zinc-700 normal-case tracking-normal">— resta del equity en /progreso</span></label>
+                      <select defaultValue={asset.loan_id ?? ''} onChange={e => handleLinkLoan(asset.id, e.target.value)}
+                        className="w-56 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[#a3e635]/40">
+                        <option value="">— ninguno —</option>
+                        {loans.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {updatingAsset === asset.id && (
                   <div className="mt-3 pt-3 border-t border-white/[0.06] flex flex-wrap gap-2 items-end">

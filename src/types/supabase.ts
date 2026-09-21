@@ -241,6 +241,7 @@ export type Database = {
           is_active: boolean
           is_investable: boolean
           is_rental: boolean
+          loan_id: string | null
           name: string
           notes: string | null
           sort_order: number
@@ -256,6 +257,7 @@ export type Database = {
           is_active?: boolean
           is_investable?: boolean
           is_rental?: boolean
+          loan_id?: string | null
           name: string
           notes?: string | null
           sort_order?: number
@@ -271,6 +273,7 @@ export type Database = {
           is_active?: boolean
           is_investable?: boolean
           is_rental?: boolean
+          loan_id?: string | null
           name?: string
           notes?: string | null
           sort_order?: number
@@ -278,7 +281,15 @@ export type Database = {
           user_id?: string
           value_crc?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "assets_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bonus_plan_items: {
         Row: {

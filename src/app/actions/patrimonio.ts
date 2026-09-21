@@ -14,6 +14,7 @@ export async function createAsset(input: {
   as_of_date: string
   is_investable: boolean
   notes?: string
+  loan_id?: string | null
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -30,10 +31,32 @@ export async function createAsset(input: {
     is_active: true,
     notes: input.notes?.trim() || null,
     sort_order: 0,
+    loan_id: input.loan_id || null,
   })
 
   if (error) return { error: error.message }
   revalidatePath('/patrimonio')
+  revalidatePath('/progreso')
+  return { error: null }
+}
+
+// Links (or unlinks, with loanId = null) an asset to a loan, e.g. a house to
+// its mortgage — by id, not by matching names. Drives net-equity math in
+// /progreso's real estate liquidity tier (value minus the linked loan's
+// current balance) instead of counting the property's gross value.
+export async function updateAssetLoan(assetId: string, loanId: string | null) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('assets')
+    .update({ loan_id: loanId, updated_at: new Date().toISOString() })
+    .eq('id', assetId).eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/patrimonio')
+  revalidatePath('/progreso')
   return { error: null }
 }
 

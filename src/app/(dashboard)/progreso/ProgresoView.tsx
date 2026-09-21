@@ -525,7 +525,7 @@ function LiquidityScenarioPanel({
     { key: 'liquid', label: 'Líquido', tier: breakdown.liquid, checked: includeLiquid, onToggle: onToggleLiquid, note: 'sobres — disponible ya' },
     { key: 'semiLiquid', label: 'Semi-líquido', tier: breakdown.semiLiquid, checked: includeSemiLiquid, onToggle: onToggleSemiLiquid, note: 'portafolio — vendible en días/semanas' },
     { key: 'locked', label: 'Bloqueado', tier: breakdown.locked, checked: includeLocked, onToggle: onToggleLocked, note: 'retiro — no disponible hasta pensión (~20+ años)' },
-    { key: 'realEstate', label: 'Bienes raíces', tier: breakdown.realEstate, checked: includeRealEstate, onToggle: onToggleRealEstate, note: 'ilíquido — requiere vender (o generar renta, si aplica)' },
+    { key: 'realEstate', label: 'Bienes raíces', tier: breakdown.realEstate, checked: includeRealEstate, onToggle: onToggleRealEstate, note: 'equity neto (valor − hipoteca) — ilíquido, requiere vender' },
   ]
 
   return (

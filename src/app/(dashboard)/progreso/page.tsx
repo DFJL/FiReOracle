@@ -40,41 +40,51 @@ export default async function ProgresoPage() {
   const rolling12EndStr   = currentMonthStart.toISOString().slice(0, 10)
 
   const [
-    { data: fireConfig },
-    { data: bucketRows },
-    { data: txs },
-    { data: movements },
-    { data: envelopes },
-    { data: assetRows },
-    { data: snapshotRows },
-    { data: categories },
+    [
+      { data: fireConfig },
+      { data: bucketRows },
+      { data: txs },
+      { data: movements },
+      { data: envelopes },
+      { data: assetRows },
+      { data: snapshotRows },
+      { data: categories },
+      { data: loanRows },
+    ],
+    exchangeRate,
   ] = await Promise.all([
-    admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
-    admin.from('user_investment_buckets')
-      .select('id, name, bucket_type, vendors, concept_map, account_id, baseline_date, baseline_value_crc, liquidity_tier')
-      .eq('user_id', user.id).eq('is_active', true),
-    admin.from('transactions')
-      .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes, detail')
-      .eq('user_id', user.id)
-      .not('amount', 'is', null)
-      .range(0, 49999),
-    admin.from('envelope_movements')
-      .select('amount, movement_type, envelope_id, date, notes')
-      .eq('user_id', user.id),
-    admin.from('savings_envelopes')
-      .select('id, name, parent_envelope_id, envelope_type, counts_as_ahorro')
-      .eq('user_id', user.id).eq('is_active', true),
-    admin.from('assets')
-      .select('name, value_crc, is_investable, is_rental')
-      .eq('user_id', user.id).eq('is_active', true),
-    admin.from('net_worth_snapshots')
-      .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
-      .eq('user_id', user.id)
-      .order('snapshot_date', { ascending: true }),
-    admin.from('transaction_categories')
-      .select('code, name, group_gasto, parent_code')
-      .eq('is_active', true)
-      .order('sort_order'),
+    Promise.all([
+      admin.from('user_financial_config').select('*').eq('user_id', user.id).maybeSingle(),
+      admin.from('user_investment_buckets')
+        .select('id, name, bucket_type, vendors, concept_map, account_id, baseline_date, baseline_value_crc, liquidity_tier')
+        .eq('user_id', user.id).eq('is_active', true),
+      admin.from('transactions')
+        .select('vendor, concept, movement_type, expense_group, is_settlement, is_passive_income, is_survival_expense, amount, date, category_code, investment_bucket_id, notes, detail')
+        .eq('user_id', user.id)
+        .not('amount', 'is', null)
+        .range(0, 49999),
+      admin.from('envelope_movements')
+        .select('amount, movement_type, envelope_id, date, notes')
+        .eq('user_id', user.id),
+      admin.from('savings_envelopes')
+        .select('id, name, parent_envelope_id, envelope_type, counts_as_ahorro')
+        .eq('user_id', user.id).eq('is_active', true),
+      admin.from('assets')
+        .select('name, value_crc, is_investable, is_rental, loan_id')
+        .eq('user_id', user.id).eq('is_active', true),
+      admin.from('net_worth_snapshots')
+        .select('snapshot_date, net_worth_crc, invested_crc, liquid_crc')
+        .eq('user_id', user.id)
+        .order('snapshot_date', { ascending: true }),
+      admin.from('transaction_categories')
+        .select('code, name, group_gasto, parent_code')
+        .eq('is_active', true)
+        .order('sort_order'),
+      admin.from('loans')
+        .select('id, current_balance, currency_code')
+        .eq('user_id', user.id),
+    ]),
+    fetchExchangeRate(),
   ])
 
   // FU Money chart: exclude locked retirement funds (liquidity_tier='locked'
@@ -137,9 +147,22 @@ export default async function ProgresoPage() {
   const semiLiquidInvested = bucketBalances.filter(b => b.tier === 'semi_liquid').reduce((s, b) => s + b.balance, 0)
   const lockedInvested     = bucketBalances.filter(b => b.tier === 'locked').reduce((s, b) => s + b.balance, 0)
 
+  // Real estate counts as NET equity (value minus any linked mortgage
+  // balance), not gross value — a house with a ₡78M loan against it isn't
+  // ₡122.85M of retirable net worth, it's the ~₡44.8M difference. Linked by
+  // loan_id (set explicitly in /patrimonio), not by name-matching.
+  const loanBalanceById = new Map(
+    (loanRows ?? []).map(l => [
+      l.id,
+      l.currency_code === 'USD' ? Number(l.current_balance) * exchangeRate.sell : Number(l.current_balance),
+    ])
+  )
   const realEstateAssets = (assetRows ?? [])
     .filter(a => a.is_investable)
-    .map(a => ({ name: a.name, value: Number(a.value_crc), isRental: a.is_rental }))
+    .map(a => {
+      const loanBalance = a.loan_id ? loanBalanceById.get(a.loan_id) ?? 0 : 0
+      return { name: a.name, value: Number(a.value_crc) - loanBalance, isRental: a.is_rental }
+    })
   const iliquidInvestable = realEstateAssets.reduce((s, a) => s + a.value, 0)
 
   // Activos invertibles — el denominador del % FIRE. Práctica estándar: solo
@@ -525,8 +548,6 @@ export default async function ProgresoPage() {
       }
     }
   }
-
-  const exchangeRate = await fetchExchangeRate()
 
   // ── Lifestyle Inflation ────────────────────────────────────────────────────
   // (category hierarchy + outlier-cleaned tx set now built earlier — see

@@ -45,7 +45,7 @@ export default async function PatrimonioPage() {
       .eq('user_id', user.id)
       .eq('is_active', true),
     admin.from('assets')
-      .select('id, name, asset_type, value_crc, as_of_date, is_investable, is_active, notes')
+      .select('id, name, asset_type, value_crc, as_of_date, is_investable, is_active, notes, loan_id')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
