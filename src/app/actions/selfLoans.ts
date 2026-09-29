@@ -441,6 +441,89 @@ export async function deleteSelfLoan(loanId: string) {
   return { ok: true }
 }
 
+// Draws more against an existing autopréstamo — like a credit line — instead
+// of only ever being able to pay it down. Withdraws the extra amount from the
+// same envelope(s) that funded the original loan, split in the same
+// proportion, and bumps original_amount so the balance owed reflects the new
+// total. Deliberately mirrors only envelope_movements (no `transactions`
+// row) — same as the original creation — so a temporary/reimbursable loan
+// stays invisible to spending analytics no matter how many draws it gets.
+export async function increaseSelfLoan(
+  loanId: string,
+  data: { amount: number; date: string; notes?: string },
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  if (!data.amount || data.amount <= 0) return { error: 'Monto inválido' }
+
+  const admin = createAdminClient()
+
+  const { data: loan, error: loanErr } = await admin
+    .from('self_loans')
+    .select('id, source_envelope_id, envelope_split, original_amount, amount_repaid')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .single()
+  if (loanErr || !loan) return { error: 'Préstamo no encontrado' }
+
+  const notes = `Autopréstamo (aumento)${data.notes ? `: ${data.notes}` : ''}`
+  const rawSplit = loan.envelope_split
+  const split: { envelope_id: string; amount: number }[] | null = Array.isArray(rawSplit)
+    ? (rawSplit as { envelope_id: string; amount: number }[])
+    : rawSplit && typeof rawSplit === 'object'
+      ? Object.entries(rawSplit as Record<string, number>).map(([envelope_id, amount]) => ({ envelope_id, amount: Number(amount) }))
+      : null
+
+  if (split && split.length > 0) {
+    const totalSplit = split.reduce((s, e) => s + Number(e.amount), 0)
+    if (totalSplit <= 0) return { error: 'Fuentes del préstamo inválidas' }
+    let drawn = 0
+    const newSplit = []
+    for (let i = 0; i < split.length; i++) {
+      const entry = split[i]
+      const isLast = i === split.length - 1
+      const portion = isLast ? data.amount - drawn : Math.round((Number(entry.amount) / totalSplit) * data.amount)
+      drawn += portion
+      if (portion !== 0) {
+        const { error } = await admin.from('envelope_movements').insert({
+          user_id: user.id, envelope_id: entry.envelope_id, date: data.date,
+          amount: -Math.abs(portion), movement_type: 'retiro', notes, self_loan_id: loanId,
+        })
+        if (error) return { error: error.message }
+      }
+      newSplit.push({ envelope_id: entry.envelope_id, amount: Number(entry.amount) + portion })
+    }
+    const { error } = await admin.from('self_loans').update({
+      original_amount: Number(loan.original_amount) + data.amount,
+      envelope_split: newSplit,
+    }).eq('id', loanId)
+    if (error) return { error: error.message }
+  } else if (loan.source_envelope_id) {
+    const { error: movErr } = await admin.from('envelope_movements').insert({
+      user_id: user.id, envelope_id: loan.source_envelope_id, date: data.date,
+      amount: -Math.abs(data.amount), movement_type: 'retiro', notes, self_loan_id: loanId,
+    })
+    if (movErr) return { error: movErr.message }
+    const { error } = await admin.from('self_loans').update({
+      original_amount: Number(loan.original_amount) + data.amount,
+    }).eq('id', loanId)
+    if (error) return { error: error.message }
+  } else {
+    return { error: 'Este préstamo no tiene sobre de origen — editá las fuentes primero' }
+  }
+
+  // Repaid amount didn't change, but the balance owed just grew — a loan
+  // that was 'paid' or 'partial' needs to fall back to reflect the new gap.
+  const newOriginal = Number(loan.original_amount) + data.amount
+  const newStatus = Number(loan.amount_repaid) === 0 ? 'pending' : Number(loan.amount_repaid) >= newOriginal ? 'paid' : 'partial'
+  await admin.from('self_loans').update({ status: newStatus }).eq('id', loanId)
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
 export async function updateLoanSources(
   loanId: string,
   sources: { envelope_id: string; amount: number }[],

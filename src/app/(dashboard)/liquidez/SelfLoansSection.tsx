@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect, useRef } from 'react'
 import type { Envelope } from './page'
 import type { SelfLoan } from './page'
 import {
-  createSelfLoan, recordSelfLoanPayment, updateLoanSources,
+  createSelfLoan, recordSelfLoanPayment, updateLoanSources, increaseSelfLoan,
   getSelfLoanHistory, updateSelfLoanPayment, deleteSelfLoanPayment, deleteSelfLoan,
 } from '@/app/actions/selfLoans'
 import type { SelfLoanPayment } from '@/app/actions/selfLoans'
@@ -456,6 +456,113 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
   )
 }
 
+function IncreasePanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void }) {
+  const [amount, setAmount] = useState('')
+  const [date, setDate]     = useState(new Date().toISOString().slice(0, 10))
+  const [notes, setNotes]   = useState('')
+  const [error, setError]   = useState('')
+  const [isPending, start]  = useTransition()
+
+  const previewPortions: { name: string; portion: number }[] = (() => {
+    const amt = parseFloat(amount.replace(/,/g, ''))
+    if (!amt || amt <= 0) return []
+    if (loan.envelope_split && loan.envelope_split.length > 0) {
+      const totalSplit = loan.envelope_split.reduce((s, e) => s + e.amount, 0)
+      if (totalSplit <= 0) return []
+      let drawn = 0
+      return loan.envelope_split.map((e, i) => {
+        const isLast = i === loan.envelope_split!.length - 1
+        const portion = isLast ? amt - drawn : Math.round((e.amount / totalSplit) * amt)
+        drawn += portion
+        return { name: e.name, portion }
+      })
+    }
+    if (loan.source_envelope_name) return [{ name: loan.source_envelope_name, portion: amt }]
+    return []
+  })()
+
+  function submit() {
+    const amt = parseFloat(amount.replace(/,/g, ''))
+    if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    setError('')
+    start(async () => {
+      const res = await increaseSelfLoan(loan.id, { amount: amt, date, notes: notes || undefined })
+      if (res?.error) { setError(res.error); return }
+      onClose()
+    })
+  }
+
+  return (
+    <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
+      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
+        Aumentar autopréstamo · como línea de crédito, saca más del mismo sobre
+      </p>
+
+      {previewPortions.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-1">Se retira de</p>
+          {previewPortions.map((p, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <span className="text-[10px] text-zinc-500">{p.name}</span>
+              <span className="text-[10px] tabular-nums text-rose-400/80">-{fmtCRC(p.portion)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Monto ₡</p>
+          <input
+            type="number"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder="0"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
+          />
+        </div>
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Fecha</p>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
+          />
+        </div>
+        <div className="col-span-2">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">Notas (opcional)</p>
+          <input
+            type="text"
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="..."
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40"
+          />
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+
+      <div className="flex gap-2">
+        <button
+          onClick={submit}
+          disabled={isPending}
+          className="px-4 py-2 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50"
+        >
+          {isPending ? '...' : 'Registrar aumento'}
+        </button>
+        <button
+          onClick={onClose}
+          className="px-4 py-2 rounded-lg bg-white/[0.06] text-zinc-400 text-xs"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── History panel ─────────────────────────────────────────────────────────────
 
 function EditPaymentForm({
@@ -649,7 +756,7 @@ function HistoryPanel({
   )
 }
 
-type ActivePanel = { type: 'history' } | { type: 'payment' } | { type: 'edit-sources' }
+type ActivePanel = { type: 'history' } | { type: 'payment' } | { type: 'edit-sources' } | { type: 'increase' }
 
 export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; envelopes: Envelope[] }) {
   const [showNew, setShowNew]       = useState(false)
@@ -770,6 +877,12 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                   <div>
                     <div className="px-4 pb-1 flex items-center gap-3">
                       <button
+                        onClick={e => { e.stopPropagation(); setOpenId(loan.id); setOpenPanel({ type: 'increase' }) }}
+                        className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] hover:text-[#a3e635]/70 transition-colors"
+                      >
+                        + Aumentar
+                      </button>
+                      <button
                         onClick={e => { e.stopPropagation(); openEditSources(loan.id) }}
                         className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] hover:text-[#a3e635]/70 transition-colors"
                       >
@@ -789,6 +902,20 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                       envelopes={envelopes}
                       onNewPayment={() => { setOpenId(loan.id); setOpenPanel({ type: 'payment' }) }}
                     />
+                  </div>
+                )}
+
+                {isOpen && openPanel?.type === 'increase' && (
+                  <div>
+                    <div className="px-4 pb-1 flex items-center gap-3">
+                      <button
+                        onClick={e => { e.stopPropagation(); setOpenPanel({ type: 'history' }) }}
+                        className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] hover:text-[#a3e635]/70 transition-colors"
+                      >
+                        ← Historial
+                      </button>
+                    </div>
+                    <IncreasePanel loan={loan} onClose={() => setOpenPanel({ type: 'history' })} />
                   </div>
                 )}
 
