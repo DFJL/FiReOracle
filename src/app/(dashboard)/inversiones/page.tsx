@@ -14,6 +14,7 @@ import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
 import type { PortfolioModelCategory } from '@/lib/portfolioModel'
+import { CurrencyProvider } from './CurrencyContext'
 
 const LIQUID_KEY = '__liquidez__'
 
@@ -574,6 +575,7 @@ export default async function InversionesPage() {
   }))
 
   return (
+    <CurrencyProvider>
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PortfolioView
         buckets={buckets}
@@ -616,7 +618,9 @@ export default async function InversionesPage() {
         positions={modelPositions}
         cashAmount={liquidBalance + brokerageIdleCash}
         targets={modelTargets}
+        exchangeRate={exchangeRate}
       />
     </div>
+    </CurrencyProvider>
   )
 }

@@ -15,10 +15,17 @@ import {
   updateAssetModelCategory,
   updatePositionModelCategory,
 } from '@/app/actions/portfolioModel'
+import { useCurrency } from './CurrencyContext'
+import type { ExchangeRate } from '@/lib/exchange-rate'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
   return `₡${Math.round(n).toLocaleString('es-CR')}`
+}
+
+function fmtUSD(n: number) {
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function fmtPct(n: number) {
@@ -83,15 +90,20 @@ export function PortfolioModelPanel({
   positions,
   cashAmount,
   targets: initialTargets,
+  exchangeRate,
 }: {
   buckets: BucketOption[]
   assets: AssetOption[]
   positions: PositionOption[]
   cashAmount: number
   targets: { category: PortfolioModelCategory; target_pct: number }[]
+  exchangeRate: ExchangeRate
 }) {
   const [included, setIncluded] = useState(DEFAULT_INCLUDED)
   const [sortMode, setSortMode] = useState<SortMode>('gap')
+  const { currency } = useCurrency()
+  const rate = exchangeRate.sell
+  const fmt = (crc: number) => currency === 'CRC' ? fmtCRC(crc) : fmtUSD(crc / rate)
 
   const initialDrafts = useMemo(
     () => Object.fromEntries(
@@ -264,26 +276,26 @@ export function PortfolioModelPanel({
                     />
                   </div>
                   <div className="flex justify-between mt-0.5">
-                    <span className="text-[10px] text-zinc-500">{fmtCRC(row?.actual ?? 0)}</span>
+                    <span className="text-[10px] text-zinc-500">{fmt(row?.actual ?? 0)}</span>
                     {row && Math.abs(row.gapAmount) > 1000 && (
                       <span className={`text-[10px] font-bold ${isDeficit ? 'text-rose-400' : 'text-amber-400'}`}>
                         {isDeficit
-                          ? `faltan ${fmtCRC(row.gapAmount)}`
-                          : `${fmtCRC(-row.gapAmount)} de más`}
+                          ? `faltan ${fmt(row.gapAmount)}`
+                          : `${fmt(-row.gapAmount)} de más`}
                       </span>
                     )}
                   </div>
                 </>
               ) : (
                 <p className="text-[10px] text-zinc-600 mt-1.5">
-                  Excluido de la comparación · {fmtCRC(rawAmount)} sin contar
+                  Excluido de la comparación · {fmt(rawAmount)} sin contar
                 </p>
               )}
 
               {rows.length > 0 && (
                 <div className="mt-2.5 pt-2.5 border-t border-zinc-900 space-y-1.5">
                   {rows.map(h => (
-                    <HoldingRowView key={`${h.kind}-${h.id ?? 'cash'}`} holding={h} />
+                    <HoldingRowView key={`${h.kind}-${h.id ?? 'cash'}`} holding={h} fmt={fmt} />
                   ))}
                 </div>
               )}
@@ -313,7 +325,7 @@ export function PortfolioModelPanel({
           <p className="text-[11px] font-black text-amber-400 uppercase tracking-wide mb-2">Sin clasificar</p>
           <div className="space-y-1.5">
             {uncategorized.map(h => (
-              <HoldingRowView key={`${h.kind}-${h.id}`} holding={h} />
+              <HoldingRowView key={`${h.kind}-${h.id}`} holding={h} fmt={fmt} />
             ))}
           </div>
         </div>
@@ -328,7 +340,7 @@ export function PortfolioModelPanel({
                 <span className="text-zinc-400">{c.label}</span>
                 <span className="text-[10px] text-zinc-600 ml-2">{c.hint}</span>
               </div>
-              <span className="text-zinc-300 font-bold">{fmtCRC(c.actual)}</span>
+              <span className="text-zinc-300 font-bold">{fmt(c.actual)}</span>
             </div>
           ))}
         </div>
@@ -337,14 +349,14 @@ export function PortfolioModelPanel({
   )
 }
 
-function HoldingRowView({ holding }: { holding: HoldingRow }) {
+function HoldingRowView({ holding, fmt }: { holding: HoldingRow; fmt: (crc: number) => string }) {
   const [pending, startTransition] = useTransition()
 
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex items-baseline gap-2 min-w-0">
         <span className="text-[11px] text-zinc-300 truncate">{holding.name}</span>
-        <span className="text-[10px] text-zinc-600 shrink-0">{fmtCRC(holding.amount)}</span>
+        <span className="text-[10px] text-zinc-600 shrink-0">{fmt(holding.amount)}</span>
       </div>
       {holding.kind !== 'cash' && (
         <select

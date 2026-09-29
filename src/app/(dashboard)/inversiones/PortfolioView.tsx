@@ -5,6 +5,7 @@ import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 import { upsertPortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
+import { useCurrency } from './CurrencyContext'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -225,7 +226,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   targets: PortfolioTarget[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
-  const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
+  const { currency, setCurrency } = useCurrency()
   const [showAllTx, setShowAllTx] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [targets, setTargets] = useState(initialTargets)
