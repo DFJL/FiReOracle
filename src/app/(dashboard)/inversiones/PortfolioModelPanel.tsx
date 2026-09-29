@@ -259,6 +259,12 @@ export function PortfolioModelPanel({
                 </div>
               </div>
 
+              {isChecked && row && Math.abs(row.targetPct - (parseFloat(drafts[category]) || 0)) > 0.05 && (
+                <p className="text-[9px] text-zinc-600 text-right -mt-1">
+                  meta efectiva {fmtPct(row.targetPct)} — renormalizada porque hay categorías desmarcadas
+                </p>
+              )}
+
               {isChecked ? (
                 <>
                   <div className="relative h-2 rounded-full bg-zinc-900 overflow-hidden mt-2">
