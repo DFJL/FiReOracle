@@ -185,6 +185,20 @@ export default async function InversionesPage() {
   const snapshotHistory: Record<string, typeof snapshotResults[number]['history']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.history]))
   const snapshotPositions: Record<string, typeof snapshotResults[number]['positions']> = Object.fromEntries(snapshotResults.map(r => [r.id, r.positions]))
 
+  // Real balance per bucket per month, for the trend chart — history is
+  // sorted newest-first, so the first hit per month is the latest snapshot
+  // within it ("later snapshot within a month wins", same rule as
+  // snapshotInvestedByMonth above).
+  const snapshotBucketByMonth: Record<string, Record<string, number>> = {}
+  for (const b of snapshotBuckets) {
+    const monthMap: Record<string, number> = {}
+    for (const h of snapshotHistory[b.id] ?? []) {
+      const m = h.date.slice(0, 7)
+      if (monthMap[m] === undefined) monthMap[m] = h.balance
+    }
+    snapshotBucketByMonth[b.id] = monthMap
+  }
+
   const { data: snapshotAccounts } = snapshotBuckets.length > 0
     ? await admin.from('financial_accounts').select('id, currency_code')
         .in('id', snapshotBuckets.map(b => b.account_id!))
@@ -356,6 +370,7 @@ export default async function InversionesPage() {
   Object.keys(liquidezDeltas).forEach(m => allMonthsSet.add(m))
   // Snapshots reach further back than any transaction, so let them set the start
   Object.keys(snapshotInvestedByMonth).forEach(m => allMonthsSet.add(m))
+  Object.values(snapshotBucketByMonth).forEach(monthMap => Object.keys(monthMap).forEach(m => allMonthsSet.add(m)))
 
   const historyPoints: HistoryPoint[] = []
 
@@ -383,10 +398,19 @@ export default async function InversionesPage() {
     // the baseline on the current total, applied month by month for the chart.
     const bucketLastReal: Record<string, number> = {}
     const bucketReplayAtLastReal: Record<string, number> = {}
+    // Snapshot_based buckets (e.g. IBKR) have no transaction replay at all —
+    // their balance only ever comes from account_balance_snapshots — so carry
+    // the last known real balance forward the same way liquid/invested do,
+    // instead of leaving them out of bucketBalances entirely (which is why
+    // the trend chart used to show IBKR flat at zero for its whole history).
+    const snapshotBucketLast: Record<string, number> = {}
 
     for (const month of months) {
       for (const def of bucketDefs) {
         running[def.id] = (running[def.id] ?? 0) + (bucketDeltas[def.id]?.[month] ?? 0)
+      }
+      for (const b of snapshotBuckets) {
+        if (snapshotBucketByMonth[b.id]?.[month] !== undefined) snapshotBucketLast[b.id] = snapshotBucketByMonth[b.id][month]
       }
       runningLiquidez += (liquidezDeltas[month] ?? 0)
       if (snapshotInvestedByMonth[month] !== undefined) lastInvested = snapshotInvestedByMonth[month]
@@ -405,6 +429,9 @@ export default async function InversionesPage() {
         } else {
           bucketBalances[def.id] = running[def.id] ?? 0
         }
+      }
+      for (const b of snapshotBuckets) {
+        if (snapshotBucketLast[b.id] !== undefined) bucketBalances[b.id] = snapshotBucketLast[b.id]
       }
 
       historyPoints.push({
