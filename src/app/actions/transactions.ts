@@ -292,10 +292,12 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   else if (input.type === 'ingreso') {
     const isUSD = input.currency_code === 'USD'
+    const txId = crypto.randomUUID()
     const resolvedCategoryCode = input.is_passive_income
       ? await resolveIngresoCategoryCode(admin, user.id, input.vendor, input.category_code ?? null)
       : input.category_code ?? null
     const { error } = await admin.from('transactions').insert({
+      id: txId,
       user_id: user.id,
       date: input.date,
       amount: input.amount,
@@ -317,7 +319,7 @@ export async function createTransaction(input: CreateTransactionInput) {
     })
     if (error) return { error: error.message }
     if (input.credit_envelope_id || input.loan_id || input.new_loan_description) {
-      const sideErr = await applySideEffects(admin, user.id, input)
+      const sideErr = await applySideEffects(admin, user.id, { ...input, source_tx_id: txId })
       if (sideErr) return { error: sideErr }
     }
   }
@@ -654,6 +656,19 @@ export async function deleteTransaction(id: string) {
   if (!user) return { error: 'No autenticado' }
 
   const admin = createAdminClient()
+
+  // A gasto/ingreso entered with a debit_envelope_id/credit_envelope_id side
+  // effect spawns a linked envelope_movements row (source_tx_id = this tx) —
+  // deleting only the transaction left that retiro/depósito behind forever,
+  // so the sobre's balance stayed off by the amount even though the
+  // transaction itself was gone from every list.
+  const { error: envErr } = await admin
+    .from('envelope_movements')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('source_tx_id', id)
+  if (envErr) return { error: envErr.message }
+
   const { error } = await admin
     .from('transactions')
     .delete()
@@ -666,6 +681,7 @@ export async function deleteTransaction(id: string) {
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
   revalidatePath('/patrimonio')
+  revalidatePath('/liquidez')
   return { error: null }
 }
 
