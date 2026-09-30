@@ -8,7 +8,7 @@ import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import {
   deleteTransaction, type UpdateTransactionInput,
-  getAllEnvelopes, getTransactionEnvelopeLink, updateTransactionEnvelopeLink,
+  getEnvelopeEditData, updateTransactionEnvelopeLink,
   updateTransactionWithLinks,
 } from '@/app/actions/transactions'
 import {
@@ -536,10 +536,10 @@ function EditTransactionModal({ tx, categories, buckets, onClose, onSaved }: {
   const [envelopesReady, setEnvelopesReady] = useState(false)
 
   useEffect(() => {
-    Promise.all([getAllEnvelopes(), getTransactionEnvelopeLink(tx.id)])
-      .then(([envs, link]) => {
-        setEnvelopes(envs)
-        const cur = link?.envelope_id ?? ''
+    getEnvelopeEditData(tx.id)
+      .then(({ envelopes, currentEnvelopeId }) => {
+        setEnvelopes(envelopes)
+        const cur = currentEnvelopeId ?? ''
         setEnvelopeId(cur)
         setInitialEnvelopeId(cur)
       })

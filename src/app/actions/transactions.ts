@@ -707,22 +707,40 @@ export async function getLeafEnvelopes(): Promise<{ id: string; name: string; cu
     .map(e => ({ id: e.id, name: e.name, custodio: (e as { custodio?: string | null }).custodio ?? null }))
 }
 
-export async function getAllEnvelopes(): Promise<{ id: string; name: string; custodio: string | null; displayName: string }[]> {
+// Combines what used to be two separate server actions (getAllEnvelopes +
+// getTransactionEnvelopeLink) into one round trip.
+// Opening the edit panel used to fire both as separate server actions — each
+// one re-authenticates independently (supabase.auth.getUser() is a real
+// network call, not a local cookie read), so the "Sobre" field paid for two
+// full request/response cycles back-to-back instead of one. On a slow
+// connection that's the difference between a blink and "tarda muchísimo".
+export async function getEnvelopeEditData(txId: string): Promise<{
+  envelopes: { id: string; name: string; custodio: string | null; displayName: string }[]
+  currentEnvelopeId: string | null
+}> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return []
+  if (!user) return { envelopes: [], currentEnvelopeId: null }
 
   const admin = createAdminClient()
-  const { data } = await admin
-    .from('savings_envelopes')
-    .select('id, name, custodio, parent_envelope_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .order('sort_order')
+  const [{ data: envRows }, { data: link }] = await Promise.all([
+    admin
+      .from('savings_envelopes')
+      .select('id, name, custodio, parent_envelope_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('sort_order'),
+    admin
+      .from('envelope_movements')
+      .select('envelope_id')
+      .eq('user_id', user.id)
+      .eq('source_tx_id' as never, txId)
+      .maybeSingle(),
+  ])
 
-  if (!data) return []
+  const data = envRows ?? []
   const nameById = new Map(data.map(e => [e.id, e.name as string]))
-  return data.map(e => {
+  const envelopes = data.map(e => {
     const parentName = e.parent_envelope_id ? (nameById.get(e.parent_envelope_id) ?? null) : null
     return {
       id: e.id,
@@ -731,23 +749,8 @@ export async function getAllEnvelopes(): Promise<{ id: string; name: string; cus
       displayName: parentName ? `${parentName} › ${e.name}` : e.name,
     }
   })
-}
 
-export async function getTransactionEnvelopeLink(txId: string): Promise<{ envelope_id: string; movement_id: string } | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const admin = createAdminClient()
-  const { data } = await admin
-    .from('envelope_movements')
-    .select('id, envelope_id')
-    .eq('user_id', user.id)
-    .eq('source_tx_id' as never, txId)
-    .maybeSingle()
-
-  if (!data) return null
-  return { envelope_id: (data as { id: string; envelope_id: string }).envelope_id, movement_id: data.id }
+  return { envelopes, currentEnvelopeId: (link as { envelope_id?: string } | null)?.envelope_id ?? null }
 }
 
 export async function updateTransactionEnvelopeLink(
