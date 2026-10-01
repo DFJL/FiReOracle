@@ -138,6 +138,7 @@ export function TransactionEntryFAB({
   const [newLoanDesc, setNewLoanDesc]       = useState('')
   const [mortgageLoanId, setMortgageLoanId] = useState('')
   const [loanBalAfter, setLoanBalAfter]     = useState('')
+  const [loanPaymentType, setLoanPaymentType] = useState<'normal' | 'extra'>('normal')
 
   // ── Duplicate detection ──────────────────────────────────────────────────────
   const [dupHits, setDupHits]         = useState<DuplicateHit[]>([])
@@ -265,7 +266,7 @@ export function TransactionEntryFAB({
     setInvestmentBucketId('')
     setShowBucketWarning(false); setBucketWarningAcked(false)
     setAhorroVendor(''); setAhorroConcepto('')
-    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId(''); setLoanBalAfter('')
+    setDebitEnvelope(''); setLoanMode(''); setNewLoanDesc(''); setMortgageLoanId(''); setLoanBalAfter(''); setLoanPaymentType('normal')
     setError(null)
     // reset AI state
     setAiMode(false); setAiText(''); setAiFile(null); setAiMessages([])
@@ -425,7 +426,7 @@ export function TransactionEntryFAB({
       : Math.max(0, balanceBefore - loanAmount)
     await linkTransactionToLoan(txId, mortgageLoanId, {
       payment_date: date,
-      payment_type: 'normal',
+      payment_type: loanPaymentType,
       amount: loanAmount,
       balance_before: balanceBefore,
       balance_after: balanceAfter,
@@ -1162,12 +1163,29 @@ export function TransactionEntryFAB({
                             ))}
                           </select>
                           {mortgageLoanId && type === 'gasto' && (
-                            <div className="mt-2">
-                              <label className={lbl}>Saldo del préstamo después de este pago <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
-                              <input type="number" min="0" step="any" value={loanBalAfter}
-                                onChange={e => setLoanBalAfter(e.target.value)}
-                                placeholder="Dejar vacío para estimar automáticamente"
-                                className={inputCls} />
+                            <div className="mt-2 space-y-2">
+                              <div>
+                                <label className={lbl}>Tipo de pago</label>
+                                <div className="flex gap-1.5">
+                                  {(['normal', 'extra'] as const).map(t => (
+                                    <button key={t} type="button" onClick={() => setLoanPaymentType(t)}
+                                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                        loanPaymentType === t
+                                          ? 'bg-[#a3e635] text-black'
+                                          : 'bg-white/[0.06] text-zinc-400 hover:bg-white/[0.1]'
+                                      }`}>
+                                      {t === 'normal' ? 'Normal (cuota)' : 'Abono extra'}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <label className={lbl}>Saldo del préstamo después de este pago <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                                <input type="number" min="0" step="any" value={loanBalAfter}
+                                  onChange={e => setLoanBalAfter(e.target.value)}
+                                  placeholder="Dejar vacío para estimar automáticamente"
+                                  className={inputCls} />
+                              </div>
                             </div>
                           )}
                           {mortgageLoanId && type !== 'gasto' && (
