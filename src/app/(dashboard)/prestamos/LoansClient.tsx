@@ -79,6 +79,17 @@ function fmtYM(ym: string, yearFull = false): string {
   })
 }
 
+// Months elapsed from the earliest payment's month through today, inclusive
+// — the denominator for "promedio mensual". A simple payments.length divisor
+// would silently inflate the average on a loan with gaps (months with no
+// abono extra should dilute it, not be skipped).
+function monthsSpan(earliestDate: string): number {
+  const from = new Date(earliestDate + 'T12:00:00')
+  const now  = new Date()
+  const months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth()) + 1
+  return Math.max(1, months)
+}
+
 function paymentLabel(t: string): string {
   if (t === 'extra') return 'Abono'
   return 'Normal'
@@ -785,6 +796,8 @@ function LoanCard({ loan: initialLoan }: { loan: LoanData }) {
       {/* Historial tab */}
       {tab === 'historial' && (
         <div className="space-y-3">
+          <PaymentSummaryCards payments={loan.payments} fmt={fmt} />
+
           <div className="flex items-center justify-between">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
               {loan.payments.length} pago{loan.payments.length !== 1 ? 's' : ''} registrado{loan.payments.length !== 1 ? 's' : ''}
@@ -1078,6 +1091,33 @@ function EditPaymentForm({
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function PaymentSummaryCards({ payments, fmt }: { payments: Payment[]; fmt: (v: number) => string }) {
+  if (payments.length === 0) return null
+
+  const earliest = payments.reduce((min, p) => p.payment_date < min ? p.payment_date : min, payments[0].payment_date)
+  const months = monthsSpan(earliest)
+
+  const totals = payments.reduce(
+    (acc, p) => {
+      if (p.payment_type === 'extra') acc.abonos += p.amount
+      else acc.cuotas += p.amount
+      acc.interes += p.interest
+      acc.capital += p.principal
+      return acc
+    },
+    { cuotas: 0, abonos: 0, interes: 0, capital: 0 },
+  )
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <Tile label="Cuotas pagadas"      value={fmt(totals.cuotas)}  sub={`prom. ${fmt(totals.cuotas / months)}/mes`} />
+      <Tile label="Abonos extra"        value={fmt(totals.abonos)}  sub={`prom. ${fmt(totals.abonos / months)}/mes`} />
+      <Tile label="Interés pagado"      value={fmt(totals.interes)} sub={`prom. ${fmt(totals.interes / months)}/mes`} />
+      <Tile label="Capital amortizado"  value={fmt(totals.capital)} sub={`prom. ${fmt(totals.capital / months)}/mes`} />
+    </div>
+  )
+}
 
 function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
