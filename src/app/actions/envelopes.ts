@@ -14,6 +14,7 @@ type EnvelopeData = {
   initial_balance?: number | null
   envelope_type?: EnvelopeType | null
   counts_as_ahorro?: boolean
+  receives_interest?: boolean
 }
 
 export async function createEnvelope(data: EnvelopeData) {
@@ -91,6 +92,7 @@ export async function updateEnvelope(id: string, data: Partial<EnvelopeData>) {
       ...(data.annual_rate !== undefined && { annual_rate: data.annual_rate }),
       ...(data.envelope_type !== undefined && { envelope_type: data.envelope_type ?? null }),
       ...(data.counts_as_ahorro !== undefined && { counts_as_ahorro: data.counts_as_ahorro }),
+      ...(data.receives_interest !== undefined && { receives_interest: data.receives_interest }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)

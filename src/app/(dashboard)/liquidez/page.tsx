@@ -18,6 +18,8 @@ export type SubEnvelope = {
   balance: number   // principal only (excludes interes movements)
   interest: number  // sum of interes movements (reference only)
   counts_as_ahorro: boolean
+  receivesInterest: boolean
+  ownMovements: { date: string; amount: number; type: string }[]
   grandchildren: { id: string; name: string; balance: number; interest: number }[]
 }
 
@@ -33,6 +35,8 @@ export type Envelope = {
   balance: number   // principal only; sum of children if has children
   interest: number  // reference only; sum of children if has children
   counts_as_ahorro: boolean
+  receivesInterest: boolean
+  ownMovements: { date: string; amount: number; type: string }[]
   children: SubEnvelope[]
 }
 
@@ -71,7 +75,7 @@ export default async function LiquidezPage() {
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id, counts_as_ahorro')
+      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id, counts_as_ahorro, receives_interest')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -102,6 +106,19 @@ export default async function LiquidezPage() {
   const { ownBalance, ownInterest, countableIds } =
     computeEnvelopeBalances(envelopes ?? [], movements ?? [])
 
+  // Per-envelope dated movement history — only leaves need this (interest
+  // distribution's time-weighted average), but it's cheap to build for all.
+  const ownMovementsByEnvelope: Record<string, { date: string; amount: number; type: string }[]> = {}
+  for (const m of movements ?? []) {
+    const d = (m as { date?: string | null }).date
+    if (!d) continue
+    ;(ownMovementsByEnvelope[m.envelope_id] ??= []).push({
+      date: d,
+      amount: Number(m.amount),
+      type: m.movement_type ?? '',
+    })
+  }
+
   // Children by parent, used to roll balances up through every level
   const childrenByParent: Record<string, { id: string; parent_envelope_id: string | null }[]> = {}
   for (const e of envelopes ?? []) {
@@ -128,6 +145,8 @@ export default async function LiquidezPage() {
       balance: rollupBalance(e.id, childrenByParent, ownBalance, countableIds),
       interest: ownInterest[e.id] ?? 0,
       counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
+      receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
+      ownMovements: ownMovementsByEnvelope[e.id] ?? [],
       grandchildren: [],
     })
   }
@@ -163,6 +182,8 @@ export default async function LiquidezPage() {
         balance,
         interest,
         counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
+        receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
+        ownMovements: ownMovementsByEnvelope[e.id] ?? [],
         children,
       }
     })

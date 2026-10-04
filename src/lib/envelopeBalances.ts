@@ -99,6 +99,51 @@ export function computeEnvelopeBalances(
   }
 }
 
+export type DatedMovement = { date: string; amount: number }
+
+/**
+ * Time-weighted average daily balance over [periodStart, periodEnd]
+ * (inclusive, 'YYYY-MM-DD'), reconstructed from dated principal movements —
+ * the fair way to split interest across envelopes that differ in both size
+ * AND how long they've held that size. A plain current-balance split treats
+ * a sobre funded yesterday the same as one that's held the same amount all
+ * month; this instead integrates balance(t) over the period and divides by
+ * its length, so a newer/smaller sobre naturally gets a smaller share.
+ */
+export function timeWeightedAvgBalance(
+  movements: DatedMovement[],
+  periodStart: string,
+  periodEnd: string,
+): number {
+  const start = new Date(periodStart + 'T00:00:00')
+  const end   = new Date(periodEnd   + 'T00:00:00')
+  const dayMs = 86_400_000
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / dayMs) + 1)
+
+  const sorted = [...movements].sort((a, b) => a.date.localeCompare(b.date))
+  let balance = sorted
+    .filter(m => m.date < periodStart)
+    .reduce((s, m) => s + m.amount, 0)
+
+  const inPeriod = sorted.filter(m => m.date >= periodStart && m.date <= periodEnd)
+
+  let weightedSum = 0
+  let cursor = start
+  for (const m of inPeriod) {
+    const mDate = new Date(m.date + 'T00:00:00')
+    const days = Math.round((mDate.getTime() - cursor.getTime()) / dayMs)
+    if (days > 0) {
+      weightedSum += balance * days
+      cursor = mDate
+    }
+    balance += m.amount
+  }
+  const remainingDays = Math.round((end.getTime() - cursor.getTime()) / dayMs) + 1
+  weightedSum += balance * Math.max(0, remainingDays)
+
+  return weightedSum / totalDays
+}
+
 /**
  * Rolls a subtree's balance up through every level, so a parent's displayed
  * balance includes children AND grandchildren. `countable` decides whether an

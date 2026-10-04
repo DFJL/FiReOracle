@@ -1692,6 +1692,7 @@ export type Database = {
           is_active: boolean | null
           name: string
           parent_envelope_id: string | null
+          receives_interest: boolean
           sort_order: number | null
           updated_at: string | null
           user_id: string
@@ -1708,6 +1709,7 @@ export type Database = {
           is_active?: boolean | null
           name: string
           parent_envelope_id?: string | null
+          receives_interest?: boolean
           sort_order?: number | null
           updated_at?: string | null
           user_id: string
@@ -1724,6 +1726,7 @@ export type Database = {
           is_active?: boolean | null
           name?: string
           parent_envelope_id?: string | null
+          receives_interest?: boolean
           sort_order?: number | null
           updated_at?: string | null
           user_id?: string

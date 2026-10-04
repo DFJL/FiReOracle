@@ -9,6 +9,7 @@ import {
 } from './actions'
 import type { MovType, EnvelopeMovement } from './actions'
 import { createEnvelope, createSubEnvelope, deleteSubEnvelope, updateEnvelope } from '@/app/actions/envelopes'
+import { timeWeightedAvgBalance } from '@/lib/envelopeBalances'
 
 function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
@@ -490,28 +491,79 @@ function EnvelopeHistoryPanel({
 }
 
 // ─── InterestModal ─────────────────────────────────────────────────────────────
+// Splits a real bank interest credit across a custodio's sobres, weighted by
+// each one's time-weighted average balance over the accrual period (not just
+// today's snapshot) — a sobre funded yesterday shouldn't get the same cut as
+// one that's held the same amount all month — and only among sobres the user
+// has opted in (persisted per-envelope, so "Corte de pelo" stays excluded
+// without re-choosing it every time).
 
 function InterestModal({
   custodio, envelopes, onClose,
 }: { custodio: string; envelopes: (Envelope | SubEnvelope)[]; onClose: () => void }) {
-  const [total, setTotal]  = useState('')
-  const [date, setDate]    = useState(new Date().toISOString().slice(0, 10))
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Default period start: the day after the most recent interest credit any
+  // of these sobres already received, or their earliest movement if none —
+  // mirrors how a real bank statement reports an accrual period.
+  const defaultFrom = (() => {
+    let lastInterest: string | null = null
+    let earliest: string | null = null
+    for (const e of envelopes) {
+      for (const m of e.ownMovements) {
+        if (!earliest || m.date < earliest) earliest = m.date
+        if (m.type === 'interes' && (!lastInterest || m.date > lastInterest)) lastInterest = m.date
+      }
+    }
+    if (lastInterest) {
+      const d = new Date(lastInterest + 'T12:00:00')
+      d.setDate(d.getDate() + 1)
+      return d.toISOString().slice(0, 10)
+    }
+    return earliest ?? today
+  })()
+
+  const [total, setTotal]       = useState('')
+  const [dateFrom, setDateFrom] = useState(defaultFrom)
+  const [dateTo, setDateTo]     = useState(today)
+  const [included, setIncluded] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(envelopes.map(e => [e.id, e.receivesInterest]))
+  )
   const [error, setError]  = useState('')
   const [isPending, start] = useTransition()
 
-  const totalBalance  = envelopes.reduce((s, e) => s + Math.max(e.balance, 0), 0)
+  function toggle(id: string) {
+    setIncluded(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
   const totalInterest = parseFloat(total) || 0
-  const allocations   = envelopes.map(e => ({
-    envelopeId: e.id,
+
+  const weighted = envelopes.map(e => ({
+    id: e.id,
     name: e.name,
-    amount: totalBalance > 0 ? (Math.max(e.balance, 0) / totalBalance) * totalInterest : 0,
+    weight: included[e.id] && dateFrom <= dateTo
+      ? Math.max(0, timeWeightedAvgBalance(
+          e.ownMovements.filter(m => m.type !== 'interes'), dateFrom, dateTo,
+        ))
+      : 0,
+  }))
+  const totalWeight = weighted.reduce((s, w) => s + w.weight, 0)
+  const allocations = weighted.map(w => ({
+    envelopeId: w.id,
+    name: w.name,
+    amount: totalWeight > 0 ? (w.weight / totalWeight) * totalInterest : 0,
   }))
 
   function submit() {
     if (!totalInterest || totalInterest <= 0) { setError('Monto inválido'); return }
+    if (dateFrom > dateTo) { setError('El período es inválido'); return }
     setError('')
     start(async () => {
-      const res = await distributeInterest(allocations, date, custodio)
+      // Persist any inclusion changes made in this session before distributing.
+      const flagChanges = envelopes.filter(e => included[e.id] !== e.receivesInterest)
+      await Promise.all(flagChanges.map(e => updateEnvelope(e.id, { receives_interest: included[e.id] })))
+
+      const res = await distributeInterest(allocations, dateTo, custodio)
       if (res?.error) { setError(res.error); return }
       onClose()
     })
@@ -527,32 +579,46 @@ function InterestModal({
           </div>
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 text-sm">✕</button>
         </div>
+
+        <div>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Interés total ₡</p>
+          <input type="number" value={total} onChange={e => setTotal(e.target.value)}
+            placeholder="0"
+            className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+        </div>
+
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Interés total ₡</p>
-            <input type="number" value={total} onChange={e => setTotal(e.target.value)}
-              placeholder="0"
-              className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+            <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Período desde</p>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40" />
           </div>
           <div>
-            <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Fecha</p>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">hasta</p>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40" />
           </div>
         </div>
-        {totalInterest > 0 && (
-          <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-3 space-y-1.5 max-h-52 overflow-y-auto">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-2">Distribución proporcional</p>
-            {allocations.filter(a => a.amount > 0.01).map(a => (
-              <div key={a.envelopeId} className="flex justify-between text-[10px]">
-                <span className="text-zinc-400 truncate mr-2">{a.name}</span>
-                <span className="text-[#a3e635] tabular-nums shrink-0">
-                  +₡{a.amount.toLocaleString('es-CR', { maximumFractionDigits: 0 })}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+
+        <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-3 space-y-1.5 max-h-60 overflow-y-auto">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-2">
+            Sobres a incluir <span className="text-zinc-700 normal-case tracking-normal">(ponderado por saldo × tiempo)</span>
+          </p>
+          {allocations.map(a => (
+            <label key={a.envelopeId} className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={included[a.envelopeId] ?? false}
+                onChange={() => toggle(a.envelopeId)}
+                className="accent-[#a3e635] w-3.5 h-3.5 shrink-0" />
+              <span className="flex-1 text-[10px] text-zinc-400 truncate">{a.name}</span>
+              <span className={`text-[10px] tabular-nums shrink-0 ${included[a.envelopeId] ? 'text-[#a3e635]' : 'text-zinc-700'}`}>
+                {included[a.envelopeId] && a.amount > 0.01
+                  ? `+₡${a.amount.toLocaleString('es-CR', { maximumFractionDigits: 0 })}`
+                  : '—'}
+              </span>
+            </label>
+          ))}
+        </div>
+
         {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex gap-2">
           <button onClick={submit} disabled={isPending}
