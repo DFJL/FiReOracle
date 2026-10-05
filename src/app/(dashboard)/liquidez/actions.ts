@@ -130,7 +130,10 @@ export async function distributeInterest(
       .eq('envelope_id', sourceEnvelopeId)
     if (sumErr) return { error: sumErr.message }
     const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
-    if (current - debitTotal < 0) {
+    // Tolerance matches the client's rounded display/prefill (sourceAvailable):
+    // the modal shows and lets the user accept a whole-colón figure, which can
+    // be up to ₡1 above the true decimal balance.
+    if (current - debitTotal < -1) {
       return { error: `Saldo insuficiente en el sobre de intereses — tiene ₡${Math.round(current).toLocaleString('es-CR')}` }
     }
 

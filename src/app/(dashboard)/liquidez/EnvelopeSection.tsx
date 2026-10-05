@@ -558,8 +558,12 @@ function InterestModal({
   // not money created from nothing), and excluded from the recipient list.
   const sourceEnvelope = envelopes.find(e => /inter[eé]s/i.test(e.name)) ?? null
   const targetEnvelopes = envelopes.filter(e => e.id !== sourceEnvelope?.id)
+  // Rounded once and reused everywhere (prefill, display, validation) so the
+  // amount the user sees is always the exact one the check is run against —
+  // comparing the displayed rounded figure against the raw decimal balance
+  // could reject a total that matches what's on screen.
   const sourceAvailable = sourceEnvelope
-    ? sourceEnvelope.ownMovements.reduce((s, m) => s + m.amount, 0)
+    ? Math.round(sourceEnvelope.ownMovements.reduce((s, m) => s + m.amount, 0))
     : 0
 
   // Default period start: the day after the most recent interest credit any
@@ -592,7 +596,7 @@ function InterestModal({
     return earliest ?? today
   })()
 
-  const [total, setTotal]       = useState(sourceAvailable > 0.01 ? String(Math.round(sourceAvailable)) : '')
+  const [total, setTotal]       = useState(sourceAvailable > 0 ? String(sourceAvailable) : '')
   const [dateFrom, setDateFrom] = useState(defaultFrom)
   const [dateTo, setDateTo]     = useState(today)
   const [included, setIncluded] = useState<Record<string, boolean>>(() =>
@@ -634,8 +638,8 @@ function InterestModal({
   function submit() {
     if (!totalInterest || totalInterest <= 0) { setError('Monto inválido'); return }
     if (dateFrom > dateTo) { setError('El período es inválido'); return }
-    if (sourceEnvelope && totalInterest > sourceAvailable + 0.01) {
-      setError(`El sobre de intereses solo tiene ₡${Math.round(sourceAvailable).toLocaleString('es-CR')} disponible`)
+    if (sourceEnvelope && totalInterest > sourceAvailable) {
+      setError(`El sobre de intereses solo tiene ₡${sourceAvailable.toLocaleString('es-CR')} disponible`)
       return
     }
     setError('')
@@ -666,7 +670,7 @@ function InterestModal({
             Interés total ₡
             {sourceEnvelope && (
               <span className="text-zinc-700 normal-case tracking-normal ml-1">
-                (desde &quot;{sourceEnvelope.name}&quot; · disponible ₡{Math.round(sourceAvailable).toLocaleString('es-CR')})
+                (desde &quot;{sourceEnvelope.name}&quot; · disponible ₡{sourceAvailable.toLocaleString('es-CR')})
               </span>
             )}
           </p>
