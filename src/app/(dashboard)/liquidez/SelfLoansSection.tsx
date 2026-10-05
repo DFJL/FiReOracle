@@ -14,6 +14,50 @@ function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
+type SobreDebt = {
+  envelopeId: string
+  name: string
+  total: number
+  loans: { description: string; amount: number }[]
+}
+
+// Groups each active loan's outstanding balance by its source sobre(s),
+// splitting proportionally across envelope_split the same way PaymentPanel's
+// preview does — a loan funded 60/40 from two sobres owes each its share of
+// what's left, not of the original amount.
+function computeSobreTotals(loans: SelfLoan[]): SobreDebt[] {
+  const map: Record<string, SobreDebt> = {}
+  const add = (envelopeId: string, name: string, description: string, amount: number) => {
+    if (amount <= 0) return
+    const entry = (map[envelopeId] ??= { envelopeId, name, total: 0, loans: [] })
+    entry.total += amount
+    entry.loans.push({ description, amount })
+  }
+
+  for (const loan of loans) {
+    const balance = loan.original_amount - loan.amount_repaid
+    if (balance <= 0) continue
+
+    if (loan.envelope_split && loan.envelope_split.length > 0) {
+      const totalSplit = loan.envelope_split.reduce((s, e) => s + e.amount, 0)
+      if (totalSplit <= 0) continue
+      let allocated = 0
+      loan.envelope_split.forEach((e, i) => {
+        const isLast = i === loan.envelope_split!.length - 1
+        const portion = isLast ? balance - allocated : Math.round((e.amount / totalSplit) * balance)
+        allocated += portion
+        add(e.envelope_id, e.name, loan.description, portion)
+      })
+    } else if (loan.source_envelope_id && loan.source_envelope_name) {
+      add(loan.source_envelope_id, loan.source_envelope_name, loan.description, balance)
+    } else {
+      add('__none__', 'Sin sobre vinculado', loan.description, balance)
+    }
+  }
+
+  return Object.values(map).sort((a, b) => b.total - a.total)
+}
+
 type SourceRow = { envelope_id: string; amount: string }
 
 function SourceRows({
@@ -759,6 +803,7 @@ function HistoryPanel({
 type ActivePanel = { type: 'history' } | { type: 'payment' } | { type: 'edit-sources' } | { type: 'increase' }
 
 export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; envelopes: Envelope[] }) {
+  const [viewMode, setViewMode]     = useState<'loans' | 'sobres'>('loans')
   const [showNew, setShowNew]       = useState(false)
   const [openId, setOpenId]         = useState<string | null>(null)
   const [openPanel, setOpenPanel]   = useState<ActivePanel | null>(null)
@@ -782,6 +827,7 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
   const active       = loans.filter(l => l.status !== 'paid')
   const paid         = loans.filter(l => l.status === 'paid')
   const totalBalance = active.reduce((s, l) => s + (l.original_amount - l.amount_repaid), 0)
+  const sobreTotals  = computeSobreTotals(active)
 
   function toggleLoan(id: string) {
     if (openId === id) {
@@ -825,7 +871,57 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
 
       {showNew && <NewLoanForm envelopes={envelopes} onClose={() => setShowNew(false)} />}
 
-      {active.length > 0 && (
+      <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-0.5 w-fit">
+        <button
+          onClick={() => setViewMode('loans')}
+          className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
+            viewMode === 'loans' ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          Por préstamo
+        </button>
+        <button
+          onClick={() => setViewMode('sobres')}
+          className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
+            viewMode === 'sobres' ? 'bg-[#a3e635]/15 text-[#a3e635]' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          Por sobre
+        </button>
+      </div>
+
+      {viewMode === 'sobres' && (
+        sobreTotals.length > 0 ? (
+          <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
+            <div className="grid grid-cols-[1fr_auto] gap-2 px-4 py-2 border-b border-white/[0.04]">
+              <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Sobre</p>
+              <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider text-right">Se debe</p>
+            </div>
+            {sobreTotals.map((s, i) => (
+              <div key={s.envelopeId} className={`px-4 py-2.5 ${i > 0 ? 'border-t border-white/[0.03]' : ''}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold text-zinc-200 truncate">{s.name}</p>
+                  <span className="text-xs font-black tabular-nums text-rose-400">{fmtCRC(s.total)}</span>
+                </div>
+                {s.loans.length > 1 && (
+                  <div className="mt-1 space-y-0.5">
+                    {s.loans.map((l, j) => (
+                      <div key={j} className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] text-zinc-600 truncate">{l.description}</span>
+                        <span className="text-[10px] tabular-nums text-zinc-600">{fmtCRC(l.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-600 text-center py-4">Sin saldo pendiente por sobre.</p>
+        )
+      )}
+
+      {viewMode === 'loans' && active.length > 0 && (
         <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
           <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-4 py-2 border-b border-white/[0.04]">
             <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">Rubro</p>
@@ -948,11 +1044,11 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
         </div>
       )}
 
-      {loans.length === 0 && !showNew && (
+      {viewMode === 'loans' && loans.length === 0 && !showNew && (
         <p className="text-xs text-zinc-600 text-center py-4">Sin autopréstamos registrados.</p>
       )}
 
-      {paid.length > 0 && (
+      {viewMode === 'loans' && paid.length > 0 && (
         <button
           onClick={() => setShowPaid(v => !v)}
           className="text-[9px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors"
@@ -961,7 +1057,7 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
         </button>
       )}
 
-      {showPaid && paid.length > 0 && (
+      {viewMode === 'loans' && showPaid && paid.length > 0 && (
         <div className="rounded-2xl bg-[#0d120d]/50 border border-white/[0.05] overflow-hidden">
           {paid.map((loan, i) => {
             const srcLabel = loan.envelope_split && loan.envelope_split.length > 0
