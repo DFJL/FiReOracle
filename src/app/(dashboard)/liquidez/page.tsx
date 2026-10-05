@@ -19,6 +19,7 @@ export type SubEnvelope = {
   interest: number  // sum of interes movements (reference only)
   counts_as_ahorro: boolean
   receivesInterest: boolean
+  createdAt: string  // YYYY-MM-DD — authoritative start for time-weighting, not inferred from movement history
   ownMovements: { date: string; amount: number; type: string }[]
   grandchildren: { id: string; name: string; balance: number; interest: number }[]
 }
@@ -36,6 +37,7 @@ export type Envelope = {
   interest: number  // reference only; sum of children if has children
   counts_as_ahorro: boolean
   receivesInterest: boolean
+  createdAt: string
   ownMovements: { date: string; amount: number; type: string }[]
   children: SubEnvelope[]
 }
@@ -75,7 +77,7 @@ export default async function LiquidezPage() {
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
-      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id, counts_as_ahorro, receives_interest')
+      .select('id, name, custodio, color, sort_order, interest_mode, annual_rate, parent_envelope_id, counts_as_ahorro, receives_interest, created_at')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
@@ -146,6 +148,7 @@ export default async function LiquidezPage() {
       interest: ownInterest[e.id] ?? 0,
       counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
       receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
+      createdAt: ((e as { created_at?: string }).created_at ?? '').slice(0, 10),
       ownMovements: ownMovementsByEnvelope[e.id] ?? [],
       grandchildren: [],
     })
@@ -183,6 +186,7 @@ export default async function LiquidezPage() {
         interest,
         counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
         receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
+        createdAt: ((e as { created_at?: string }).created_at ?? '').slice(0, 10),
         ownMovements: ownMovementsByEnvelope[e.id] ?? [],
         children,
       }

@@ -134,6 +134,47 @@ function AhorroCheck({ id, checked }: { id: string; checked: boolean }) {
   )
 }
 
+// ─── InterestCheck ─────────────────────────────────────────────────────────────
+// Same idea as AhorroCheck, for receives_interest — visible right in the main
+// list (amber, matching the "interés" color used everywhere else on this
+// page) instead of only inside the "+ Interés" modal, which is easy to miss
+// since it only shows up while you're actively distributing a credit.
+
+function InterestCheck({ id, checked }: { id: string; checked: boolean }) {
+  const [value, setValue]   = useState(checked)
+  const [isPending, start]  = useTransition()
+
+  function toggle(e: React.MouseEvent | React.KeyboardEvent) {
+    e.stopPropagation()
+    const next = !value
+    setValue(next)
+    start(async () => {
+      const res = await updateEnvelope(id, { receives_interest: next })
+      if (res?.error) setValue(!next)
+    })
+  }
+
+  return (
+    <span
+      role="checkbox"
+      aria-checked={value}
+      tabIndex={0}
+      onClick={toggle}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggle(e) }}
+      title={value ? 'Aplica para distribución de intereses' : 'No aplica para distribución de intereses'}
+      className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[9px] font-black transition-all ${
+        isPending ? 'opacity-50' : ''
+      } ${
+        value
+          ? 'bg-amber-500 border-amber-500 text-black'
+          : 'border-zinc-700 text-transparent hover:border-zinc-500'
+      }`}
+    >
+      %
+    </span>
+  )
+}
+
 // ─── AddMovementPanel ──────────────────────────────────────────────────────────
 
 function AddMovementPanel({
@@ -503,13 +544,25 @@ function InterestModal({
 }: { custodio: string; envelopes: (Envelope | SubEnvelope)[]; onClose: () => void }) {
   const today = new Date().toISOString().slice(0, 10)
 
+  // A sobre named "Intereses..." is a real holding account the bank already
+  // paid into — when one exists for this custodio, it's the source: debited
+  // down as the other sobres are credited (conservation-respecting transfer,
+  // not money created from nothing), and excluded from the recipient list.
+  const sourceEnvelope = envelopes.find(e => /inter[eé]s/i.test(e.name)) ?? null
+  const targetEnvelopes = envelopes.filter(e => e.id !== sourceEnvelope?.id)
+  const sourceAvailable = sourceEnvelope
+    ? sourceEnvelope.ownMovements.reduce((s, m) => s + m.amount, 0)
+    : 0
+
   // Default period start: the day after the most recent interest credit any
   // of these sobres already received, or their earliest movement if none —
-  // mirrors how a real bank statement reports an accrual period.
+  // mirrors how a real bank statement reports an accrual period. Per-sobre
+  // longevity (how much of this window each one actually existed for) is
+  // handled separately below, from each sobre's own createdAt.
   const defaultFrom = (() => {
     let lastInterest: string | null = null
     let earliest: string | null = null
-    for (const e of envelopes) {
+    for (const e of targetEnvelopes) {
       for (const m of e.ownMovements) {
         if (!earliest || m.date < earliest) earliest = m.date
         if (m.type === 'interes' && (!lastInterest || m.date > lastInterest)) lastInterest = m.date
@@ -527,7 +580,7 @@ function InterestModal({
   const [dateFrom, setDateFrom] = useState(defaultFrom)
   const [dateTo, setDateTo]     = useState(today)
   const [included, setIncluded] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(envelopes.map(e => [e.id, e.receivesInterest]))
+    Object.fromEntries(targetEnvelopes.map(e => [e.id, e.receivesInterest]))
   )
   const [error, setError]  = useState('')
   const [isPending, start] = useTransition()
@@ -538,15 +591,23 @@ function InterestModal({
 
   const totalInterest = parseFloat(total) || 0
 
-  const weighted = envelopes.map(e => ({
-    id: e.id,
-    name: e.name,
-    weight: included[e.id] && dateFrom <= dateTo
-      ? Math.max(0, timeWeightedAvgBalance(
-          e.ownMovements.filter(m => m.type !== 'interes'), dateFrom, dateTo,
-        ))
-      : 0,
-  }))
+  // Per-sobre longevity, not per-cuenta: a sobre never gets weighted for days
+  // before it actually existed, regardless of the window picked above —
+  // createdAt is authoritative, movement history isn't (a data migration
+  // reset several sobres' movements without changing when they were really
+  // created).
+  const weighted = targetEnvelopes.map(e => {
+    const effectiveFrom = e.createdAt && e.createdAt > dateFrom ? e.createdAt : dateFrom
+    return {
+      id: e.id,
+      name: e.name,
+      weight: included[e.id] && effectiveFrom <= dateTo
+        ? Math.max(0, timeWeightedAvgBalance(
+            e.ownMovements.filter(m => m.type !== 'interes'), effectiveFrom, dateTo,
+          ))
+        : 0,
+    }
+  })
   const totalWeight = weighted.reduce((s, w) => s + w.weight, 0)
   const allocations = weighted.map(w => ({
     envelopeId: w.id,
@@ -557,13 +618,17 @@ function InterestModal({
   function submit() {
     if (!totalInterest || totalInterest <= 0) { setError('Monto inválido'); return }
     if (dateFrom > dateTo) { setError('El período es inválido'); return }
+    if (sourceEnvelope && totalInterest > sourceAvailable + 0.01) {
+      setError(`El sobre de intereses solo tiene ₡${Math.round(sourceAvailable).toLocaleString('es-CR')} disponible`)
+      return
+    }
     setError('')
     start(async () => {
       // Persist any inclusion changes made in this session before distributing.
-      const flagChanges = envelopes.filter(e => included[e.id] !== e.receivesInterest)
+      const flagChanges = targetEnvelopes.filter(e => included[e.id] !== e.receivesInterest)
       await Promise.all(flagChanges.map(e => updateEnvelope(e.id, { receives_interest: included[e.id] })))
 
-      const res = await distributeInterest(allocations, dateTo, custodio)
+      const res = await distributeInterest(allocations, dateTo, custodio, sourceEnvelope?.id)
       if (res?.error) { setError(res.error); return }
       onClose()
     })
@@ -581,7 +646,14 @@ function InterestModal({
         </div>
 
         <div>
-          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Interés total ₡</p>
+          <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">
+            Interés total ₡
+            {sourceEnvelope && (
+              <span className="text-zinc-700 normal-case tracking-normal ml-1">
+                (desde &quot;{sourceEnvelope.name}&quot; · disponible ₡{Math.round(sourceAvailable).toLocaleString('es-CR')})
+              </span>
+            )}
+          </p>
           <input type="number" value={total} onChange={e => setTotal(e.target.value)}
             placeholder="0"
             className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
@@ -602,7 +674,7 @@ function InterestModal({
 
         <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-3 space-y-1.5 max-h-60 overflow-y-auto">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-2">
-            Sobres a incluir <span className="text-zinc-700 normal-case tracking-normal">(ponderado por saldo × tiempo)</span>
+            Sobres a incluir <span className="text-zinc-700 normal-case tracking-normal">(ponderado por saldo × tiempo desde su creación)</span>
           </p>
           {allocations.map(a => (
             <label key={a.envelopeId} className="flex items-center gap-2 cursor-pointer">
@@ -691,6 +763,7 @@ function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
         }`}>
         <span className="w-1.5 h-1.5 rounded-full shrink-0 opacity-70" style={{ background: sub.color ?? '#888' }} />
         <AhorroCheck id={sub.id} checked={sub.counts_as_ahorro} />
+        <InterestCheck id={sub.id} checked={sub.receivesInterest} />
         <EnvelopeName id={sub.id} name={sub.name} className="flex-1 text-[11px] text-zinc-400" />
         <div className="shrink-0 flex flex-col items-end gap-0.5">
           <span className={`text-[11px] font-black tabular-nums ${
@@ -1009,6 +1082,7 @@ export function EnvelopeSection({
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: env.color ?? '#888' }} />
                 )}
                 {!hasChildren && <AhorroCheck id={env.id} checked={env.counts_as_ahorro} />}
+                {!hasChildren && <InterestCheck id={env.id} checked={env.receivesInterest} />}
                 <EnvelopeName id={env.id} name={env.name} className="flex-1 text-xs text-zinc-300" />
                 <span className="text-[9px] font-bold text-zinc-600 px-1.5 py-0.5 rounded bg-white/[0.04] shrink-0">
                   {env.custodio}

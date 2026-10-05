@@ -102,23 +102,59 @@ export async function distributeInterest(
   allocations: { envelopeId: string; amount: number }[],
   date: string,
   custodio: string,
+  sourceEnvelopeId?: string,
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autorizado' }
 
-  const rows = allocations
+  const credits = allocations
     .filter(a => a.amount > 0.01)
-    .map(a => ({
-      user_id: user.id,
-      envelope_id: a.envelopeId,
-      date,
-      amount: Math.round(a.amount * 100) / 100,
-      movement_type: 'interes' as const,
-      notes: `Interés ${custodio} acreditado proporcionalmente`,
-    }))
+    .map(a => ({ envelopeId: a.envelopeId, amount: Math.round(a.amount * 100) / 100 }))
 
-  if (!rows.length) return { ok: true }
+  if (!credits.length) return { ok: true }
+
+  const debitTotal = credits.reduce((s, c) => s + c.amount, 0)
+
+  // Real source sobre (e.g. "Intereses...") holding money the bank already
+  // paid in: this is now a conservation-respecting transfer, same movement
+  // types transferBetweenEnvelopes uses, so the app's liquid total doesn't
+  // phantom-drop or phantom-rise — it's just moving, not creating, money.
+  // Without a source (no such sobre for this custodio), fall back to the
+  // original behavior: credit as 'interes', nothing debited anywhere.
+  if (sourceEnvelopeId) {
+    const { data: rows, error: sumErr } = await supabase
+      .from('envelope_movements')
+      .select('amount')
+      .eq('user_id', user.id)
+      .eq('envelope_id', sourceEnvelopeId)
+    if (sumErr) return { error: sumErr.message }
+    const current = (rows ?? []).reduce((s, r) => s + Number(r.amount), 0)
+    if (current - debitTotal < 0) {
+      return { error: `Saldo insuficiente en el sobre de intereses — tiene ₡${Math.round(current).toLocaleString('es-CR')}` }
+    }
+
+    const { error: outErr } = await supabase.from('envelope_movements').insert({
+      user_id: user.id,
+      envelope_id: sourceEnvelopeId,
+      date,
+      amount: -debitTotal,
+      movement_type: 'traslado_out',
+      notes: `Distribución de interés ${custodio} hacia otros sobres`,
+    })
+    if (outErr) return { error: outErr.message }
+  }
+
+  const rows = credits.map(c => ({
+    user_id: user.id,
+    envelope_id: c.envelopeId,
+    date,
+    amount: c.amount,
+    movement_type: (sourceEnvelopeId ? 'traslado_in' : 'interes') as MovType,
+    notes: sourceEnvelopeId
+      ? `Interés ${custodio} acreditado proporcionalmente (desde sobre de intereses)`
+      : `Interés ${custodio} acreditado proporcionalmente`,
+  }))
 
   const { error } = await supabase.from('envelope_movements').insert(rows)
   if (error) return { error: error.message }
