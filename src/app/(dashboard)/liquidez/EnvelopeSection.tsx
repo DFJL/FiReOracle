@@ -539,6 +539,14 @@ function EnvelopeHistoryPanel({
 // has opted in (persisted per-envelope, so "Corte de pelo" stays excluded
 // without re-choosing it every time).
 
+// A movement is a past interest distribution if it's tagged 'interes' (no
+// source sobre existed for that custodio) or its notes carry the marker
+// distributeInterest writes either way — needed because a sourced credit is
+// typed 'traslado_in' for conservation, not 'interes'.
+function isInterestCredit(m: { type: string; notes?: string | null }): boolean {
+  return m.type === 'interes' || /acreditado proporcionalmente/i.test(m.notes ?? '')
+}
+
 function InterestModal({
   custodio, envelopes, onClose,
 }: { custodio: string; envelopes: (Envelope | SubEnvelope)[]; onClose: () => void }) {
@@ -559,13 +567,21 @@ function InterestModal({
   // mirrors how a real bank statement reports an accrual period. Per-sobre
   // longevity (how much of this window each one actually existed for) is
   // handled separately below, from each sobre's own createdAt.
+  //
+  // A past distribution isn't always tagged movement_type 'interes': when a
+  // custodio has a real source sobre, its credits are 'traslado_in' instead
+  // (conservation-respecting — see distributeInterest), so they're tagged by
+  // notes text instead. Matching on notes, not type, keeps both this default
+  // AND the weighting below correct regardless of which path was used —
+  // otherwise the window would never advance past the earliest movement, and
+  // already-credited interest would start compounding into next period's base.
   const defaultFrom = (() => {
     let lastInterest: string | null = null
     let earliest: string | null = null
     for (const e of targetEnvelopes) {
       for (const m of e.ownMovements) {
         if (!earliest || m.date < earliest) earliest = m.date
-        if (m.type === 'interes' && (!lastInterest || m.date > lastInterest)) lastInterest = m.date
+        if (isInterestCredit(m) && (!lastInterest || m.date > lastInterest)) lastInterest = m.date
       }
     }
     if (lastInterest) {
@@ -576,7 +592,7 @@ function InterestModal({
     return earliest ?? today
   })()
 
-  const [total, setTotal]       = useState('')
+  const [total, setTotal]       = useState(sourceAvailable > 0.01 ? String(Math.round(sourceAvailable)) : '')
   const [dateFrom, setDateFrom] = useState(defaultFrom)
   const [dateTo, setDateTo]     = useState(today)
   const [included, setIncluded] = useState<Record<string, boolean>>(() =>
@@ -603,7 +619,7 @@ function InterestModal({
       name: e.name,
       weight: included[e.id] && effectiveFrom <= dateTo
         ? Math.max(0, timeWeightedAvgBalance(
-            e.ownMovements.filter(m => m.type !== 'interes'), effectiveFrom, dateTo,
+            e.ownMovements.filter(m => !isInterestCredit(m)), effectiveFrom, dateTo,
           ))
         : 0,
     }

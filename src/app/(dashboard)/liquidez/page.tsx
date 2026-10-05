@@ -20,7 +20,7 @@ export type SubEnvelope = {
   counts_as_ahorro: boolean
   receivesInterest: boolean
   createdAt: string  // YYYY-MM-DD — authoritative start for time-weighting, not inferred from movement history
-  ownMovements: { date: string; amount: number; type: string }[]
+  ownMovements: { date: string; amount: number; type: string; notes: string | null }[]
   grandchildren: { id: string; name: string; balance: number; interest: number }[]
 }
 
@@ -38,7 +38,7 @@ export type Envelope = {
   counts_as_ahorro: boolean
   receivesInterest: boolean
   createdAt: string
-  ownMovements: { date: string; amount: number; type: string }[]
+  ownMovements: { date: string; amount: number; type: string; notes: string | null }[]
   children: SubEnvelope[]
 }
 
@@ -83,7 +83,7 @@ export default async function LiquidezPage() {
       .order('sort_order'),
     admin
       .from('envelope_movements')
-      .select('envelope_id, amount, movement_type, date')
+      .select('envelope_id, amount, movement_type, date, notes')
       .eq('user_id', user.id),
     admin
       .from('self_loans')
@@ -110,7 +110,7 @@ export default async function LiquidezPage() {
 
   // Per-envelope dated movement history — only leaves need this (interest
   // distribution's time-weighted average), but it's cheap to build for all.
-  const ownMovementsByEnvelope: Record<string, { date: string; amount: number; type: string }[]> = {}
+  const ownMovementsByEnvelope: Record<string, { date: string; amount: number; type: string; notes: string | null }[]> = {}
   for (const m of movements ?? []) {
     const d = (m as { date?: string | null }).date
     if (!d) continue
@@ -118,6 +118,7 @@ export default async function LiquidezPage() {
       date: d,
       amount: Number(m.amount),
       type: m.movement_type ?? '',
+      notes: (m as { notes?: string | null }).notes ?? null,
     })
   }
 
