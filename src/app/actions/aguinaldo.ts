@@ -92,6 +92,46 @@ export async function deleteAguinaldoAllocation(id: string): Promise<{ error: st
   return { error: null }
 }
 
+// Swaps sort_order with the adjacent line within the same group — reordering
+// is scoped per group, not the whole flat list, so moving a line within
+// "regalos" never jumps it into "ahorros".
+export async function moveAguinaldoAllocation(
+  id: string,
+  year: number,
+  direction: 'up' | 'down',
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const { data: rows, error: fetchErr } = await admin.from('aguinaldo_allocations')
+    .select('id, group_name, sort_order')
+    .eq('user_id', user.id)
+    .eq('year', year)
+    .order('sort_order')
+  if (fetchErr) return { error: fetchErr.message }
+
+  const target = (rows ?? []).find(r => r.id === id)
+  if (!target) return { error: 'No encontrado' }
+
+  const siblings = (rows ?? []).filter(r => r.group_name === target.group_name)
+  const idx = siblings.findIndex(r => r.id === id)
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (swapIdx < 0 || swapIdx >= siblings.length) return { error: null }
+
+  const other = siblings[swapIdx]
+  const { error: e1 } = await admin.from('aguinaldo_allocations')
+    .update({ sort_order: other.sort_order }).eq('id', target.id).eq('user_id', user.id)
+  if (e1) return { error: e1.message }
+  const { error: e2 } = await admin.from('aguinaldo_allocations')
+    .update({ sort_order: target.sort_order }).eq('id', other.id).eq('user_id', user.id)
+  if (e2) return { error: e2.message }
+
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
+
 // ── Gross salary ledger (base for the legal estimate — isolated from
 // `transactions`/income metrics everywhere else in the app; read only by
 // this feature's calculation) ───────────────────────────────────────────────

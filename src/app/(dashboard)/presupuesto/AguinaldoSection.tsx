@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import {
-  addAguinaldoAllocation, updateAguinaldoAllocation, deleteAguinaldoAllocation,
+  addAguinaldoAllocation, updateAguinaldoAllocation, deleteAguinaldoAllocation, moveAguinaldoAllocation,
   addGrossSalaryEntry, updateGrossSalaryEntry, deleteGrossSalaryEntry,
 } from '@/app/actions/aguinaldo'
 import type { AguinaldoAllocation, AguinaldoGrossSalaryEntry } from '@/app/actions/aguinaldo'
@@ -29,11 +29,14 @@ function pctColor(pct: number) {
 // ── Allocation row ──────────────────────────────────────────────────────────
 
 function AllocationRow({
-  alloc, envelopes, txCategories,
+  alloc, year, envelopes, txCategories, isFirst, isLast,
 }: {
   alloc: AguinaldoAllocation
+  year: number
   envelopes: Envelope[]
   txCategories: TxCategory[]
+  isFirst: boolean
+  isLast: boolean
 }) {
   const [editing, setEditing]       = useState(false)
   const [label, setLabel]           = useState(alloc.label)
@@ -44,10 +47,15 @@ function AllocationRow({
   const [categoryCode, setCategoryCode] = useState(alloc.category_code ?? '')
   const [error, setError]           = useState('')
   const [isPending, start]          = useTransition()
+  const [, startMove]               = useTransition()
 
   const envelopeName = alloc.envelope_id ? envelopes.find(e => e.id === alloc.envelope_id)?.name : null
   const real = alloc.real_amount ?? 0
   const pct  = alloc.amount > 0 ? (real / alloc.amount) * 100 : 0
+
+  function move(direction: 'up' | 'down') {
+    startMove(async () => { await moveAguinaldoAllocation(alloc.id, year, direction) })
+  }
 
   function save() {
     const amt = parseFloat(amount.replace(/,/g, ''))
@@ -122,7 +130,13 @@ function AllocationRow({
   }
 
   return (
-    <div className="flex items-center gap-2 py-1.5 border-b border-white/[0.04] last:border-0">
+    <div className="flex items-center gap-1.5 py-1.5 border-b border-white/[0.04] last:border-0">
+      <div className="flex flex-col shrink-0 -my-1">
+        <button onClick={() => move('up')} disabled={isFirst}
+          className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▲</button>
+        <button onClick={() => move('down')} disabled={isLast}
+          className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▼</button>
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-zinc-200 truncate">{alloc.label}</p>
         {envelopeName && <p className="text-[9px] text-zinc-600 truncate">→ {envelopeName}</p>}
@@ -336,6 +350,7 @@ export function AguinaldoSection({
 }) {
   const [collapsed, setCollapsed]       = useState(false)
   const [showLedger, setShowLedger]     = useState(false)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const isActual = receivedAmount > 0
   // Projecting unpaid-yet months at the current known rate is more realistic
   // for planning than the strict sum ÷ 12 (which treats unpaid months as
@@ -346,8 +361,15 @@ export function AguinaldoSection({
 
   const totalBudget = allocations.reduce((s, a) => s + a.amount, 0)
   const totalReal   = allocations.reduce((s, a) => s + (a.real_amount ?? 0), 0)
-  const remaining   = totalAmount - totalBudget
-  const pctAllocated = totalAmount > 0 ? Math.min((totalBudget / totalAmount) * 100, 100) : 0
+  // "Presupuestado" = planned/committed, NOT spent — a budget row with no
+  // real_amount yet contributes 0 to totalReal regardless of how much of
+  // the pot its budget line claims. Two separate bars on purpose, so
+  // "ya planeé casi todo" (normal, even healthy) never reads as "ya gasté
+  // casi todo" (which would only be true if totalReal were also high).
+  const pctBudgeted = totalAmount > 0 ? Math.min((totalBudget / totalAmount) * 100, 100) : 0
+  const pctSpent     = totalAmount > 0 ? Math.min((totalReal / totalAmount) * 100, 100) : 0
+  const unbudgeted   = totalAmount - totalBudget
+  const unspent      = totalAmount - totalReal
 
   // Grouped rendering — ungrouped lines (group_name null) show under a
   // generic "Otros" bucket last, grouped ones keep first-seen order.
@@ -363,6 +385,14 @@ export function AguinaldoSection({
     groupOrder.push('Otros')
   }
   const existingGroups = groupOrder.filter(g => g !== 'Otros')
+
+  function toggleGroup(g: string) {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g); else next.add(g)
+      return next
+    })
+  }
 
   if (totalAmount <= 0 && allocations.length === 0 && grossSalaryEntries.length === 0) return null
 
@@ -416,21 +446,33 @@ export function AguinaldoSection({
             )}
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Asignado</p>
-              <p className="text-[10px] text-zinc-500 tabular-nums">
-                {fmtCRC(totalBudget)} / {fmtCRC(totalAmount)}
-                {remaining < -0.5 && <span className="text-rose-400 ml-1">(excede por {fmtCRC(-remaining)})</span>}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Presupuestado <span className="text-zinc-700 normal-case tracking-normal">(planeado)</span></p>
+              </div>
+              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalBudget)} / {fmtCRC(totalAmount)}</p>
+              <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                <div className={`h-full rounded-full ${unbudgeted < -0.5 ? 'bg-rose-500' : 'bg-amber-400'}`}
+                  style={{ width: `${pctBudgeted}%`, opacity: 0.7 }} />
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-1">
+                {unbudgeted < -0.5
+                  ? <span className="text-rose-400">excede por {fmtCRC(-unbudgeted)}</span>
+                  : <>sin presupuestar: <span className="text-zinc-400 tabular-nums">{fmtCRC(unbudgeted)}</span></>}
               </p>
             </div>
-            <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
-              <div className={`h-full rounded-full ${remaining < -0.5 ? 'bg-rose-500' : 'bg-amber-400'}`}
-                style={{ width: `${pctAllocated}%`, opacity: 0.7 }} />
-            </div>
-            <div className="flex items-center justify-between mt-1 text-[9px] text-zinc-600">
-              <span>Real ejecutado: <span className="text-zinc-400 tabular-nums">{fmtCRC(totalReal)}</span></span>
-              <span>Diferencia vs. aguinaldo: <span className={`tabular-nums ${totalAmount - totalReal < 0 ? 'text-rose-400' : 'text-emerald-400/80'}`}>{fmtCRC(totalAmount - totalReal)}</span></span>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Ejecutado <span className="text-zinc-700 normal-case tracking-normal">(gastado)</span></p>
+              </div>
+              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalReal)} / {fmtCRC(totalAmount)}</p>
+              <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${pctSpent}%`, opacity: 0.7 }} />
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-1">
+                sin gastar: <span className="text-zinc-400 tabular-nums">{fmtCRC(unspent)}</span>
+              </p>
             </div>
           </div>
 
@@ -444,16 +486,33 @@ export function AguinaldoSection({
                 <p className="text-[8px] font-black text-zinc-600 uppercase tracking-wider w-10 text-right">%</p>
               </div>
             )}
-            {groupOrder.map(g => (
-              <div key={g}>
-                {groupOrder.length > 1 && (
-                  <p className="text-[9px] font-black text-amber-400/50 uppercase tracking-wider mt-2 mb-0.5">{g}</p>
-                )}
-                {byGroup[g].map(a => (
-                  <AllocationRow key={a.id} alloc={a} envelopes={envelopes} txCategories={txCategories} />
-                ))}
-              </div>
-            ))}
+            {groupOrder.map(g => {
+              const items = byGroup[g]
+              const gBudget = items.reduce((s, a) => s + a.amount, 0)
+              const gReal   = items.reduce((s, a) => s + (a.real_amount ?? 0), 0)
+              const isCollapsed = collapsedGroups.has(g)
+              return (
+                <div key={g}>
+                  {groupOrder.length > 1 && (
+                    <button
+                      onClick={() => toggleGroup(g)}
+                      className="w-full flex items-center justify-between mt-2 mb-0.5 py-0.5"
+                    >
+                      <span className="text-[9px] font-black text-amber-400/60 uppercase tracking-wider flex items-center gap-1">
+                        <span className="text-zinc-600">{isCollapsed ? '▸' : '▾'}</span> {g}
+                      </span>
+                      <span className="text-[9px] tabular-nums text-zinc-500">{fmtCRC(gBudget)} / {fmtCRC(gReal)}</span>
+                    </button>
+                  )}
+                  {!isCollapsed && items.map((a, i) => (
+                    <AllocationRow
+                      key={a.id} alloc={a} year={year} envelopes={envelopes} txCategories={txCategories}
+                      isFirst={i === 0} isLast={i === items.length - 1}
+                    />
+                  ))}
+                </div>
+              )
+            })}
           </div>
 
           <AddAllocationForm
