@@ -62,7 +62,8 @@ type PassiveIncomeSource = { name: string; amountMonthly: number; pct: number; s
 
 type PassiveIncomeData = {
   sources: PassiveIncomeSource[]
-  trend: { label: string; amount: number }[]
+  sourcesByMonth: Record<string, PassiveIncomeSource[]>
+  trend: { ym: string; label: string; amount: number }[]
   topSourcePct: number
   yoyPct: number | null
   prev12m: number
@@ -974,8 +975,11 @@ function PassiveIncomeSection({
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
   const [expandedSource, setExpandedSource] = useState<string | null>(null)
+  const [selectedYm, setSelectedYm] = useState<string | null>(null)
   const maxAmount = Math.max(...data.trend.map(d => d.amount), 1)
   const hov = hovIdx !== null ? data.trend[hovIdx] : null
+  const selectedMonth = selectedYm ? data.trend.find(m => m.ym === selectedYm) ?? null : null
+  const displaySources = selectedYm ? (data.sourcesByMonth[selectedYm] ?? []) : data.sources
 
   const concentrationColor = data.topSourcePct >= 70 ? '#f43f5e' : data.topSourcePct >= 45 ? '#f59e0b' : '#a3e635'
   const yoyColor = data.yoyPct === null ? '#71717a' : data.yoyPct >= 0 ? '#a3e635' : '#f43f5e'
@@ -1042,7 +1046,7 @@ function PassiveIncomeSection({
       {/* Trend (24m) */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (24m)</p>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Tendencia mensual (24m) · clic para filtrar</p>
           {hov && (
             <span className="text-[10px] text-zinc-300">
               {hov.label}: <span className="font-bold text-[#84cc16]">{fmt(hov.amount)}</span>
@@ -1051,23 +1055,25 @@ function PassiveIncomeSection({
         </div>
         <div className="flex items-end gap-1 h-20">
           {data.trend.map((m, i) => {
-            const pct   = Math.min(m.amount / (maxAmount * 1.05), 1)
-            const isHov = hovIdx === i
+            const pct        = Math.min(m.amount / (maxAmount * 1.05), 1)
+            const isHov      = hovIdx === i
+            const isSelected = selectedYm === m.ym
             return (
               <div
                 key={i}
-                className="flex-1 flex flex-col items-center relative cursor-default"
+                className="flex-1 flex flex-col items-center relative cursor-pointer"
                 style={{ height: '100%' }}
                 onMouseEnter={() => setHovIdx(i)}
                 onMouseLeave={() => setHovIdx(null)}
+                onClick={() => setSelectedYm(isSelected ? null : m.ym)}
               >
                 <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
                   <div
                     className="w-full rounded-t-sm transition-opacity"
                     style={{
                       height: `${pct * 100}%`,
-                      backgroundColor: '#84cc16',
-                      opacity: isHov ? 0.9 : 0.5,
+                      backgroundColor: isSelected ? '#fff' : '#84cc16',
+                      opacity: isSelected ? 1 : isHov ? 0.9 : 0.5,
                       minHeight: m.amount > 0 ? '2px' : undefined,
                     }}
                   />
@@ -1084,12 +1090,28 @@ function PassiveIncomeSection({
       </div>
 
       {/* Sources — by TYPE of passive income; click a row with a ▸ to drill
-          into which vendor/protocol/reward-type makes it up. */}
+          into which vendor/protocol/reward-type makes it up. Filtered to a
+          single month when a bar above is selected, instead of the default
+          trailing-12m average. */}
       <div className="space-y-1.5">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Fuentes (promedio mensual)</p>
-        {data.sources.length === 0 ? (
-          <p className="text-[10px] text-zinc-600">Sin ingresos pasivos registrados en los últimos 12 meses.</p>
-        ) : data.sources.slice(0, 8).map(s => {
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
+            {selectedMonth ? `Fuentes — ${selectedMonth.label}` : 'Fuentes (promedio mensual)'}
+          </p>
+          {selectedMonth && (
+            <button
+              onClick={() => setSelectedYm(null)}
+              className="text-[9px] font-black text-zinc-600 uppercase tracking-wider hover:text-[#84cc16] transition-colors"
+            >
+              ✕ ver promedio
+            </button>
+          )}
+        </div>
+        {displaySources.length === 0 ? (
+          <p className="text-[10px] text-zinc-600">
+            {selectedMonth ? `Sin ingresos pasivos en ${selectedMonth.label}.` : 'Sin ingresos pasivos registrados en los últimos 12 meses.'}
+          </p>
+        ) : displaySources.slice(0, 8).map(s => {
           const canExpand = s.subSources.length > 0
           const isOpen = expandedSource === s.name
           return (

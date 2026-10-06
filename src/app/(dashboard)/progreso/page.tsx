@@ -426,49 +426,65 @@ export default async function ProgresoPage() {
   // above), matching how the user thinks about this ("¿de qué TIPO viene mi
   // ingreso pasivo?"), not by vendor. Vendor/notes subtype becomes
   // drill-down detail on demand instead of flattening everything together.
-  const passiveSourceMap: Record<string, number> = {}
-  const passiveSubMap: Record<string, Record<string, number>> = {}
-  for (const tx of passiveTxsAll) {
-    if (!tx.date || !curYMs.includes(tx.date.slice(0, 7))) continue
-    const resolvedCode = resolveCategoryCode(tx)
-    const baseName = (resolvedCode && catNameMap.get(resolvedCode))
-      || resolvedCode
-      || tx.concept
-      || tx.vendor
-      || 'Otros'
-    const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim())
-      ? vendorCanonicalLabel[normalizeVendorKey(tx.vendor)]
-      : null
-    const subName = passiveSubtype(tx.notes, tx.detail) || vendorLabel || baseName
-    const amt = Number(tx.amount ?? 0)
-    passiveSourceMap[baseName] = (passiveSourceMap[baseName] ?? 0) + amt
-    passiveSubMap[baseName] ??= {}
-    passiveSubMap[baseName][subName] = (passiveSubMap[baseName][subName] ?? 0) + amt
+  // Factored out so the same grouping (by TYPE, with vendor/notes drill-down)
+  // can build either the trailing-12m average shown by default, or a single
+  // month's actual breakdown when the user clicks a bar in the trend chart.
+  // `divideBy` controls whether amounts come back as a monthly average (12m
+  // view) or as that period's actual total (single-month view).
+  function buildPassiveSources(yms: string[], divideBy: number) {
+    const sourceMap: Record<string, number> = {}
+    const subMap: Record<string, Record<string, number>> = {}
+    for (const tx of passiveTxsAll) {
+      if (!tx.date || !yms.includes(tx.date.slice(0, 7))) continue
+      const resolvedCode = resolveCategoryCode(tx)
+      const baseName = (resolvedCode && catNameMap.get(resolvedCode))
+        || resolvedCode
+        || tx.concept
+        || tx.vendor
+        || 'Otros'
+      const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim())
+        ? vendorCanonicalLabel[normalizeVendorKey(tx.vendor)]
+        : null
+      const subName = passiveSubtype(tx.notes, tx.detail) || vendorLabel || baseName
+      const amt = Number(tx.amount ?? 0)
+      sourceMap[baseName] = (sourceMap[baseName] ?? 0) + amt
+      subMap[baseName] ??= {}
+      subMap[baseName][subName] = (subMap[baseName][subName] ?? 0) + amt
+    }
+    const periodTotal = Object.values(sourceMap).reduce((s, v) => s + v, 0)
+    return Object.entries(sourceMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amountSum]) => {
+        const subEntries = Object.entries(subMap[name] ?? {})
+          .sort((a, b) => b[1] - a[1])
+          .map(([subName, subSum]) => ({
+            name: subName,
+            amountMonthly: subSum / divideBy,
+            pct: amountSum > 0 ? (subSum / amountSum) * 100 : 0,
+          }))
+        // Nothing to drill into when the only "sub-source" is the category itself.
+        const subSources = subEntries.length === 1 && subEntries[0].name === name ? [] : subEntries
+        return {
+          name,
+          amountMonthly: amountSum / divideBy,
+          pct: periodTotal > 0 ? (amountSum / periodTotal) * 100 : 0,
+          subSources,
+        }
+      })
   }
   // Values are shown as a monthly average (12m total ÷ 12) — a "typical
   // month" reads much more naturally than a 12-month lump sum.
-  const passiveSources = Object.entries(passiveSourceMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, amount12m]) => {
-      const subEntries = Object.entries(passiveSubMap[name] ?? {})
-        .sort((a, b) => b[1] - a[1])
-        .map(([subName, subAmount12m]) => ({
-          name: subName,
-          amountMonthly: subAmount12m / 12,
-          pct: amount12m > 0 ? (subAmount12m / amount12m) * 100 : 0,
-        }))
-      // Nothing to drill into when the only "sub-source" is the category itself.
-      const subSources = subEntries.length === 1 && subEntries[0].name === name ? [] : subEntries
-      return {
-        name,
-        amountMonthly: amount12m / 12,
-        pct: passiveIncome12m > 0 ? (amount12m / passiveIncome12m) * 100 : 0,
-        subSources,
-      }
-    })
+  const passiveSources = buildPassiveSources(curYMs, 12)
   // Concentration risk: how much of the total rides on the single biggest
   // source — a useful diversification signal independent of the amount.
   const passiveTopSourcePct = passiveSources[0]?.pct ?? 0
+
+  // Per-month breakdown for the trend chart's click-to-filter — single month,
+  // so amounts are that month's actual total, not divided into an average.
+  const passiveSourcesByMonth: Record<string, ReturnType<typeof buildPassiveSources>> = {}
+  for (const ym of allYMs) {
+    passiveSourcesByMonth[ym] = buildPassiveSources([ym], 1)
+  }
 
   // 24-month trend, same month range as the Lifestyle Inflation section above.
   const passiveTrend = allYMs.map(ym => {
@@ -476,7 +492,7 @@ export default async function ProgresoPage() {
     const amount = passiveTxsAll
       .filter(tx => tx.date?.startsWith(ym))
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
-    return { label: `${MONTH_LABELS_LIFESTYLE[Number(m) - 1]} ${y.slice(2)}`, amount }
+    return { ym, label: `${MONTH_LABELS_LIFESTYLE[Number(m) - 1]} ${y.slice(2)}`, amount }
   })
 
   // Yield: passive income / avg invested (last 12 snapshots) — avoids point-in-time outliers
@@ -873,6 +889,7 @@ export default async function ProgresoPage() {
         passiveToIncomeRatio={passiveToIncomeRatio}
         passiveIncomeData={{
           sources: passiveSources,
+          sourcesByMonth: passiveSourcesByMonth,
           trend: passiveTrend,
           topSourcePct: passiveTopSourcePct,
           yoyPct: passiveYoyPct,
