@@ -312,6 +312,19 @@ export default async function PresupuestoPage({
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
+      <PresupuestoClient
+        budgets={budgetRows ?? []}
+        actualQ1={actualQ1}
+        actualQ2={actualQ2}
+        history={history}
+        incomeActual={incomeActual}
+        year={year}
+        month={month}
+        suggestions={suggestions}
+        envelopes={(envelopeRows ?? []) as Envelope[]}
+        txCategories={(catRows ?? []) as TxCategory[]}
+        accounts={(accountRows ?? []) as FinancialAccount[]}
+      />
       <AguinaldoSection
         year={aguinaldoYear}
         periodStart={aguinaldoPeriodStart}
@@ -325,19 +338,6 @@ export default async function PresupuestoPage({
         grossSalaryEntries={aguinaldoGrossRows ?? []}
         envelopes={(envelopeRows ?? []) as Envelope[]}
         txCategories={(catRows ?? []) as TxCategory[]}
-      />
-      <PresupuestoClient
-        budgets={budgetRows ?? []}
-        actualQ1={actualQ1}
-        actualQ2={actualQ2}
-        history={history}
-        incomeActual={incomeActual}
-        year={year}
-        month={month}
-        suggestions={suggestions}
-        envelopes={(envelopeRows ?? []) as Envelope[]}
-        txCategories={(catRows ?? []) as TxCategory[]}
-        accounts={(accountRows ?? []) as FinancialAccount[]}
       />
     </div>
   )
