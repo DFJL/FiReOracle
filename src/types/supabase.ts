@@ -197,6 +197,53 @@ export type Database = {
           },
         ]
       }
+      aguinaldo_allocations: {
+        Row: {
+          amount: number
+          created_at: string
+          envelope_id: string | null
+          id: string
+          is_done: boolean
+          label: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+          year: number
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          envelope_id?: string | null
+          id?: string
+          is_done?: boolean
+          label: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+          year: number
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          envelope_id?: string | null
+          id?: string
+          is_done?: boolean
+          label?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aguinaldo_allocations_envelope_id_fkey"
+            columns: ["envelope_id"]
+            isOneToOne: false
+            referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       asset_value_history: {
         Row: {
           asset_id: string

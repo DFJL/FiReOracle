@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { PresupuestoClient } from './PresupuestoClient'
 import type { Envelope, TxCategory, FinancialAccount } from './PresupuestoClient'
+import { AguinaldoSection } from './AguinaldoSection'
 import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
@@ -36,6 +37,14 @@ export default async function PresupuestoPage({
   // Last day of the viewed month (for temporal budget filtering)
   const lastDayOfMonth = new Date(year, month, 0).toISOString().slice(0, 10)
 
+  // Aguinaldo (CR 13th-month bonus): legal base is gross ordinary + extraordinary
+  // salary earned Dec 1 (prev year) through Nov 30 — independent of which month
+  // is being browsed above, always anchored to today's real date so it doesn't
+  // shift while paging through past/future budget months.
+  const aguinaldoYear = now.getFullYear()
+  const aguinaldoPeriodStart = `${aguinaldoYear - 1}-12-01`
+  const aguinaldoPeriodEnd   = `${aguinaldoYear}-11-30`
+
   const [
     { data: allBudgetRows },
     { data: txRows },
@@ -45,6 +54,9 @@ export default async function PresupuestoPage({
     { data: envelopeRows },
     { data: accountRows },
     { data: monthlyDoneRows },
+    { data: aguinaldoBaseTxRows },
+    { data: aguinaldoPaidTxRows },
+    { data: aguinaldoAllocRows },
   ] = await Promise.all([
     admin.from('budgets')
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
@@ -106,6 +118,34 @@ export default async function PresupuestoPage({
       .eq('user_id', user.id)
       .eq('year', year)
       .eq('month', month),
+
+    // Salary + bono earned during the legal aguinaldo period — the base for
+    // the estimate, independent of the browsed month/year above.
+    admin.from('transactions')
+      .select('amount, currency_code, amount_usd')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .in('category_code', ['SALARY', 'BONO'])
+      .gte('date', aguinaldoPeriodStart)
+      .lte('date', aguinaldoPeriodEnd)
+      .not('amount', 'is', null),
+
+    // Already-deposited aguinaldo for this cycle, if the real payment already
+    // landed in December — takes priority over the estimate once it exists.
+    admin.from('transactions')
+      .select('amount, currency_code, amount_usd')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'income')
+      .eq('category_code', 'AGUINALDO')
+      .gte('date', `${aguinaldoYear}-12-01`)
+      .lte('date', `${aguinaldoYear}-12-31`)
+      .not('amount', 'is', null),
+
+    admin.from('aguinaldo_allocations')
+      .select('id, year, label, amount, envelope_id, is_done, sort_order')
+      .eq('user_id', user.id)
+      .eq('year', aguinaldoYear)
+      .order('sort_order'),
   ])
 
   // Dedup: keep only the most recent effective row per category
@@ -206,8 +246,24 @@ export default async function PresupuestoPage({
   }
   const suggestions = [...suggSet].filter(Boolean).sort()
 
+  // Aguinaldo: once the real payment lands in December, it replaces the
+  // estimate — no point projecting from salary history once you know the
+  // actual number.
+  const aguinaldoBase      = (aguinaldoBaseTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+  const aguinaldoEstimated = aguinaldoBase / 12
+  const aguinaldoReceived  = (aguinaldoPaidTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
+      <AguinaldoSection
+        year={aguinaldoYear}
+        periodStart={aguinaldoPeriodStart}
+        periodEnd={aguinaldoPeriodEnd}
+        estimatedAmount={aguinaldoEstimated}
+        receivedAmount={aguinaldoReceived}
+        allocations={aguinaldoAllocRows ?? []}
+        envelopes={(envelopeRows ?? []) as Envelope[]}
+      />
       <PresupuestoClient
         budgets={budgetRows ?? []}
         actualQ1={actualQ1}
