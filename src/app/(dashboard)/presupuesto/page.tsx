@@ -57,6 +57,7 @@ export default async function PresupuestoPage({
     { data: aguinaldoBaseTxRows },
     { data: aguinaldoPaidTxRows },
     { data: aguinaldoAllocRows },
+    { data: aguinaldoGrossRows },
   ] = await Promise.all([
     admin.from('budgets')
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
@@ -142,10 +143,20 @@ export default async function PresupuestoPage({
       .not('amount', 'is', null),
 
     admin.from('aguinaldo_allocations')
-      .select('id, year, label, amount, envelope_id, is_done, sort_order')
+      .select('id, year, label, amount, real_amount, group_name, category_code, envelope_id, sort_order')
       .eq('user_id', user.id)
       .eq('year', aguinaldoYear)
       .order('sort_order'),
+
+    // Real gross-salary ledger (per quincena, entered manually from payslips)
+    // — isolated from `transactions`, used only for this estimate. Takes
+    // priority over the net-deposit approximation above whenever it has
+    // entries, since net salary excludes CCSS/renta withholdings and
+    // understates the legal (gross-based) aguinaldo formula.
+    admin.from('aguinaldo_gross_salary')
+      .select('id, pay_date, gross_amount, notes')
+      .eq('user_id', user.id)
+      .order('pay_date'),
   ])
 
   // Dedup: keep only the most recent effective row per category
@@ -246,12 +257,26 @@ export default async function PresupuestoPage({
   }
   const suggestions = [...suggSet].filter(Boolean).sort()
 
-  // Aguinaldo: once the real payment lands in December, it replaces the
-  // estimate — no point projecting from salary history once you know the
-  // actual number.
-  const aguinaldoBase      = (aguinaldoBaseTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
-  const aguinaldoEstimated = aguinaldoBase / 12
-  const aguinaldoReceived  = (aguinaldoPaidTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+  // Aguinaldo estimate, in priority order:
+  // 1. Already deposited (real AGUINALDO-coded transaction in December) — no
+  //    point projecting once the actual number is known.
+  // 2. Real gross-salary ledger (payslip data entered by hand) within the
+  //    legal period — literal sum ÷ 12. Most accurate when coverage is full;
+  //    reported months-covered lets the UI flag a partial/understated figure.
+  // 3. Net salary deposits (SALARY + BONO transactions) ÷ 12 — a fallback
+  //    approximation that understates the true (gross-based) amount, since
+  //    it's net of CCSS/renta withholdings.
+  const grossEntriesInPeriod = (aguinaldoGrossRows ?? []).filter(
+    e => e.pay_date >= aguinaldoPeriodStart && e.pay_date <= aguinaldoPeriodEnd
+  )
+  const aguinaldoGrossSum = grossEntriesInPeriod.reduce((s, e) => s + Number(e.gross_amount), 0)
+  const grossMonthsCovered = new Set(grossEntriesInPeriod.map(e => e.pay_date.slice(0, 7))).size
+
+  const aguinaldoNetBase  = (aguinaldoBaseTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+  const aguinaldoReceived = (aguinaldoPaidTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+
+  const aguinaldoEstimated = aguinaldoGrossSum > 0 ? aguinaldoGrossSum / 12 : aguinaldoNetBase / 12
+  const aguinaldoSource: 'gross' | 'net' = aguinaldoGrossSum > 0 ? 'gross' : 'net'
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
@@ -260,9 +285,13 @@ export default async function PresupuestoPage({
         periodStart={aguinaldoPeriodStart}
         periodEnd={aguinaldoPeriodEnd}
         estimatedAmount={aguinaldoEstimated}
+        estimateSource={aguinaldoSource}
+        monthsCovered={grossMonthsCovered}
         receivedAmount={aguinaldoReceived}
         allocations={aguinaldoAllocRows ?? []}
+        grossSalaryEntries={aguinaldoGrossRows ?? []}
         envelopes={(envelopeRows ?? []) as Envelope[]}
+        txCategories={(catRows ?? []) as TxCategory[]}
       />
       <PresupuestoClient
         budgets={budgetRows ?? []}

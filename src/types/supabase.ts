@@ -200,11 +200,14 @@ export type Database = {
       aguinaldo_allocations: {
         Row: {
           amount: number
+          category_code: string | null
           created_at: string
           envelope_id: string | null
+          group_name: string | null
           id: string
           is_done: boolean
           label: string
+          real_amount: number | null
           sort_order: number
           updated_at: string
           user_id: string
@@ -212,11 +215,14 @@ export type Database = {
         }
         Insert: {
           amount?: number
+          category_code?: string | null
           created_at?: string
           envelope_id?: string | null
+          group_name?: string | null
           id?: string
           is_done?: boolean
           label: string
+          real_amount?: number | null
           sort_order?: number
           updated_at?: string
           user_id: string
@@ -224,11 +230,14 @@ export type Database = {
         }
         Update: {
           amount?: number
+          category_code?: string | null
           created_at?: string
           envelope_id?: string | null
+          group_name?: string | null
           id?: string
           is_done?: boolean
           label?: string
+          real_amount?: number | null
           sort_order?: number
           updated_at?: string
           user_id?: string
@@ -243,6 +252,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      aguinaldo_gross_salary: {
+        Row: {
+          created_at: string
+          gross_amount: number
+          id: string
+          notes: string | null
+          pay_date: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          gross_amount: number
+          id?: string
+          notes?: string | null
+          pay_date: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          gross_amount?: number
+          id?: string
+          notes?: string | null
+          pay_date?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       asset_value_history: {
         Row: {
