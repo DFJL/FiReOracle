@@ -319,7 +319,7 @@ function AddGrossEntryForm() {
 
 export function AguinaldoSection({
   year, periodStart, periodEnd, estimatedAmount, estimateSource, monthsCovered,
-  receivedAmount, allocations, grossSalaryEntries, envelopes, txCategories,
+  projectedAmount, receivedAmount, allocations, grossSalaryEntries, envelopes, txCategories,
 }: {
   year: number
   periodStart: string
@@ -327,6 +327,7 @@ export function AguinaldoSection({
   estimatedAmount: number
   estimateSource: 'gross' | 'net'
   monthsCovered: number
+  projectedAmount: number | null
   receivedAmount: number
   allocations: AguinaldoAllocation[]
   grossSalaryEntries: AguinaldoGrossSalaryEntry[]
@@ -336,7 +337,12 @@ export function AguinaldoSection({
   const [collapsed, setCollapsed]       = useState(false)
   const [showLedger, setShowLedger]     = useState(false)
   const isActual = receivedAmount > 0
-  const totalAmount = isActual ? receivedAmount : estimatedAmount
+  // Projecting unpaid-yet months at the current known rate is more realistic
+  // for planning than the strict sum ÷ 12 (which treats unpaid months as
+  // zero) — use it for the headline/allocation total when available, but
+  // still show the strict figure alongside for transparency.
+  const usingProjection = !isActual && projectedAmount != null && estimateSource === 'gross'
+  const totalAmount = isActual ? receivedAmount : usingProjection ? projectedAmount! : estimatedAmount
 
   const totalBudget = allocations.reduce((s, a) => s + a.amount, 0)
   const totalReal   = allocations.reduce((s, a) => s + (a.real_amount ?? 0), 0)
@@ -368,9 +374,12 @@ export function AguinaldoSection({
           <p className="text-xl font-black text-white mt-0.5">
             {fmtCRC(totalAmount)}
             <span className="text-xs font-normal text-zinc-500 ml-2">
-              {isActual ? 'depositado' : estimateSource === 'gross' ? 'estimado (bruto registrado)' : 'estimado (aprox. desde neto)'}
+              {isActual ? 'depositado' : usingProjection ? 'proyectado' : estimateSource === 'gross' ? 'estimado (bruto registrado)' : 'estimado (aprox. desde neto)'}
             </span>
           </p>
+          {usingProjection && (
+            <p className="text-[9px] text-zinc-600 mt-0.5">estricto (solo lo registrado ÷ 12): {fmtCRC(estimatedAmount)}</p>
+          )}
         </div>
         <span className="text-zinc-600 text-xs">{collapsed ? '▾' : '▴'}</span>
       </button>
@@ -380,9 +389,11 @@ export function AguinaldoSection({
           <p className="text-[9px] text-zinc-600">
             {isActual
               ? `Ya depositado en diciembre ${year}.`
-              : estimateSource === 'gross'
-                ? `Calculado por ley: bruto registrado ÷ 12${monthsCovered < 12 ? ` — cubre ${monthsCovered} de 12 meses del periodo (${fmtDate(periodStart)} a ${fmtDate(periodEnd)}), así que por ahora queda por debajo del real` : ''}.`
-                : `Aproximado desde depósitos netos de SALARY + BONO (${fmtDate(periodStart)} a ${fmtDate(periodEnd)}) ÷ 12 — queda por debajo del real porque no descuenta CCSS/renta. Registrá tu salario bruto por quincena abajo para un cálculo exacto.`}
+              : usingProjection
+                ? `Bruto registrado ÷ 12, completando las quincenas que faltan del periodo (${fmtDate(periodStart)} a ${fmtDate(periodEnd)}) con la tarifa más reciente conocida — cubre ${monthsCovered} de 12 meses con datos reales, el resto es proyección.`
+                : estimateSource === 'gross'
+                  ? `Calculado por ley: bruto registrado ÷ 12${monthsCovered < 12 ? ` — cubre ${monthsCovered} de 12 meses del periodo (${fmtDate(periodStart)} a ${fmtDate(periodEnd)}), así que por ahora queda por debajo del real` : ''}.`
+                  : `Aproximado desde depósitos netos de SALARY + BONO (${fmtDate(periodStart)} a ${fmtDate(periodEnd)}) ÷ 12 — queda por debajo del real porque no descuenta CCSS/renta. Registrá tu salario bruto por quincena abajo para un cálculo exacto.`}
           </p>
 
           {/* Gross salary ledger */}

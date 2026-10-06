@@ -278,6 +278,38 @@ export default async function PresupuestoPage({
   const aguinaldoEstimated = aguinaldoGrossSum > 0 ? aguinaldoGrossSum / 12 : aguinaldoNetBase / 12
   const aguinaldoSource: 'gross' | 'net' = aguinaldoGrossSum > 0 ? 'gross' : 'net'
 
+  // Projected estimate: fills any quincena missing from the period (out of
+  // the expected 2 per month) — more accurate than the strict sum ÷ 12 above
+  // when the gap is unpaid-yet months (e.g. Oct/Nov) rather than genuinely
+  // unknown ones, since those months really will be paid, not zero.
+  // A month with one known quincena (e.g. Dec — II recorded, I missing)
+  // fills the gap with THAT month's own rate, not the latest one — a month
+  // with zero entries (e.g. unpaid Oct/Nov) forward-fills from the latest
+  // known rate instead, since a flat "use the latest rate everywhere" would
+  // wrongly apply the current post-raise rate to a pre-raise historical gap.
+  let aguinaldoProjected: number | null = null
+  if (grossEntriesInPeriod.length > 0) {
+    const latestRate = [...grossEntriesInPeriod].sort((a, b) => b.pay_date.localeCompare(a.pay_date))[0].gross_amount
+    const entriesByMonth: Record<string, number[]> = {}
+    for (const e of grossEntriesInPeriod) {
+      const ym = e.pay_date.slice(0, 7)
+      ;(entriesByMonth[ym] ??= []).push(Number(e.gross_amount))
+    }
+    let missingAmount = 0
+    const cursor = new Date(aguinaldoPeriodStart + 'T00:00:00')
+    for (let i = 0; i < 12; i++) {
+      const ym = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+      const known = entriesByMonth[ym] ?? []
+      const missingCount = Math.max(0, 2 - known.length)
+      if (missingCount > 0) {
+        const fillRate = known.length > 0 ? known.reduce((s, v) => s + v, 0) / known.length : Number(latestRate)
+        missingAmount += missingCount * fillRate
+      }
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+    aguinaldoProjected = (aguinaldoGrossSum + missingAmount) / 12
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
       <AguinaldoSection
@@ -287,6 +319,7 @@ export default async function PresupuestoPage({
         estimatedAmount={aguinaldoEstimated}
         estimateSource={aguinaldoSource}
         monthsCovered={grossMonthsCovered}
+        projectedAmount={aguinaldoProjected}
         receivedAmount={aguinaldoReceived}
         allocations={aguinaldoAllocRows ?? []}
         grossSalaryEntries={aguinaldoGrossRows ?? []}
