@@ -9,6 +9,8 @@ import {
 } from './actions'
 import type { MovType, EnvelopeMovement } from './actions'
 import { createEnvelope, createSubEnvelope, deleteSubEnvelope, updateEnvelope } from '@/app/actions/envelopes'
+import { addFinancialAccount, updateFinancialAccount, deleteFinancialAccount } from '@/app/actions/financialAccounts'
+import type { FinancialAccountDetail } from '@/app/actions/financialAccounts'
 import { timeWeightedAvgBalance } from '@/lib/envelopeBalances'
 
 function fmtCRC(n: number) {
@@ -970,20 +972,182 @@ function AddSubEnvelopePanel({ parentId, onClose }: { parentId: string; onClose:
   )
 }
 
+// ─── AccountSettingsModal ────────────────────────────────────────────────────
+// Bank-account identity (type + last4) per custodio — feeds the inbox's
+// duplicate/credit-card/internal-transfer detection, which needs to know
+// which real account a notification email refers to instead of guessing
+// from wording alone.
+
+const ACCOUNT_TYPES: { value: string; label: string }[] = [
+  { value: 'checking',    label: 'Cuenta corriente / débito' },
+  { value: 'savings',     label: 'Ahorro' },
+  { value: 'credit_card', label: 'Tarjeta de crédito' },
+  { value: 'cash',        label: 'Efectivo' },
+  { value: 'investment',  label: 'Inversión' },
+]
+
+function AccountRow({ account }: { account: FinancialAccountDetail }) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName]       = useState(account.name)
+  const [type, setType]       = useState(account.account_type)
+  const [last4, setLast4]     = useState(account.last4 ?? '')
+  const [error, setError]     = useState('')
+  const [isPending, start]    = useTransition()
+
+  function save() {
+    if (!name.trim()) { setError('Nombre requerido'); return }
+    if (last4 && !/^\d{4}$/.test(last4)) { setError('Deben ser 4 dígitos'); return }
+    setError('')
+    start(async () => {
+      const res = await updateFinancialAccount(account.id, {
+        name: name.trim(), account_type: type, last4: last4 || null,
+      })
+      if (res?.error) { setError(res.error); return }
+      setEditing(false)
+    })
+  }
+
+  function remove() {
+    if (!window.confirm(`¿Eliminar la cuenta "${account.name}"?`)) return
+    start(async () => { await deleteFinancialAccount(account.id) })
+  }
+
+  const inp = 'bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+
+  if (editing) {
+    return (
+      <div className="py-1.5 border-b border-white/[0.04] last:border-0 space-y-1">
+        <div className="flex gap-1.5">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" className={`flex-1 ${inp}`} />
+          <input value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            placeholder="últ. 4" className={`w-16 ${inp}`} />
+        </div>
+        <select value={type} onChange={e => setType(e.target.value)} className={`w-full ${inp}`}>
+          {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        {error && <p className="text-[10px] text-rose-400">{error}</p>}
+        <div className="flex gap-1.5">
+          <button onClick={save} disabled={isPending} className="px-2 py-1 rounded-md bg-[#a3e635] text-black text-[10px] font-black disabled:opacity-50">
+            {isPending ? '...' : 'Guardar'}
+          </button>
+          <button onClick={() => setEditing(false)} className="px-2 py-1 rounded-md bg-white/[0.06] text-zinc-400 text-[10px]">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 py-1.5 border-b border-white/[0.04] last:border-0">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-zinc-200 truncate">{account.name}</p>
+        <p className="text-[9px] text-zinc-600">
+          {ACCOUNT_TYPES.find(t => t.value === account.account_type)?.label ?? account.account_type}
+          {account.last4 && ` · ···${account.last4}`}
+        </p>
+      </div>
+      <button onClick={() => setEditing(true)} className="text-[9px] font-black text-zinc-600 uppercase hover:text-[#a3e635]/70 transition-colors">
+        Editar
+      </button>
+      <button onClick={remove} disabled={isPending} className="text-[9px] font-black text-zinc-700 uppercase hover:text-rose-400 transition-colors disabled:opacity-40">
+        Borrar
+      </button>
+    </div>
+  )
+}
+
+function AccountSettingsModal({
+  custodio, accounts, onClose,
+}: { custodio: string; accounts: FinancialAccountDetail[]; onClose: () => void }) {
+  const [name, setName]     = useState('')
+  const [type, setType]     = useState('checking')
+  const [last4, setLast4]   = useState('')
+  const [error, setError]   = useState('')
+  const [isPending, start]  = useTransition()
+
+  function submit() {
+    if (!name.trim()) { setError('Nombre requerido'); return }
+    if (last4 && !/^\d{4}$/.test(last4)) { setError('Deben ser 4 dígitos'); return }
+    setError('')
+    start(async () => {
+      const res = await addFinancialAccount({
+        name: name.trim(), bank_name: custodio, account_type: type,
+        custodio, last4: last4 || null, currency_code: 'CRC',
+      })
+      if (res?.error) { setError(res.error); return }
+      setName(''); setLast4('')
+    })
+  }
+
+  const inp = 'bg-white/[0.06] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-[#0d120d] border border-[#a3e635]/[0.15] rounded-2xl p-6 w-full max-w-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Cuentas bancarias</p>
+            <p className="text-base font-black text-white mt-0.5">{custodio}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 text-sm">✕</button>
+        </div>
+
+        <p className="text-[9px] text-zinc-600 leading-relaxed">
+          Los últimos 4 dígitos que el banco usa en sus correos — sirve para que la bandeja sepa con certeza
+          si una transacción fue con esta tarjeta/cuenta en vez de adivinar por el texto del correo.
+        </p>
+
+        <div>
+          {accounts.length === 0 ? (
+            <p className="text-[10px] text-zinc-600 py-2">Sin cuentas registradas para este custodio todavía.</p>
+          ) : (
+            accounts.map(a => <AccountRow key={a.id} account={a} />)
+          )}
+        </div>
+
+        <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
+          <div className="flex gap-1.5">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="ej. Débito, TC Visa..."
+              className={`flex-1 ${inp}`} />
+            <input value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="últ. 4" className={`w-20 ${inp}`} />
+          </div>
+          <select value={type} onChange={e => setType(e.target.value)} className={`w-full ${inp}`}>
+            {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          {error && <p className="text-[10px] text-rose-400">{error}</p>}
+          <button onClick={submit} disabled={isPending}
+            className="w-full py-2 rounded-lg bg-[#a3e635]/15 text-[#a3e635] text-[11px] font-black hover:bg-[#a3e635]/25 transition-colors disabled:opacity-50">
+            {isPending ? '...' : '+ Agregar cuenta'}
+          </button>
+        </div>
+
+        <button onClick={onClose} className="w-full py-2 rounded-lg bg-white/[0.06] text-zinc-400 text-xs">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── EnvelopeSection (main export) ────────────────────────────────────────────
 
 export function EnvelopeSection({
   envelopes,
   leafEnvelopes,
+  accounts,
 }: {
   envelopes: Envelope[]
   leafEnvelopes: (Envelope | SubEnvelope)[]
+  accounts: FinancialAccountDetail[]
 }) {
   const [openId, setOpenId]           = useState<string | null>(null)
   const [expandedId, setExpandedId]   = useState<string | null>(null)
   const [subAddParentId, setSubAdd]   = useState<string | null>(null)
   const [subAddLeafId, setSubAddLeaf] = useState<string | null>(null)
   const [interestCustodio, setInterest] = useState<string | null>(null)
+  const [accountsCustodio, setAccountsCustodio] = useState<string | null>(null)
   const [showAddEnvelope, setShowAdd]   = useState(false)
   const [filterCustodio, setFilter]     = useState<string | null>(null)
 
@@ -1042,13 +1206,24 @@ export function EnvelopeSection({
                 <p className={`text-xs font-black ${active ? 'text-[#a3e635]' : 'text-zinc-200'}`}>{cust}</p>
                 <p className="text-[10px] tabular-nums text-zinc-500">{fmtCRC(ct)} · {pct.toFixed(1)}%</p>
               </div>
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={e => { e.stopPropagation(); setInterest(cust) }}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setInterest(cust) } }}
-                className="shrink-0 px-2.5 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all">
-                + Interés
+              <span className="flex items-center gap-1 shrink-0">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={e => { e.stopPropagation(); setInterest(cust) }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setInterest(cust) } }}
+                  className="px-2.5 py-1.5 rounded-lg bg-[#a3e635]/10 text-[#a3e635] text-[10px] font-black hover:bg-[#a3e635]/20 transition-all">
+                  + Interés
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Cuentas bancarias de este custodio"
+                  onClick={e => { e.stopPropagation(); setAccountsCustodio(cust) }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setAccountsCustodio(cust) } }}
+                  className="px-2 py-1.5 rounded-lg bg-white/[0.04] text-zinc-500 text-[10px] font-black hover:bg-white/[0.08] hover:text-zinc-300 transition-all">
+                  ⚙
+                </span>
               </span>
             </button>
           )
@@ -1197,6 +1372,14 @@ export function EnvelopeSection({
           custodio={interestCustodio}
           envelopes={leafEnvelopes.filter(e => e.custodio === interestCustodio)}
           onClose={() => setInterest(null)}
+        />
+      )}
+
+      {accountsCustodio && (
+        <AccountSettingsModal
+          custodio={accountsCustodio}
+          accounts={accounts.filter(a => a.custodio === accountsCustodio)}
+          onClose={() => setAccountsCustodio(null)}
         />
       )}
     </div>

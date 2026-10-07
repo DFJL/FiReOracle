@@ -74,6 +74,7 @@ export default async function LiquidezPage() {
     { data: envelopes },
     { data: movements },
     { data: loans },
+    { data: financialAccounts },
   ] = await Promise.all([
     admin
       .from('savings_envelopes')
@@ -90,6 +91,11 @@ export default async function LiquidezPage() {
       .select('id, description, original_amount, amount_repaid, loan_date, status, source_envelope_id, envelope_split, notes, linked_transaction_id')
       .eq('user_id', user.id)
       .order('loan_date', { ascending: false }),
+    admin
+      .from('financial_accounts')
+      .select('id, name, bank_name, account_type, custodio, last4, currency_code, is_active')
+      .eq('user_id', user.id)
+      .order('name'),
   ])
 
   const linkedTxIds = [...new Set((loans ?? []).map(l => l.linked_transaction_id).filter((id): id is string => !!id))]
@@ -265,7 +271,7 @@ export default async function LiquidezPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-10">
-      <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} />
+      <EnvelopeSection envelopes={rootEnvelopes} leafEnvelopes={leafEnvelopes} accounts={financialAccounts ?? []} />
       <div className="border-t border-white/[0.06] pt-8">
         <SobresEvolucionSection sobres={sobresEvolucion} />
       </div>

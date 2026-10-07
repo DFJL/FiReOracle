@@ -902,8 +902,10 @@ export type Database = {
           bank_name: string | null
           created_at: string
           currency_code: string
+          custodio: string | null
           id: string
           is_active: boolean
+          last4: string | null
           name: string
           notes: string | null
           updated_at: string
@@ -914,8 +916,10 @@ export type Database = {
           bank_name?: string | null
           created_at?: string
           currency_code: string
+          custodio?: string | null
           id?: string
           is_active?: boolean
+          last4?: string | null
           name: string
           notes?: string | null
           updated_at?: string
@@ -926,8 +930,10 @@ export type Database = {
           bank_name?: string | null
           created_at?: string
           currency_code?: string
+          custodio?: string | null
           id?: string
           is_active?: boolean
+          last4?: string | null
           name?: string
           notes?: string | null
           updated_at?: string
