@@ -45,23 +45,139 @@ export type InboxItem = {
   extracted: ExtractedFields | null
   status: 'pending' | 'confirmed' | 'discarded'
   created_at: string
+  duplicate_of_tx_id: string | null
+  duplicate_of_tx: { date: string; amount: number; vendor: string | null } | null
 }
 
+type DupeCandidate = { id: string; amount: number; date: string; vendor: string | null }
+
+// Same amount (±1%) on a nearby date (±1 day), with a loose vendor-name
+// overlap check when both sides have one — "WALMART" vs "WALMART SAN RAFAEL"
+// should match, "WALMART" vs "UBER" at the same amount shouldn't.
+function findDuplicateMatch(
+  tx: { date: string; amount: number; vendor: string },
+  candidates: DupeCandidate[],
+): DupeCandidate | null {
+  const newVendor = tx.vendor?.trim().toLowerCase() ?? ''
+  const txDate = new Date(tx.date).getTime()
+  return candidates.find(d => {
+    if (Math.abs(Number(d.amount) - tx.amount) > tx.amount * 0.01) return false
+    if (Math.abs(new Date(d.date).getTime() - txDate) > 86400000) return false
+    const existVendor = (d.vendor ?? '').trim().toLowerCase()
+    if (newVendor.length >= 4 && existVendor.length >= 4) {
+      const overlap = newVendor.slice(0, 4) === existVendor.slice(0, 4)
+        || existVendor.includes(newVendor.slice(0, 6))
+        || newVendor.includes(existVendor.slice(0, 6))
+      if (!overlap) return false
+    }
+    return true
+  }) ?? null
+}
+
+// Sweeps pending items against transactions NOT sourced from this inbox
+// (manual FAB entries, old sheet imports) — catches the case where the user
+// typed a transaction by hand before (or after) its notification email
+// arrived, so the same spend doesn't need reviewing twice. Marks matches
+// discarded with a record of which transaction they duplicate (not a bare
+// status flip) so a bad match is auditable and restorable, not silently
+// gone — this is a heuristic, not a certainty.
+export async function autoDiscardDuplicates(): Promise<{ discarded: number }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { discarded: 0 }
+
+  const admin = createAdminClient()
+  const { data: pending } = await admin
+    .from('transaction_inbox')
+    .select('id, extracted')
+    .eq('user_id', user.id)
+    .eq('status', 'pending')
+
+  const candidates = (pending ?? [])
+    .map(p => ({ id: p.id, ext: p.extracted as ExtractedFields | null }))
+    .filter((p): p is { id: string; ext: ExtractedFields } => !!p.ext?.date && !!p.ext?.amount && !!p.ext?.vendor)
+
+  if (candidates.length === 0) return { discarded: 0 }
+
+  const dates = candidates.map(c => c.ext.date).sort()
+  const windowStart = new Date(new Date(dates[0]).getTime() - 86400000).toISOString().slice(0, 10)
+  const windowEnd   = new Date(new Date(dates[dates.length - 1]).getTime() + 86400000).toISOString().slice(0, 10)
+
+  const { data: txs } = await admin
+    .from('transactions')
+    .select('id, amount, date, vendor, movement_type')
+    .eq('user_id', user.id)
+    .neq('source', 'email')
+    .gte('date', windowStart)
+    .lte('date', windowEnd)
+
+  const byMovementType: Record<string, DupeCandidate[]> = {}
+  for (const t of txs ?? []) {
+    const key = t.movement_type ?? ''
+    ;(byMovementType[key] ??= []).push({ id: t.id, amount: Number(t.amount), date: t.date ?? '', vendor: t.vendor })
+  }
+
+  const matches: { inboxId: string; txId: string }[] = []
+  for (const c of candidates) {
+    const pool = byMovementType[c.ext.movement_type] ?? []
+    const match = findDuplicateMatch({ date: c.ext.date, amount: c.ext.amount, vendor: c.ext.vendor }, pool)
+    if (match) matches.push({ inboxId: c.id, txId: match.id })
+  }
+
+  if (matches.length === 0) return { discarded: 0 }
+
+  await Promise.all(matches.map(m =>
+    admin.from('transaction_inbox')
+      .update({ status: 'discarded', duplicate_of_tx_id: m.txId })
+      .eq('id', m.inboxId)
+      .eq('user_id', user.id)
+  ))
+
+  return { discarded: matches.length }
+}
+
+export async function restoreInboxItem(inboxId: string): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  const { error } = await createAdminClient()
+    .from('transaction_inbox')
+    .update({ status: 'pending', duplicate_of_tx_id: null })
+    .eq('id', inboxId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/movimientos')
+  return { error: null }
+}
 
 export async function getInboxItems(): Promise<InboxItem[]> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
 
+  await autoDiscardDuplicates()
+
   const admin = createAdminClient()
   const { data } = await admin
     .from('transaction_inbox')
-    .select('id, email_id, email_date, raw_subject, raw_snippet, extracted, status, created_at')
+    .select('id, email_id, email_date, raw_subject, raw_snippet, extracted, status, created_at, duplicate_of_tx_id')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(100)
 
-  return (data ?? []) as InboxItem[]
+  const txIds = [...new Set((data ?? []).map(i => i.duplicate_of_tx_id).filter((id): id is string => !!id))]
+  const txMap: Record<string, { date: string; amount: number; vendor: string | null }> = {}
+  if (txIds.length > 0) {
+    const { data: dupeTxs } = await admin.from('transactions').select('id, date, amount, vendor').in('id', txIds)
+    for (const t of dupeTxs ?? []) txMap[t.id] = { date: t.date ?? '', amount: Number(t.amount), vendor: t.vendor }
+  }
+
+  return (data ?? []).map(i => ({
+    ...i,
+    duplicate_of_tx: i.duplicate_of_tx_id ? (txMap[i.duplicate_of_tx_id] ?? null) : null,
+  })) as InboxItem[]
 }
 
 export async function confirmInboxItem(
@@ -90,12 +206,11 @@ export async function confirmInboxItem(
 
   if (!options?.force) {
     // Soft duplicate check: same movement_type + amount within ±1% on ±1 day
-    // Also fetch vendor so we can skip the warning when vendors are clearly different
     const dayBefore = new Date(new Date(tx.date).getTime() - 86400000).toISOString().slice(0, 10)
     const dayAfter  = new Date(new Date(tx.date).getTime() + 86400000).toISOString().slice(0, 10)
     const { data: dupes } = await admin
       .from('transactions')
-      .select('id, amount, date, vendor, concept')
+      .select('id, amount, date, vendor')
       .eq('user_id', user.id)
       .eq('movement_type', tx.movement_type)
       .gte('date', dayBefore)
@@ -104,18 +219,10 @@ export async function confirmInboxItem(
       .lte('amount', tx.amount * 1.01)
       .limit(5)
 
-    const newVendor = tx.vendor?.trim().toLowerCase() ?? ''
-    const realDupe = (dupes ?? []).find(d => {
-      const existVendor = (d.vendor as string | null)?.trim().toLowerCase() ?? ''
-      // If both have vendors and neither contains the first 4 chars of the other → different place, not a dupe
-      if (newVendor.length >= 4 && existVendor.length >= 4) {
-        const overlap = newVendor.slice(0, 4) === existVendor.slice(0, 4)
-          || existVendor.includes(newVendor.slice(0, 6))
-          || newVendor.includes(existVendor.slice(0, 6))
-        if (!overlap) return false
-      }
-      return true
-    })
+    const realDupe = findDuplicateMatch(
+      { date: tx.date, amount: tx.amount, vendor: tx.vendor },
+      (dupes ?? []).map(d => ({ id: d.id, amount: Number(d.amount), date: d.date ?? '', vendor: d.vendor })),
+    )
 
     if (realDupe) {
       return { error: `Posible duplicado: ya existe una tx similar del ${realDupe.date} por ${realDupe.amount}` }

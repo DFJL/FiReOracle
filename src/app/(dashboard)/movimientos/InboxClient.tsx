@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  confirmInboxItem, discardInboxItem, insertManualInboxItem,
+  confirmInboxItem, discardInboxItem, insertManualInboxItem, restoreInboxItem,
   reExtractInboxItem, batchConfirmHighConfidence, batchDiscardByAge, suggestCategory,
 } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
@@ -190,6 +190,15 @@ function ItemCard({
     })
   }
 
+  function handleRestore() {
+    setErr(null)
+    startTransition(async () => {
+      const res = await restoreInboxItem(item.id)
+      if (res.error) setErr(res.error)
+      else router.refresh()
+    })
+  }
+
   const isProcessed = item.status !== 'pending'
   const relevantCats = categories.filter(c =>
     c.category_type === (fields.movement_type === 'income' ? 'income' : 'expense')
@@ -221,7 +230,15 @@ function ItemCard({
             {item.status === 'confirmed' && (
               <span className="text-[9px] font-bold text-[#a3e635] bg-[#a3e635]/10 px-1.5 py-0.5 rounded-full">✓ confirmado</span>
             )}
-            {item.status === 'discarded' && (
+            {item.status === 'discarded' && item.duplicate_of_tx_id && (
+              <span
+                title={item.duplicate_of_tx ? `Ya existe: ${item.duplicate_of_tx.vendor ?? '?'} · ₡${Math.round(item.duplicate_of_tx.amount).toLocaleString('es-CR')} del ${item.duplicate_of_tx.date}` : undefined}
+                className="text-[9px] font-bold text-amber-400/80 bg-amber-400/10 px-1.5 py-0.5 rounded-full"
+              >
+                duplicado — ya estaba registrado
+              </span>
+            )}
+            {item.status === 'discarded' && !item.duplicate_of_tx_id && (
               <span className="text-[9px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">descartado</span>
             )}
             {isOld && item.status === 'pending' && (
@@ -468,6 +485,24 @@ function ItemCard({
               >
                 {reExtracting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
                 Re-extraer
+              </button>
+            </div>
+          )}
+
+          {item.status === 'discarded' && item.duplicate_of_tx_id && (
+            <div className="flex items-center gap-2 pt-1">
+              <p className="text-[10px] text-zinc-600 flex-1">
+                Se descartó solo porque coincide con una tx ya registrada
+                {item.duplicate_of_tx ? ` (${item.duplicate_of_tx.vendor ?? '?'} · ₡${Math.round(item.duplicate_of_tx.amount).toLocaleString('es-CR')} del ${item.duplicate_of_tx.date})` : ''}.
+                Si no es la misma, restaurala.
+              </p>
+              <button
+                onClick={handleRestore}
+                disabled={pending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] text-zinc-400 text-[11px] font-semibold hover:bg-white/[0.08] hover:text-zinc-200 transition-colors disabled:opacity-40 shrink-0"
+              >
+                <RotateCcw size={12} />
+                Restaurar
               </button>
             </div>
           )}

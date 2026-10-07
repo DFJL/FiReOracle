@@ -2153,6 +2153,7 @@ export type Database = {
         Row: {
           account_id: string | null
           created_at: string
+          duplicate_of_tx_id: string | null
           email_date: string | null
           email_id: string
           extracted: Json | null
@@ -2165,6 +2166,7 @@ export type Database = {
         Insert: {
           account_id?: string | null
           created_at?: string
+          duplicate_of_tx_id?: string | null
           email_date?: string | null
           email_id: string
           extracted?: Json | null
@@ -2177,6 +2179,7 @@ export type Database = {
         Update: {
           account_id?: string | null
           created_at?: string
+          duplicate_of_tx_id?: string | null
           email_date?: string | null
           email_id?: string
           extracted?: Json | null
@@ -2192,6 +2195,13 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "connected_email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_inbox_duplicate_of_tx_id_fkey"
+            columns: ["duplicate_of_tx_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]
