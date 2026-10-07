@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { matchAccountRefs } from '@/lib/inbox-utils'
 
 const anthropic = new Anthropic()
 
@@ -25,7 +26,9 @@ REGLAS:
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta (ej: "Compra supermercado", "SINPE recibido", "Pago de servicios", "Comprobante BNCR")
 - movement_type: "expense" para débitos/compras/pagos de préstamo, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros de cajero
-- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, Mastercard, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro
+- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, Mastercard, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro. NOTA: esto es solo un respaldo — si el correo menciona los últimos 4 dígitos de la tarjeta/cuenta (account_ref), el sistema cruza eso contra las cuentas reales del usuario y esa coincidencia manda sobre esta inferencia.
+- account_ref: los ÚLTIMOS 4 DÍGITOS de la tarjeta o cuenta que origina/recibe esta transacción, tal como aparecen en el correo (ej. "tarjeta terminada en 1234", "cuenta ****5678" → "1234"/"5678"). null si el correo no los menciona.
+- counterparty_ref: SOLO si es una transferencia/SINPE con cuenta de contraparte explícita, los últimos 4 dígitos de esa OTRA cuenta (destino si es saliente, origen si es entrante). null en cualquier otro caso (compras, retiros, pagos a comercios).
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
 CASO ESPECIAL — comprobantes con PDF adjunto (BNCR "BN Contacto Digital", etc.):
 Si el correo es claramente bancario pero el monto está en un PDF adjunto y no en el cuerpo,
@@ -33,7 +36,7 @@ devolvé lo que podés (fecha del asunto, vendor="Banco Nacional", concept="Comp
 NO uses skip:true para comprobantes bancarios aunque falte el monto.
 Usá skip:true SOLO para correos claramente no bancarios: marketing, boletines, estados de cuenta sin transacción, cambios de contraseña.
 FORMATO — respondé SOLO con JSON:
-{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"category_code":"FOOD_MARKET","confidence":"high"}
+{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"account_ref":"1234","counterparty_ref":null,"category_code":"FOOD_MARKET","confidence":"high"}
 Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
 
 export type GmailPart = {
@@ -163,6 +166,16 @@ export async function syncGmailAccount(
   const newIds = allNewIds.slice(0, MAX_MESSAGES_PER_SYNC)
   const remaining = allNewIds.length - newIds.length
 
+  // Fetched once per sync, not per message — cross-referenced against each
+  // extraction's account_ref/counterparty_ref below to replace the
+  // wording-based credit-card guess with a certain one, and to catch
+  // transfers between the user's own accounts.
+  const { data: registeredAccounts } = await admin
+    .from('financial_accounts')
+    .select('id, name, account_type, custodio, last4')
+    .eq('user_id', userId)
+    .not('last4', 'is', null)
+
   const system = EXTRACTION_SYSTEM.replace('__TODAY__', today)
   let inserted = 0
 
@@ -233,6 +246,19 @@ export async function syncGmailAccount(
           extracted = parsed
         }
       } catch { /* skip */ }
+
+      if (extracted && registeredAccounts && registeredAccounts.length > 0) {
+        const { matched_account, matched_counterparty, is_internal_transfer } = matchAccountRefs(
+          { account_ref: extracted.account_ref as string | null, counterparty_ref: extracted.counterparty_ref as string | null },
+          registeredAccounts,
+        )
+        if (matched_account) {
+          extracted.matched_account = matched_account
+          extracted.is_credit_card = matched_account.account_type === 'credit_card'
+        }
+        if (matched_counterparty) extracted.matched_counterparty = matched_counterparty
+        if (is_internal_transfer) extracted.is_internal_transfer = true
+      }
 
       await admin.from('transaction_inbox').insert({
         user_id:     userId,

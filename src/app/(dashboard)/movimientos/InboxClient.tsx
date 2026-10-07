@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   confirmInboxItem, discardInboxItem, insertManualInboxItem, restoreInboxItem,
+  confirmInboxItemAsTransfer,
   reExtractInboxItem, batchConfirmHighConfidence, batchDiscardByAge, suggestCategory,
 } from '@/app/actions/inbox'
 import type { InboxItem, ExtractedFields } from '@/app/actions/inbox'
@@ -35,6 +36,7 @@ type Envelope = {
   name: string
   color: string | null
   parent_envelope_id: string | null
+  custodio?: string | null
 }
 
 type Loan = {
@@ -81,6 +83,84 @@ function relativeTime(iso: string | null): string {
   if (hrs < 24) return `hace ${hrs}h`
   const days = Math.floor(hrs / 24)
   return `hace ${days}d`
+}
+
+// ── TransferSuggestion ───────────────────────────────────────────────────────
+// Shown when both account_ref and counterparty_ref matched a registered
+// account — likely money moving between the user's own accounts, not real
+// income/expense. Registers it as a sobre-to-sobre transfer (same mechanism
+// /liquidez uses) instead of a transactions row, and marks the inbox item
+// confirmed. Sobre pickers start empty on purpose — no saved default.
+function TransferSuggestion({
+  item, envelopes,
+}: {
+  item: InboxItem
+  envelopes: Envelope[]
+}) {
+  const ext = item.extracted
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [err, setErr] = useState<string | null>(null)
+  const [fromEnvelopeId, setFromEnvelopeId] = useState('')
+  const [toEnvelopeId, setToEnvelopeId]     = useState('')
+
+  if (!ext?.is_internal_transfer || !ext.matched_account || !ext.matched_counterparty) return null
+
+  // account_ref is the origin when outgoing, the destination when incoming.
+  const outgoing = ext.movement_type !== 'income'
+  const fromAccount = outgoing ? ext.matched_account : ext.matched_counterparty
+  const toAccount   = outgoing ? ext.matched_counterparty : ext.matched_account
+  const { date, amount, concept } = ext
+
+  const fromOptions = envelopes.filter(e => e.custodio === fromAccount.custodio)
+  const toOptions    = envelopes.filter(e => e.custodio === toAccount.custodio)
+
+  function submit() {
+    if (!fromEnvelopeId || !toEnvelopeId) { setErr('Elegí sobre origen y destino'); return }
+    setErr(null)
+    startTransition(async () => {
+      const res = await confirmInboxItemAsTransfer(item.id, {
+        fromEnvelopeId, toEnvelopeId, date, amount, notes: concept,
+      })
+      if (res.error) { setErr(res.error); return }
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="bg-sky-400/5 border border-sky-400/20 rounded-lg px-3 py-2.5 space-y-2">
+      <p className="text-[10px] text-sky-300/90 leading-relaxed">
+        <span className="font-bold">Transferencia interna detectada</span> — {fromAccount.name} ({fromAccount.custodio}) → {toAccount.name} ({toAccount.custodio}).
+        No es gasto ni ingreso real; registralo como traslado de sobre en vez de confirmarlo abajo.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[8px] font-black text-zinc-500 uppercase tracking-wider">Sobre origen ({fromAccount.custodio})</label>
+          <select value={fromEnvelopeId} onChange={e => setFromEnvelopeId(e.target.value)}
+            className="mt-1 w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-sky-400/40">
+            <option value="">— elegir —</option>
+            {fromOptions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[8px] font-black text-zinc-500 uppercase tracking-wider">Sobre destino ({toAccount.custodio})</label>
+          <select value={toEnvelopeId} onChange={e => setToEnvelopeId(e.target.value)}
+            className="mt-1 w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-sky-400/40">
+            <option value="">— elegir —</option>
+            {toOptions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+      </div>
+      {err && <p className="text-[10px] text-rose-400">{err}</p>}
+      <button
+        onClick={submit}
+        disabled={pending || !fromEnvelopeId || !toEnvelopeId}
+        className="px-3 py-1.5 rounded-lg bg-sky-400/15 text-sky-300 text-[11px] font-black hover:bg-sky-400/25 transition-colors disabled:opacity-40"
+      >
+        {pending ? '...' : 'Registrar traslado'}
+      </button>
+    </div>
+  )
 }
 
 // ── ItemCard ─────────────────────────────────────────────────────────────────
@@ -283,6 +363,9 @@ function ItemCard({
               </p>
             </div>
           )}
+
+          {/* Internal transfer suggestion */}
+          {item.status === 'pending' && <TransferSuggestion item={item} envelopes={envelopes} />}
 
           {/* Editable fields */}
           <div className="grid grid-cols-2 gap-3">

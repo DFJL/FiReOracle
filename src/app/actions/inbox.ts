@@ -4,6 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { matchAccountRefs } from '@/lib/inbox-utils'
+import { transferBetweenEnvelopes } from '@/app/(dashboard)/liquidez/actions'
 import Anthropic from '@anthropic-ai/sdk'
 
 const RE_EXTRACT_SYSTEM = `Sos un extractor de datos de correos de notificación bancaria de Costa Rica.
@@ -16,11 +18,15 @@ REGLAS:
 - vendor = nombre del comercio, persona o banco
 - concept = descripción corta
 - movement_type: "expense" para débitos/compras/pagos, "income" para créditos/depósitos/SINPE recibido, "cash_withdrawal" para retiros
-- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro
+- is_credit_card: true si el correo indica claramente que es una transacción de TARJETA DE CRÉDITO (TC, crédito, Visa Crédito, etc.); false si es débito, SINPE, transferencia, retiro u otro instrumento; omitir si no es claro. NOTA: esto es solo un respaldo — si el correo menciona los últimos 4 dígitos de la tarjeta/cuenta (account_ref), el sistema cruza eso contra las cuentas reales del usuario y esa coincidencia manda sobre esta inferencia.
+- account_ref: los ÚLTIMOS 4 DÍGITOS de la tarjeta o cuenta que origina/recibe esta transacción, tal como aparecen en el correo. null si el correo no los menciona.
+- counterparty_ref: SOLO si es una transferencia/SINPE con cuenta de contraparte explícita, los últimos 4 dígitos de esa OTRA cuenta (destino si es saliente, origen si es entrante). null en cualquier otro caso.
 - confidence: "high" si tenés todos los datos claramente, "medium" si hay algo inferido, "low" si hay ambigüedad
 FORMATO — respondé SOLO con JSON:
-{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"category_code":"FOOD_MARKET","confidence":"high"}
+{"amount":15000,"currency":"CRC","vendor":"Walmart","concept":"Compra supermercado","date":"2026-06-01","movement_type":"expense","is_credit_card":true,"account_ref":"1234","counterparty_ref":null,"category_code":"FOOD_MARKET","confidence":"high"}
 Si no es correo bancario: {"skip":true,"reason":"No es notificación de transacción"}`
+
+export type MatchedAccount = { id: string; name: string; account_type: string; custodio: string | null }
 
 export type ExtractedFields = {
   amount: number
@@ -30,6 +36,11 @@ export type ExtractedFields = {
   date: string
   movement_type: 'expense' | 'income' | 'cash_withdrawal'
   is_credit_card?: boolean
+  account_ref?: string | null
+  counterparty_ref?: string | null
+  matched_account?: MatchedAccount | null
+  matched_counterparty?: MatchedAccount | null
+  is_internal_transfer?: boolean
   category_code?: string
   expense_group?: string
   is_passive_income?: boolean
@@ -306,6 +317,39 @@ export async function discardInboxItem(inboxId: string): Promise<{ error: string
   return { error: null }
 }
 
+// Detected-internal-transfer path: registers a real sobre-to-sobre transfer
+// (same mechanism /liquidez uses) instead of a transactions row — money
+// moving between the user's own accounts isn't income or expense, so it
+// shouldn't land in that ledger at all.
+export async function confirmInboxItemAsTransfer(
+  inboxId: string,
+  data: { fromEnvelopeId: string; toEnvelopeId: string; date: string; amount: number; notes?: string },
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autenticado' }
+
+  if (data.fromEnvelopeId === data.toEnvelopeId) return { error: 'El sobre origen y destino no pueden ser el mismo' }
+
+  const res = await transferBetweenEnvelopes(data.fromEnvelopeId, data.toEnvelopeId, {
+    date: data.date, amount: data.amount, notes: data.notes,
+  })
+  if (res?.error) return { error: res.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('transaction_inbox')
+    .update({ status: 'confirmed' })
+    .eq('id', inboxId)
+    .eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/movimientos')
+  revalidatePath('/liquidez')
+  return { error: null }
+}
+
 export async function insertManualInboxItem(
   subject: string,
   snippet: string,
@@ -389,6 +433,26 @@ export async function reExtractInboxItem(inboxId: string): Promise<{ error: stri
       if (!parsed.skip) extracted = parsed
     }
   } catch { /* skip */ }
+
+  if (extracted) {
+    const { data: registeredAccounts } = await admin
+      .from('financial_accounts')
+      .select('id, name, account_type, custodio, last4')
+      .eq('user_id', user.id)
+      .not('last4', 'is', null)
+    if (registeredAccounts && registeredAccounts.length > 0) {
+      const { matched_account, matched_counterparty, is_internal_transfer } = matchAccountRefs(
+        { account_ref: extracted.account_ref as string | null, counterparty_ref: extracted.counterparty_ref as string | null },
+        registeredAccounts,
+      )
+      if (matched_account) {
+        extracted.matched_account = matched_account
+        extracted.is_credit_card = matched_account.account_type === 'credit_card'
+      }
+      if (matched_counterparty) extracted.matched_counterparty = matched_counterparty
+      if (is_internal_transfer) extracted.is_internal_transfer = true
+    }
+  }
 
   const { error } = await admin
     .from('transaction_inbox')
