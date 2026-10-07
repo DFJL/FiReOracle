@@ -20,7 +20,8 @@ export async function GET(req: Request) {
 
   const today = new Date().toISOString().slice(0, 10)
   let totalInserted = 0
-  const results: { email: string; found: number; inserted: number; error?: string }[] = []
+  let totalRemaining = 0
+  const results: { email: string; found: number; inserted: number; remaining?: number; error?: string }[] = []
 
   for (const account of accounts) {
     const accessToken = await refreshGmailAccessToken(account.refresh_token)
@@ -30,15 +31,23 @@ export async function GET(req: Request) {
       continue
     }
     try {
-      const { found, inserted } = await syncGmailAccount(accessToken, account.user_id, account.id, admin, today)
-      totalInserted += inserted
-      results.push({ email: account.email, found, inserted })
+      const { found, inserted, remaining } = await syncGmailAccount(accessToken, account.user_id, account.id, admin, today)
+      totalInserted  += inserted
+      totalRemaining += remaining
+      results.push({ email: account.email, found, inserted, remaining })
     } catch (err) {
       console.error(`[email-sync] Error en ${account.email}:`, err)
       results.push({ email: account.email, found: 0, inserted: 0, error: String(err) })
     }
   }
 
-  console.log(`[email-sync] Cron completado: ${totalInserted} nuevos de ${accounts.length} cuentas`)
-  return Response.json({ synced: accounts.length, inserted: totalInserted, accounts: results })
+  // A large backlog (e.g. after months without syncing) is capped per
+  // invocation to stay inside the function's execution timeout. Any
+  // remainder just rolls over to tomorrow's run — catching up a big backlog
+  // fast is better done via the manual "Sincronizar" button in /movimientos
+  // (which chains calls client-side) than by self-retriggering this cron,
+  // since an un-awaited fetch after the response is sent isn't guaranteed
+  // to survive in a serverless runtime.
+  console.log(`[email-sync] Cron completado: ${totalInserted} nuevos de ${accounts.length} cuentas, ${totalRemaining} pendientes`)
+  return Response.json({ synced: accounts.length, inserted: totalInserted, remaining: totalRemaining, accounts: results })
 }

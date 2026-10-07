@@ -111,13 +111,25 @@ export async function refreshGmailAccessToken(refreshToken: string): Promise<str
   return data.access_token ?? null
 }
 
+// Each message costs a handful of sequential network round trips (fetch
+// detail, maybe a PDF, an AI extraction call, an insert) — after months
+// without syncing, `newer_than:90d` can match hundreds of emails, and
+// processing them all in one invocation reliably blows past a serverless
+// function's execution timeout. The connection gets cut before a response
+// is ever sent, which surfaces client-side as a bare network error ("Load
+// failed"/"Failed to fetch"), not a clean error message. Capping how many
+// NEW messages get processed per call keeps each invocation safely inside
+// the timeout; already-inserted messages are skipped via the existingIds
+// check either way, so calling this again just picks up where it left off.
+const MAX_MESSAGES_PER_SYNC = 30
+
 export async function syncGmailAccount(
   accessToken: string,
   userId: string,
   accountId: string,
   admin: ReturnType<typeof createAdminClient>,
   today: string,
-): Promise<{ found: number; inserted: number }> {
+): Promise<{ found: number; inserted: number; remaining: number }> {
   const allIds: string[] = []
   let pageToken: string | undefined
   do {
@@ -135,7 +147,7 @@ export async function syncGmailAccount(
     .update({ last_synced_at: new Date().toISOString() })
     .eq('id', accountId)
 
-  if (allIds.length === 0) return { found: 0, inserted: 0 }
+  if (allIds.length === 0) return { found: 0, inserted: 0, remaining: 0 }
 
   const { data: existing } = await admin
     .from('transaction_inbox')
@@ -144,9 +156,12 @@ export async function syncGmailAccount(
     .in('email_id', allIds)
 
   const existingIds = new Set((existing ?? []).map(r => r.email_id))
-  const newIds = allIds.filter(id => !existingIds.has(id))
+  const allNewIds = allIds.filter(id => !existingIds.has(id))
 
-  if (newIds.length === 0) return { found: allIds.length, inserted: 0 }
+  if (allNewIds.length === 0) return { found: allIds.length, inserted: 0, remaining: 0 }
+
+  const newIds = allNewIds.slice(0, MAX_MESSAGES_PER_SYNC)
+  const remaining = allNewIds.length - newIds.length
 
   const system = EXTRACTION_SYSTEM.replace('__TODAY__', today)
   let inserted = 0
@@ -235,5 +250,5 @@ export async function syncGmailAccount(
     }
   }
 
-  return { found: allIds.length, inserted }
+  return { found: allIds.length, inserted, remaining }
 }

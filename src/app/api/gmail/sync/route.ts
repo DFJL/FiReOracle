@@ -22,7 +22,8 @@ export async function POST() {
   const today = new Date().toISOString().slice(0, 10)
   let totalFound = 0
   let totalInserted = 0
-  const results: { email: string; found: number; inserted: number; error?: string }[] = []
+  let totalRemaining = 0
+  const results: { email: string; found: number; inserted: number; remaining?: number; error?: string }[] = []
 
   for (const account of accounts) {
     const accessToken = await refreshGmailAccessToken(account.refresh_token)
@@ -30,11 +31,17 @@ export async function POST() {
       results.push({ email: account.email, found: 0, inserted: 0, error: 'Token inválido' })
       continue
     }
-    const { found, inserted } = await syncGmailAccount(accessToken, user.id, account.id, admin, today)
-    totalFound    += found
-    totalInserted += inserted
-    results.push({ email: account.email, found, inserted })
+    try {
+      const { found, inserted, remaining } = await syncGmailAccount(accessToken, user.id, account.id, admin, today)
+      totalFound     += found
+      totalInserted  += inserted
+      totalRemaining += remaining
+      results.push({ email: account.email, found, inserted, remaining })
+    } catch (err) {
+      console.error(`[gmail-sync] Error en ${account.email}:`, err)
+      results.push({ email: account.email, found: 0, inserted: 0, error: String(err) })
+    }
   }
 
-  return Response.json({ found: totalFound, inserted: totalInserted, accounts: results })
+  return Response.json({ found: totalFound, inserted: totalInserted, remaining: totalRemaining, accounts: results })
 }

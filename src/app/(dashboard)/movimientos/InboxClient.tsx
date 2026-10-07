@@ -487,9 +487,7 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
   const [removing,  setRemoving]  = useState<string | null>(null)
   const [msgs,      setMsgs]      = useState<Record<string, { ok: boolean; text: string }>>({})
 
-  async function doSync(acc: ConnectedAccount): Promise<boolean> {
-    setSyncing(acc.id)
-    setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
+  async function doSyncOnce(acc: ConnectedAccount): Promise<{ hadNew: boolean; remaining: number; ok: boolean }> {
     try {
       const endpoint = acc.provider === 'yahoo' ? '/api/yahoo/sync' : '/api/gmail/sync'
       const body     = acc.provider === 'yahoo' ? JSON.stringify({ accountId: acc.id }) : undefined
@@ -498,30 +496,50 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
         headers: acc.provider === 'yahoo' ? { 'Content-Type': 'application/json' } : {},
         body,
       })
-      const data = await res.json() as { found?: number; inserted?: number; error?: string }
+      const data = await res.json() as { found?: number; inserted?: number; remaining?: number; error?: string }
 
       if (!res.ok || data.error) {
         const isToken = data.error?.toLowerCase().includes('token') || res.status === 401
         setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: data.error ?? 'Error' + (isToken ? ' — reconectá la cuenta' : '') } }))
-        return false
+        return { hadNew: false, remaining: 0, ok: false }
       }
 
-      const { found = 0, inserted = 0 } = data
+      const { found = 0, inserted = 0, remaining = 0 } = data
       setMsgs(m => ({
         ...m,
         [acc.id]: {
           ok:   true,
-          text: inserted > 0
-            ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
-            : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
+          text: remaining > 0
+            ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found} — quedan ${remaining}, siguiendo...`
+            : inserted > 0
+              ? `${inserted} nuevo${inserted !== 1 ? 's' : ''} de ${found}`
+              : `${found} revisado${found !== 1 ? 's' : ''}, sin novedades`,
         },
       }))
-      // Update last_synced_at locally
       setAccounts(a => a.map(a2 => a2.id === acc.id ? { ...a2, last_synced_at: new Date().toISOString() } : a2))
-      return inserted > 0
+      return { hadNew: inserted > 0, remaining, ok: true }
     } catch (e) {
       setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: String(e) } }))
-      return false
+      return { hadNew: false, remaining: 0, ok: false }
+    }
+  }
+
+  // A big backlog (e.g. after months without syncing) is capped per request
+  // server-side to stay inside the function's execution timeout — chain
+  // calls here until there's nothing left, instead of making the user click
+  // "Sincronizar" over and over. Capped at 20 rounds (~600 emails) as a
+  // safety net against looping forever on a server-side bug.
+  async function doSync(acc: ConnectedAccount): Promise<boolean> {
+    setSyncing(acc.id)
+    setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
+    try {
+      let hadNew = false
+      for (let round = 0; round < 20; round++) {
+        const r = await doSyncOnce(acc)
+        hadNew = hadNew || r.hadNew
+        if (!r.ok || r.remaining === 0) break
+      }
+      return hadNew
     } finally {
       setSyncing(null)
     }
