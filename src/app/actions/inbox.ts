@@ -51,9 +51,15 @@ export type InboxItem = {
 
 type DupeCandidate = { id: string; amount: number; date: string; vendor: string | null }
 
-// Same amount (±1%) on a nearby date (±1 day), with a loose vendor-name
-// overlap check when both sides have one — "WALMART" vs "WALMART SAN RAFAEL"
-// should match, "WALMART" vs "UBER" at the same amount shouldn't.
+const DUPE_WINDOW_DAYS = 7
+
+// Exact amount (to the nearest colón) within a week of the date, with a
+// loose vendor-name overlap check when both sides have one — "WALMART" vs
+// "WALMART SAN RAFAEL" should match, "WALMART" vs "UBER" at the same amount
+// shouldn't. The date window is wide because manual entries are often typed
+// late or with a mistyped date, but the amount match is exact (not ±1%
+// anymore) to compensate — a week-wide net with a fuzzy amount would catch
+// too many unrelated same-vendor transactions.
 function findDuplicateMatch(
   tx: { date: string; amount: number; vendor: string },
   candidates: DupeCandidate[],
@@ -61,8 +67,8 @@ function findDuplicateMatch(
   const newVendor = tx.vendor?.trim().toLowerCase() ?? ''
   const txDate = new Date(tx.date).getTime()
   return candidates.find(d => {
-    if (Math.abs(Number(d.amount) - tx.amount) > tx.amount * 0.01) return false
-    if (Math.abs(new Date(d.date).getTime() - txDate) > 86400000) return false
+    if (Math.round(Number(d.amount)) !== Math.round(tx.amount)) return false
+    if (Math.abs(new Date(d.date).getTime() - txDate) > DUPE_WINDOW_DAYS * 86400000) return false
     const existVendor = (d.vendor ?? '').trim().toLowerCase()
     if (newVendor.length >= 4 && existVendor.length >= 4) {
       const overlap = newVendor.slice(0, 4) === existVendor.slice(0, 4)
@@ -100,8 +106,8 @@ export async function autoDiscardDuplicates(): Promise<{ discarded: number }> {
   if (candidates.length === 0) return { discarded: 0 }
 
   const dates = candidates.map(c => c.ext.date).sort()
-  const windowStart = new Date(new Date(dates[0]).getTime() - 86400000).toISOString().slice(0, 10)
-  const windowEnd   = new Date(new Date(dates[dates.length - 1]).getTime() + 86400000).toISOString().slice(0, 10)
+  const windowStart = new Date(new Date(dates[0]).getTime() - DUPE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10)
+  const windowEnd   = new Date(new Date(dates[dates.length - 1]).getTime() + DUPE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10)
 
   const { data: txs } = await admin
     .from('transactions')
@@ -205,9 +211,9 @@ export async function confirmInboxItem(
   const admin = createAdminClient()
 
   if (!options?.force) {
-    // Soft duplicate check: same movement_type + amount within ±1% on ±1 day
-    const dayBefore = new Date(new Date(tx.date).getTime() - 86400000).toISOString().slice(0, 10)
-    const dayAfter  = new Date(new Date(tx.date).getTime() + 86400000).toISOString().slice(0, 10)
+    // Soft duplicate check: same movement_type, exact amount, within a week
+    const dayBefore = new Date(new Date(tx.date).getTime() - DUPE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10)
+    const dayAfter  = new Date(new Date(tx.date).getTime() + DUPE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10)
     const { data: dupes } = await admin
       .from('transactions')
       .select('id, amount, date, vendor')
@@ -215,8 +221,8 @@ export async function confirmInboxItem(
       .eq('movement_type', tx.movement_type)
       .gte('date', dayBefore)
       .lte('date', dayAfter)
-      .gte('amount', tx.amount * 0.99)
-      .lte('amount', tx.amount * 1.01)
+      .gte('amount', tx.amount - 0.5)
+      .lte('amount', tx.amount + 0.5)
       .limit(5)
 
     const realDupe = findDuplicateMatch(
