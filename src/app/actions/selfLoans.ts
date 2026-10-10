@@ -160,6 +160,67 @@ export async function getSelfLoanHistory(loanId: string): Promise<SelfLoanPaymen
   }))
 }
 
+export type SelfLoanMovement = {
+  id: string
+  kind: 'abono' | 'aumento'
+  amount: number
+  date: string
+  notes: string | null
+  from_envelope_id: string | null
+}
+
+// Unified timeline for display — getSelfLoanHistory only ever covered abonos
+// (self_loan_payments), so increaseSelfLoan's draws (recorded straight to
+// envelope_movements, tagged self_loan_id, never written to
+// self_loan_payments) were invisible in the loan's history entirely.
+export async function getSelfLoanMovements(loanId: string): Promise<SelfLoanMovement[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data: loan } = await admin
+    .from('self_loans')
+    .select('id')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!loan) return []
+
+  const [{ data: payments }, { data: increases }] = await Promise.all([
+    admin.from('self_loan_payments')
+      .select('id, amount, payment_date, notes, from_envelope_id')
+      .eq('self_loan_id', loanId),
+    // Increases carry self_loan_id directly on the envelope_movements row;
+    // abonos instead reference self_loan_payment_id, so this never doubles
+    // up with the query above.
+    admin.from('envelope_movements')
+      .select('id, amount, date, notes')
+      .eq('self_loan_id', loanId)
+      .eq('user_id', user.id),
+  ])
+
+  const abonos: SelfLoanMovement[] = (payments ?? []).map(p => ({
+    id: p.id,
+    kind: 'abono' as const,
+    amount: Number(p.amount),
+    date: p.payment_date,
+    notes: (p as { notes?: string | null }).notes ?? null,
+    from_envelope_id: (p as { from_envelope_id?: string | null }).from_envelope_id ?? null,
+  }))
+
+  const aumentos: SelfLoanMovement[] = (increases ?? []).map(m => ({
+    id: m.id,
+    kind: 'aumento' as const,
+    amount: Math.abs(Number(m.amount)),
+    date: m.date ?? '',
+    notes: m.notes,
+    from_envelope_id: null,
+  }))
+
+  return [...abonos, ...aumentos].sort((a, b) => b.date.localeCompare(a.date))
+}
+
 async function applyPaymentMovements(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,

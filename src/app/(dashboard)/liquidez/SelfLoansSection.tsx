@@ -5,9 +5,9 @@ import type { Envelope } from './page'
 import type { SelfLoan } from './page'
 import {
   createSelfLoan, recordSelfLoanPayment, updateLoanSources, increaseSelfLoan,
-  getSelfLoanHistory, updateSelfLoanPayment, deleteSelfLoanPayment, deleteSelfLoan,
+  getSelfLoanMovements, updateSelfLoanPayment, deleteSelfLoanPayment, deleteSelfLoan,
 } from '@/app/actions/selfLoans'
-import type { SelfLoanPayment } from '@/app/actions/selfLoans'
+import type { SelfLoanPayment, SelfLoanMovement } from '@/app/actions/selfLoans'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -705,25 +705,27 @@ function HistoryPanel({
   envelopes: Envelope[]
   onNewPayment: () => void
 }) {
-  const [payments, setPayments]   = useState<SelfLoanPayment[]>([])
+  const [movements, setMovements] = useState<SelfLoanMovement[]>([])
   const [loading, setLoading]     = useState(true)
   const [editId, setEditId]       = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError]         = useState('')
   const [, startDel]              = useTransition()
 
-  useEffect(() => {
-    getSelfLoanHistory(loan.id).then(p => { setPayments(p); setLoading(false) })
-  }, [loan.id])
+  function reload() {
+    getSelfLoanMovements(loan.id).then(m => { setMovements(m); setLoading(false) })
+  }
 
-  function handleDelete(p: SelfLoanPayment) {
-    if (!window.confirm(`¿Eliminar abono de ${fmtCRC(p.amount)} del ${p.payment_date}? Se revertirán los movimientos de sobre asociados.`)) return
+  useEffect(reload, [loan.id])
+
+  function handleDelete(p: SelfLoanMovement) {
+    if (!window.confirm(`¿Eliminar abono de ${fmtCRC(p.amount)} del ${p.date}? Se revertirán los movimientos de sobre asociados.`)) return
     setDeletingId(p.id)
     setError('')
     startDel(async () => {
       const res = await deleteSelfLoanPayment(p.id, loan.id)
       if (res?.error) { setError(res.error); setDeletingId(null); return }
-      setPayments(prev => prev.filter(x => x.id !== p.id))
+      setMovements(prev => prev.filter(x => x.id !== p.id))
       setDeletingId(null)
     })
   }
@@ -733,7 +735,7 @@ function HistoryPanel({
   return (
     <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Historial de abonos</p>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Historial de movimientos</p>
         <button
           onClick={onNewPayment}
           className="text-[9px] font-black text-[#a3e635]/70 uppercase tracking-[0.14em] hover:text-[#a3e635] transition-colors"
@@ -744,54 +746,65 @@ function HistoryPanel({
 
       {loading && <p className="text-[10px] text-zinc-600">Cargando…</p>}
 
-      {!loading && payments.length === 0 && (
-        <p className="text-[10px] text-zinc-600">Sin abonos registrados.</p>
+      {!loading && movements.length === 0 && (
+        <p className="text-[10px] text-zinc-600">Sin movimientos registrados.</p>
       )}
 
-      {!loading && payments.length > 0 && (
+      {!loading && movements.length > 0 && (
         <div className="space-y-1">
-          {payments.map(p => (
-            <div key={p.id}>
-              <div className="flex items-center justify-between gap-3 py-1.5">
-                <div className="min-w-0">
-                  <p className="text-xs tabular-nums text-zinc-200 font-semibold">{fmtCRC(p.amount)}</p>
-                  <p className="text-[9px] text-zinc-600">
-                    {new Date(p.payment_date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    {p.from_envelope_id && envelopeNameById[p.from_envelope_id] && (
-                      <span className="ml-1.5 text-zinc-700">· {envelopeNameById[p.from_envelope_id]}</span>
-                    )}
-                    {p.notes && <span className="ml-1.5 text-zinc-700">· {p.notes}</span>}
-                  </p>
+          {movements.map(p => {
+            const isAumento = p.kind === 'aumento'
+            // The original draw and later increases both post to
+            // envelope_movements the same way — distinguish them by notes
+            // text only for the label, not by a separate kind.
+            const aumentoLabel = p.notes?.includes('(aumento)') ? 'Aumento' : 'Préstamo inicial'
+            return (
+              <div key={p.id}>
+                <div className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="min-w-0">
+                    <p className={`text-xs tabular-nums font-semibold ${isAumento ? 'text-rose-400' : 'text-[#a3e635]'}`}>
+                      {isAumento ? '+' : '−'}{fmtCRC(p.amount)}
+                      <span className="ml-1.5 text-[9px] font-black text-zinc-600 uppercase tracking-wider">
+                        {isAumento ? aumentoLabel : 'Abono'}
+                      </span>
+                    </p>
+                    <p className="text-[9px] text-zinc-600">
+                      {new Date(p.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {p.from_envelope_id && envelopeNameById[p.from_envelope_id] && (
+                        <span className="ml-1.5 text-zinc-700">· {envelopeNameById[p.from_envelope_id]}</span>
+                      )}
+                      {p.notes && <span className="ml-1.5 text-zinc-700">· {p.notes}</span>}
+                    </p>
+                  </div>
+                  {!isAumento && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setEditId(editId === p.id ? null : p.id)}
+                        className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em] hover:text-[#a3e635]/70 transition-colors"
+                      >
+                        {editId === p.id ? 'Cerrar' : 'Editar'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        disabled={deletingId === p.id}
+                        className="text-[9px] font-black text-zinc-700 uppercase tracking-[0.12em] hover:text-rose-400 transition-colors disabled:opacity-40"
+                      >
+                        {deletingId === p.id ? '…' : 'Borrar'}
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => setEditId(editId === p.id ? null : p.id)}
-                    className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.12em] hover:text-[#a3e635]/70 transition-colors"
-                  >
-                    {editId === p.id ? 'Cerrar' : 'Editar'}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(p)}
-                    disabled={deletingId === p.id}
-                    className="text-[9px] font-black text-zinc-700 uppercase tracking-[0.12em] hover:text-rose-400 transition-colors disabled:opacity-40"
-                  >
-                    {deletingId === p.id ? '…' : 'Borrar'}
-                  </button>
-                </div>
+                {!isAumento && editId === p.id && (
+                  <EditPaymentForm
+                    payment={{ id: p.id, amount: p.amount, payment_date: p.date, notes: p.notes, from_envelope_id: p.from_envelope_id }}
+                    loanId={loan.id}
+                    envelopes={envelopes}
+                    onDone={() => { setEditId(null); reload() }}
+                  />
+                )}
               </div>
-              {editId === p.id && (
-                <EditPaymentForm
-                  payment={p}
-                  loanId={loan.id}
-                  envelopes={envelopes}
-                  onDone={() => {
-                    setEditId(null)
-                    getSelfLoanHistory(loan.id).then(setPayments)
-                  }}
-                />
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
