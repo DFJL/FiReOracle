@@ -6,6 +6,7 @@ import type { SelfLoan } from './page'
 import {
   createSelfLoan, recordSelfLoanPayment, updateLoanSources, increaseSelfLoan,
   getSelfLoanMovements, updateSelfLoanPayment, deleteSelfLoanPayment, deleteSelfLoan,
+  updateSelfLoanIncrease, deleteSelfLoanIncrease,
 } from '@/app/actions/selfLoans'
 import type { SelfLoanPayment, SelfLoanMovement } from '@/app/actions/selfLoans'
 
@@ -696,6 +697,83 @@ function EditPaymentForm({
   )
 }
 
+function EditIncreaseForm({
+  movement,
+  loanId,
+  envelopes,
+  onDone,
+}: {
+  movement: SelfLoanMovement
+  loanId: string
+  envelopes: Envelope[]
+  onDone: () => void
+}) {
+  // Strip the "Autopréstamo (aumento): " / "Autopréstamo (aumento)" prefix back out —
+  // updateSelfLoanIncrease re-adds it, so editing the raw notes would double it up.
+  const rawNotes = movement.notes?.replace(/^Autopréstamo \(aumento\):?\s*/, '') ?? ''
+
+  const [amount, setAmount] = useState(String(movement.amount))
+  const [date, setDate]     = useState(movement.date)
+  const [notes, setNotes]   = useState(rawNotes)
+  const [envelopeId, setEnvelopeId] = useState(movement.envelope_id ?? '')
+  const [error, setError]   = useState('')
+  const [isPending, start]  = useTransition()
+
+  function save() {
+    const amt = parseFloat(amount.replace(/,/g, ''))
+    if (!amt || amt <= 0) { setError('Monto inválido'); return }
+    if (!envelopeId) { setError('Elegí el sobre debitado'); return }
+    setError('')
+    start(async () => {
+      const res = await updateSelfLoanIncrease(movement.id, loanId, {
+        amount: amt, date, notes, envelope_id: envelopeId,
+      })
+      if (res?.error) { setError(res.error); return }
+      onDone()
+    })
+  }
+
+  const lbl = 'text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1'
+  const inp = 'w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40'
+
+  return (
+    <div className="mt-2 space-y-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className={lbl}>Monto ₡</p>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className={inp} />
+        </div>
+        <div>
+          <p className={lbl}>Fecha</p>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp} />
+        </div>
+        <div className="col-span-2">
+          <p className={lbl}>Notas</p>
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="..." className={inp} />
+        </div>
+        <div className="col-span-2">
+          <p className={lbl}>Sobre debitado</p>
+          <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inp}>
+            <option value="">— seleccioná un sobre —</option>
+            {envelopes.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+      </div>
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={save} disabled={isPending}
+          className="px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black disabled:opacity-50">
+          {isPending ? '...' : 'Guardar'}
+        </button>
+        <button onClick={onDone}
+          className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-zinc-400 text-xs">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function HistoryPanel({
   loan,
   envelopes,
@@ -724,6 +802,18 @@ function HistoryPanel({
     setError('')
     startDel(async () => {
       const res = await deleteSelfLoanPayment(p.id, loan.id)
+      if (res?.error) { setError(res.error); setDeletingId(null); return }
+      setMovements(prev => prev.filter(x => x.id !== p.id))
+      setDeletingId(null)
+    })
+  }
+
+  function handleDeleteIncrease(p: SelfLoanMovement) {
+    if (!window.confirm(`¿Eliminar aumento de ${fmtCRC(p.amount)} del ${p.date}? El saldo del préstamo baja en esa misma cantidad.`)) return
+    setDeletingId(p.id)
+    setError('')
+    startDel(async () => {
+      const res = await deleteSelfLoanIncrease(p.id, loan.id)
       if (res?.error) { setError(res.error); setDeletingId(null); return }
       setMovements(prev => prev.filter(x => x.id !== p.id))
       setDeletingId(null)
@@ -776,7 +866,7 @@ function HistoryPanel({
                       {p.notes && <span className="ml-1.5 text-zinc-700">· {p.notes}</span>}
                     </p>
                   </div>
-                  {!isAumento && (
+                  {(!isAumento || p.editable) && (
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => setEditId(editId === p.id ? null : p.id)}
@@ -785,7 +875,7 @@ function HistoryPanel({
                         {editId === p.id ? 'Cerrar' : 'Editar'}
                       </button>
                       <button
-                        onClick={() => handleDelete(p)}
+                        onClick={() => isAumento ? handleDeleteIncrease(p) : handleDelete(p)}
                         disabled={deletingId === p.id}
                         className="text-[9px] font-black text-zinc-700 uppercase tracking-[0.12em] hover:text-rose-400 transition-colors disabled:opacity-40"
                       >
@@ -797,6 +887,14 @@ function HistoryPanel({
                 {!isAumento && editId === p.id && (
                   <EditPaymentForm
                     payment={{ id: p.id, amount: p.amount, payment_date: p.date, notes: p.notes, from_envelope_id: p.from_envelope_id }}
+                    loanId={loan.id}
+                    envelopes={envelopes}
+                    onDone={() => { setEditId(null); reload() }}
+                  />
+                )}
+                {isAumento && p.editable && editId === p.id && (
+                  <EditIncreaseForm
+                    movement={p}
                     loanId={loan.id}
                     envelopes={envelopes}
                     onDone={() => { setEditId(null); reload() }}

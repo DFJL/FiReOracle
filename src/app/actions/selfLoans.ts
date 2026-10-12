@@ -167,6 +167,8 @@ export type SelfLoanMovement = {
   date: string
   notes: string | null
   from_envelope_id: string | null
+  envelope_id: string | null   // aumento only: which envelope was debited for the draw
+  editable: boolean            // aumento only: false for the original loan draw (handled by deleteSelfLoan/updateLoanSources instead)
 }
 
 // Unified timeline for display — getSelfLoanHistory only ever covered abonos
@@ -195,7 +197,7 @@ export async function getSelfLoanMovements(loanId: string): Promise<SelfLoanMove
     // abonos instead reference self_loan_payment_id, so this never doubles
     // up with the query above.
     admin.from('envelope_movements')
-      .select('id, amount, date, notes')
+      .select('id, amount, date, notes, envelope_id')
       .eq('self_loan_id', loanId)
       .eq('user_id', user.id),
   ])
@@ -207,6 +209,8 @@ export async function getSelfLoanMovements(loanId: string): Promise<SelfLoanMove
     date: p.payment_date,
     notes: (p as { notes?: string | null }).notes ?? null,
     from_envelope_id: (p as { from_envelope_id?: string | null }).from_envelope_id ?? null,
+    envelope_id: null,
+    editable: true,
   }))
 
   const aumentos: SelfLoanMovement[] = (increases ?? []).map(m => ({
@@ -216,6 +220,8 @@ export async function getSelfLoanMovements(loanId: string): Promise<SelfLoanMove
     date: m.date ?? '',
     notes: m.notes,
     from_envelope_id: null,
+    envelope_id: (m as { envelope_id?: string | null }).envelope_id ?? null,
+    editable: !!m.notes?.includes('(aumento)'),
   }))
 
   return [...abonos, ...aumentos].sort((a, b) => b.date.localeCompare(a.date))
@@ -580,6 +586,107 @@ export async function increaseSelfLoan(
   const newOriginal = Number(loan.original_amount) + data.amount
   const newStatus = Number(loan.amount_repaid) === 0 ? 'pending' : Number(loan.amount_repaid) >= newOriginal ? 'paid' : 'partial'
   await admin.from('self_loans').update({ status: newStatus }).eq('id', loanId)
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
+// Edits a single aumento (draw) already recorded via increaseSelfLoan. Only
+// handles loans drawn from one envelope (source_envelope_id, no
+// envelope_split) — a split increase posts one envelope_movements row per
+// source envelope with no batch id tying them together, so editing one row
+// in isolation would desync envelope_split's running totals. Refuses rather
+// than risk corrupting that split instead of silently doing it wrong.
+export async function updateSelfLoanIncrease(
+  movementId: string,
+  loanId: string,
+  data: { amount: number; date: string; notes?: string; envelope_id: string },
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+  if (!data.amount || data.amount <= 0) return { error: 'Monto inválido' }
+  if (!data.envelope_id) return { error: 'Falta el sobre de origen' }
+
+  const admin = createAdminClient()
+
+  const { data: loan } = await admin
+    .from('self_loans')
+    .select('id, original_amount, amount_repaid, envelope_split')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .single()
+  if (!loan) return { error: 'No autorizado' }
+  if (loan.envelope_split) return { error: 'Este préstamo tiene varias fuentes — no se puede editar un aumento individual todavía' }
+
+  const { data: mov } = await admin
+    .from('envelope_movements')
+    .select('id, amount, notes')
+    .eq('id', movementId)
+    .eq('self_loan_id', loanId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!mov) return { error: 'Movimiento no encontrado' }
+  if (!mov.notes?.includes('(aumento)')) return { error: 'Solo se pueden editar aumentos, no el préstamo inicial' }
+
+  const oldAmount = Math.abs(Number(mov.amount))
+  const notes = `Autopréstamo (aumento)${data.notes ? `: ${data.notes}` : ''}`
+
+  const { error: movErr } = await admin.from('envelope_movements')
+    .update({ envelope_id: data.envelope_id, date: data.date, amount: -Math.abs(data.amount), notes })
+    .eq('id', movementId)
+  if (movErr) return { error: movErr.message }
+
+  const newOriginal = Number(loan.original_amount) - oldAmount + data.amount
+  const newStatus = Number(loan.amount_repaid) === 0 ? 'pending' : Number(loan.amount_repaid) >= newOriginal ? 'paid' : 'partial'
+
+  const { error: loanErr } = await admin.from('self_loans')
+    .update({ original_amount: newOriginal, status: newStatus })
+    .eq('id', loanId)
+  if (loanErr) return { error: loanErr.message }
+
+  revalidatePath('/liquidez')
+  return { ok: true }
+}
+
+export async function deleteSelfLoanIncrease(movementId: string, loanId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+
+  const { data: loan } = await admin
+    .from('self_loans')
+    .select('id, original_amount, amount_repaid, envelope_split')
+    .eq('id', loanId)
+    .eq('user_id', user.id)
+    .single()
+  if (!loan) return { error: 'No autorizado' }
+  if (loan.envelope_split) return { error: 'Este préstamo tiene varias fuentes — no se puede eliminar un aumento individual todavía' }
+
+  const { data: mov } = await admin
+    .from('envelope_movements')
+    .select('id, amount, notes')
+    .eq('id', movementId)
+    .eq('self_loan_id', loanId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (!mov) return { error: 'Movimiento no encontrado' }
+  if (!mov.notes?.includes('(aumento)')) return { error: 'Solo se pueden eliminar aumentos, no el préstamo inicial' }
+
+  const oldAmount = Math.abs(Number(mov.amount))
+
+  const { error: delErr } = await admin.from('envelope_movements').delete().eq('id', movementId)
+  if (delErr) return { error: delErr.message }
+
+  const newOriginal = Math.max(0, Number(loan.original_amount) - oldAmount)
+  const newStatus = Number(loan.amount_repaid) === 0 ? 'pending' : Number(loan.amount_repaid) >= newOriginal ? 'paid' : 'partial'
+
+  const { error: loanErr } = await admin.from('self_loans')
+    .update({ original_amount: newOriginal, status: newStatus })
+    .eq('id', loanId)
+  if (loanErr) return { error: loanErr.message }
 
   revalidatePath('/liquidez')
   return { ok: true }
