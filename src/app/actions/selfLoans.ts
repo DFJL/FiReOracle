@@ -171,6 +171,17 @@ export type SelfLoanMovement = {
   editable: boolean            // aumento only: false for the original loan draw (handled by deleteSelfLoan/updateLoanSources instead)
 }
 
+// The only draw whose envelope_movements notes start with exactly this —
+// createAutoprestamo/createSelfLoan's genesis withdrawal. Every later draw
+// — via increaseSelfLoan ("Autopréstamo (aumento)...") or a transaction
+// linked to the loan ("Tx: concepto...") — starts differently, so this is
+// a reliable way to tell "the original loan" apart from "a later draw"
+// without caring which of those two paths created it.
+const GENESIS_DRAW_PREFIX = 'Autopréstamo: '
+function isLaterDraw(notes: string | null): boolean {
+  return !!notes && !notes.startsWith(GENESIS_DRAW_PREFIX)
+}
+
 // Unified timeline for display — getSelfLoanHistory only ever covered abonos
 // (self_loan_payments), so increaseSelfLoan's draws (recorded straight to
 // envelope_movements, tagged self_loan_id, never written to
@@ -221,7 +232,7 @@ export async function getSelfLoanMovements(loanId: string): Promise<SelfLoanMove
     notes: m.notes,
     from_envelope_id: null,
     envelope_id: (m as { envelope_id?: string | null }).envelope_id ?? null,
-    editable: !!m.notes?.includes('(aumento)'),
+    editable: isLaterDraw(m.notes),
   }))
 
   return [...abonos, ...aumentos].sort((a, b) => b.date.localeCompare(a.date))
@@ -656,7 +667,7 @@ export async function updateSelfLoanIncrease(
     .eq('user_id', user.id)
     .maybeSingle()
   if (!mov) return { error: 'Movimiento no encontrado' }
-  if (!mov.notes?.includes('(aumento)')) return { error: 'Solo se pueden editar aumentos, no el préstamo inicial' }
+  if (!isLaterDraw(mov.notes)) return { error: 'Solo se pueden editar aumentos, no el préstamo inicial' }
 
   const oldAmount = Math.abs(Number(mov.amount))
   const notes = `Autopréstamo (aumento)${data.notes ? `: ${data.notes}` : ''}`
@@ -702,7 +713,7 @@ export async function deleteSelfLoanIncrease(movementId: string, loanId: string)
     .eq('user_id', user.id)
     .maybeSingle()
   if (!mov) return { error: 'Movimiento no encontrado' }
-  if (!mov.notes?.includes('(aumento)')) return { error: 'Solo se pueden eliminar aumentos, no el préstamo inicial' }
+  if (!isLaterDraw(mov.notes)) return { error: 'Solo se pueden eliminar aumentos, no el préstamo inicial' }
 
   const oldAmount = Math.abs(Number(mov.amount))
 

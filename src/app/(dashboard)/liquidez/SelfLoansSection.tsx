@@ -879,9 +879,10 @@ function HistoryPanel({
           {movements.map(p => {
             const isAumento = p.kind === 'aumento'
             // The original draw and later increases both post to
-            // envelope_movements the same way — distinguish them by notes
-            // text only for the label, not by a separate kind.
-            const aumentoLabel = p.notes?.includes('(aumento)') ? 'Aumento' : 'Préstamo inicial'
+            // envelope_movements the same way — editable (server-computed:
+            // not the genesis note) is what actually distinguishes them, so
+            // reuse it for the label too instead of a second, looser check.
+            const aumentoLabel = p.editable ? 'Aumento' : 'Préstamo inicial'
             return (
               <div key={p.id}>
                 <div className="flex items-center justify-between gap-3 py-1.5">

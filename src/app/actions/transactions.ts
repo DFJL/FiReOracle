@@ -152,6 +152,10 @@ async function applySideEffects(
       date: input.date,
       notes: `Tx: ${input.concept || input.vendor || ''}`.trim(),
       ...(input.source_tx_id ? { source_tx_id: input.source_tx_id } : {}),
+      // Tags this draw as belonging to the self-loan so it shows up in its
+      // history (getSelfLoanMovements) instead of being an invisible plain
+      // withdrawal — same self_loan_id convention increaseSelfLoan uses.
+      ...(input.loan_id ? { self_loan_id: input.loan_id } : {}),
     } as never)
     if (error) return error.message
     revalidatePath('/liquidez')
@@ -196,15 +200,40 @@ async function applySideEffects(
   } else if (input.loan_id) {
     const { data: loan } = await admin
       .from('self_loans')
-      .select('original_amount')
+      .select('original_amount, source_envelope_id, envelope_split')
       .eq('id', input.loan_id)
       .eq('user_id', userId)
       .maybeSingle()
     if (!loan) return 'Autopréstamo no encontrado'
 
+    const updates: { original_amount: number; source_envelope_id?: null; envelope_split?: { envelope_id: string; amount: number }[] } = {
+      original_amount: Number(loan.original_amount) + input.amount,
+    }
+
+    // A debit-side draw (gasto) names the envelope it came from — fold it
+    // into envelope_split so this envelope's contribution is tracked for
+    // repayment credit, same as a draw made via "+ Aumentar" on the loan
+    // itself. Without this, linking a transaction to a self-loan from an
+    // envelope that wasn't already a registered source grew original_amount
+    // but left that envelope invisible to the loan — it would never get its
+    // share back when the loan is repaid.
+    if (input.debit_envelope_id) {
+      const rawSplit = loan.envelope_split
+      const split: { envelope_id: string; amount: number }[] = Array.isArray(rawSplit)
+        ? (rawSplit as { envelope_id: string; amount: number }[])
+        : loan.source_envelope_id
+          ? [{ envelope_id: loan.source_envelope_id, amount: Number(loan.original_amount) }]
+          : []
+      const idx = split.findIndex(e => e.envelope_id === input.debit_envelope_id)
+      if (idx >= 0) split[idx] = { ...split[idx], amount: split[idx].amount + input.amount }
+      else split.push({ envelope_id: input.debit_envelope_id, amount: input.amount })
+      updates.source_envelope_id = null
+      updates.envelope_split = split
+    }
+
     const { error } = await admin
       .from('self_loans')
-      .update({ original_amount: Number(loan.original_amount) + input.amount })
+      .update(updates)
       .eq('id', input.loan_id)
     if (error) return error.message
     revalidatePath('/liquidez')
