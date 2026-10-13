@@ -23,6 +23,17 @@ type Category = {
   is_passive_income: boolean
 }
 
+// Same labeling TransactionEntryFAB uses — shows custodio/parent context so
+// two envelopes with the same name at different nesting levels (e.g. two
+// "Mariam" sobres) stay distinguishable once every level is listed, not just leaves.
+function envelopeLabel(env: Envelope, all: Envelope[]) {
+  const custodio = env.custodio ?? ''
+  if (!env.parent_envelope_id) return custodio ? `${custodio} › ${env.name}` : env.name
+  const parent = all.find(e => e.id === env.parent_envelope_id)
+  if (!parent) return custodio ? `${custodio} › ${env.name}` : env.name
+  return custodio ? `${custodio} › ${parent.name} › ${env.name}` : `${parent.name} › ${env.name}`
+}
+
 type ConnectedAccount = {
   id: string
   email: string
@@ -475,27 +486,25 @@ function ItemCard({
               )}
             </div>
 
-            {/* Envelope — leaf only (parents are containers, not valid movement targets) */}
-            {envelopes.length > 0 && (() => {
-              const parentIds = new Set(envelopes.filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string))
-              const leafEnvelopes = envelopes.filter(e => !parentIds.has(e.id))
-              return (
-                <div className="col-span-2">
-                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Sobre / Bolsillo</label>
-                  <select
-                    value={envelopeId}
-                    onChange={e => setEnvelopeId(e.target.value)}
-                    disabled={isProcessed}
-                    className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
-                  >
-                    <option value="" className="bg-[#111]">(ninguno)</option>
-                    {leafEnvelopes.map(env => (
-                      <option key={env.id} value={env.id} className="bg-[#111]">{env.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )
-            })()}
+            {/* Envelope — every active envelope at every nesting level, same as
+                TransactionEntryFAB, so a sub-sobre can be targeted directly
+                instead of only its top-level container. */}
+            {envelopes.length > 0 && (
+              <div className="col-span-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Sobre / Bolsillo</label>
+                <select
+                  value={envelopeId}
+                  onChange={e => setEnvelopeId(e.target.value)}
+                  disabled={isProcessed}
+                  className="mt-1 w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-[#a3e635]/40 disabled:opacity-50"
+                >
+                  <option value="" className="bg-[#111]">(ninguno)</option>
+                  {envelopes.map(env => (
+                    <option key={env.id} value={env.id} className="bg-[#111]">{envelopeLabel(env, envelopes)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Loan selector — only for expenses */}
             {loans.length > 0 && fields.movement_type === 'expense' && (
