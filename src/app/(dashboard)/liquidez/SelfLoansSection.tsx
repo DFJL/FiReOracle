@@ -501,16 +501,32 @@ function PaymentPanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes:
   )
 }
 
-function IncreasePanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void }) {
+function IncreasePanel({ loan, envelopes, onClose }: { loan: SelfLoan; envelopes: Envelope[]; onClose: () => void }) {
   const [amount, setAmount] = useState('')
   const [date, setDate]     = useState(new Date().toISOString().slice(0, 10))
   const [notes, setNotes]   = useState('')
+  // '' = usar las fuentes actuales del préstamo, proporcional (comportamiento de siempre).
+  // Un id específico = este aumento sale entero de ese sobre, sea una fuente ya
+  // conocida del préstamo o una nueva — así un segundo pago desde un sobre distinto
+  // queda registrado en el autopréstamo en vez de como transacción suelta invisible
+  // para el saldo que le debés a ese sobre.
+  const [envelopeId, setEnvelopeId] = useState('')
   const [error, setError]   = useState('')
   const [isPending, start]  = useTransition()
+
+  const existingSourceIds = new Set(
+    loan.envelope_split && loan.envelope_split.length > 0
+      ? loan.envelope_split.map(s => s.envelope_id)
+      : loan.source_envelope_id ? [loan.source_envelope_id] : []
+  )
 
   const previewPortions: { name: string; portion: number }[] = (() => {
     const amt = parseFloat(amount.replace(/,/g, ''))
     if (!amt || amt <= 0) return []
+    if (envelopeId) {
+      const env = envelopes.find(e => e.id === envelopeId)
+      return env ? [{ name: env.name, portion: amt }] : []
+    }
     if (loan.envelope_split && loan.envelope_split.length > 0) {
       const totalSplit = loan.envelope_split.reduce((s, e) => s + e.amount, 0)
       if (totalSplit <= 0) return []
@@ -531,7 +547,9 @@ function IncreasePanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void 
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
     setError('')
     start(async () => {
-      const res = await increaseSelfLoan(loan.id, { amount: amt, date, notes: notes || undefined })
+      const res = await increaseSelfLoan(loan.id, {
+        amount: amt, date, notes: notes || undefined, envelope_id: envelopeId || undefined,
+      })
       if (res?.error) { setError(res.error); return }
       onClose()
     })
@@ -540,8 +558,24 @@ function IncreasePanel({ loan, onClose }: { loan: SelfLoan; onClose: () => void 
   return (
     <div className="mx-4 mb-2 mt-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 space-y-3">
       <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">
-        Aumentar autopréstamo · como línea de crédito, saca más del mismo sobre
+        Aumentar autopréstamo · como línea de crédito
       </p>
+
+      <div>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-1">¿De qué sobre sale?</p>
+        <select
+          value={envelopeId}
+          onChange={e => setEnvelopeId(e.target.value)}
+          className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#a3e635]/40"
+        >
+          <option value="">— fuentes actuales del préstamo (proporcional) —</option>
+          {envelopes.map(e => (
+            <option key={e.id} value={e.id}>
+              {e.name}{!existingSourceIds.has(e.id) ? ' (nueva fuente)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {previewPortions.length > 0 && (
         <div className="space-y-0.5">
@@ -1122,7 +1156,7 @@ export function SelfLoansSection({ loans, envelopes }: { loans: SelfLoan[]; enve
                         ← Historial
                       </button>
                     </div>
-                    <IncreasePanel loan={loan} onClose={() => setOpenPanel({ type: 'history' })} />
+                    <IncreasePanel loan={loan} envelopes={envelopes} onClose={() => setOpenPanel({ type: 'history' })} />
                   </div>
                 )}
 

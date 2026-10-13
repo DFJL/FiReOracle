@@ -509,15 +509,19 @@ export async function deleteSelfLoan(loanId: string) {
 }
 
 // Draws more against an existing autopréstamo — like a credit line — instead
-// of only ever being able to pay it down. Withdraws the extra amount from the
-// same envelope(s) that funded the original loan, split in the same
-// proportion, and bumps original_amount so the balance owed reflects the new
-// total. Deliberately mirrors only envelope_movements (no `transactions`
-// row) — same as the original creation — so a temporary/reimbursable loan
-// stays invisible to spending analytics no matter how many draws it gets.
+// of only ever being able to pay it down. By default withdraws the extra
+// amount from the same envelope(s) that funded the original loan, split in
+// the same proportion. Pass `envelope_id` to draw this specific increase from
+// one envelope instead — including one that wasn't a source before — merging
+// it into envelope_split so its contribution is tracked for repayment credit
+// (the bug this fixed: a second draw made as a plain transaction from a new
+// envelope never touched envelope_split, so that envelope was never repaid).
+// Deliberately mirrors only envelope_movements (no `transactions` row) — same
+// as the original creation — so a temporary/reimbursable loan stays invisible
+// to spending analytics no matter how many draws it gets.
 export async function increaseSelfLoan(
   loanId: string,
-  data: { amount: number; date: string; notes?: string },
+  data: { amount: number; date: string; notes?: string; envelope_id?: string },
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -543,7 +547,32 @@ export async function increaseSelfLoan(
       ? Object.entries(rawSplit as Record<string, number>).map(([envelope_id, amount]) => ({ envelope_id, amount: Number(amount) }))
       : null
 
-  if (split && split.length > 0) {
+  if (data.envelope_id) {
+    const { error: movErr } = await admin.from('envelope_movements').insert({
+      user_id: user.id, envelope_id: data.envelope_id, date: data.date,
+      amount: -Math.abs(data.amount), movement_type: 'retiro', notes, self_loan_id: loanId,
+    })
+    if (movErr) return { error: movErr.message }
+
+    // Normalize whatever sources the loan already had into a split array,
+    // then fold this draw in — incrementing if envelope_id is already a
+    // source, appending a new entry if it's not.
+    const mergedSplit: { envelope_id: string; amount: number }[] = split && split.length > 0
+      ? [...split]
+      : loan.source_envelope_id
+        ? [{ envelope_id: loan.source_envelope_id, amount: Number(loan.original_amount) }]
+        : []
+    const idx = mergedSplit.findIndex(e => e.envelope_id === data.envelope_id)
+    if (idx >= 0) mergedSplit[idx] = { ...mergedSplit[idx], amount: mergedSplit[idx].amount + data.amount }
+    else mergedSplit.push({ envelope_id: data.envelope_id, amount: data.amount })
+
+    const { error } = await admin.from('self_loans').update({
+      original_amount: Number(loan.original_amount) + data.amount,
+      source_envelope_id: null,
+      envelope_split: mergedSplit,
+    }).eq('id', loanId)
+    if (error) return { error: error.message }
+  } else if (split && split.length > 0) {
     const totalSplit = split.reduce((s, e) => s + Number(e.amount), 0)
     if (totalSplit <= 0) return { error: 'Fuentes del préstamo inválidas' }
     let drawn = 0
