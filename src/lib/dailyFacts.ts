@@ -13,12 +13,28 @@ function fmtDate(d: string): string {
   return new Date(d + 'T12:00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-// Deterministic pick so the same fact shows all day and only rotates once
-// a day per user — no extra table/cron needed to "remember" today's pick.
-function seededIndex(seed: string, mod: number): number {
+// Deterministic PRNG (mulberry32) seeded from a string — same sequence every
+// time for the same seed, no state stored anywhere.
+function seededRng(seedStr: string): () => number {
   let hash = 0
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0
-  return Math.abs(hash) % mod
+  for (let i = 0; i < seedStr.length; i++) hash = (hash * 31 + seedStr.charCodeAt(i)) | 0
+  let seed = hash >>> 0
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function seededShuffle<T>(arr: T[], seedStr: string): T[] {
+  const rng = seededRng(seedStr)
+  const result = [...arr]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
 }
 
 const WEEKDAYS = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados']
@@ -338,6 +354,16 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
   }
 
   if (facts.length === 0) return null
-  const idx = seededIndex(`${userId}-${todayStr}`, facts.length)
-  return facts[idx]
+
+  // Cycle through every available fact once before any of them repeats,
+  // instead of a flat hash-per-day pick that could (and did) land on the
+  // same fact again just a couple days later with no guarantee of hitting
+  // the rest of the pool first. Each block of facts.length days is its own
+  // shuffled cycle, reseeded per cycle so the order itself keeps changing.
+  const daysSinceEpoch = Math.floor(new Date(todayStr + 'T00:00:00Z').getTime() / 86_400_000)
+  const cycleLen = facts.length
+  const cycleNumber = Math.floor(daysSinceEpoch / cycleLen)
+  const dayInCycle = daysSinceEpoch % cycleLen
+  const order = seededShuffle(facts.map((_, i) => i), `${userId}-cycle-${cycleNumber}-len-${cycleLen}`)
+  return facts[order[dayInCycle]]
 }
