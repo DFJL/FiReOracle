@@ -13,6 +13,11 @@ function fmtDate(d: string): string {
   return new Date(d + 'T12:00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+function fmtMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('es-CR', { month: 'long', year: 'numeric' })
+}
+
 // Deterministic PRNG (mulberry32) seeded from a string — same sequence every
 // time for the same seed, no state stored anywhere.
 function seededRng(seedStr: string): () => number {
@@ -35,6 +40,14 @@ function seededShuffle<T>(arr: T[], seedStr: string): T[] {
     ;[result[i], result[j]] = [result[j], result[i]]
   }
   return result
+}
+
+// Picks one phrasing out of several for the same underlying fact, seeded
+// independently of which fact gets chosen — so even a fact that recurs
+// across cycles doesn't read like the exact same sentence every time.
+function pickPhrasing(variants: string[], seedStr: string): string {
+  const rng = seededRng(seedStr)
+  return variants[Math.floor(rng() * variants.length)]
 }
 
 const WEEKDAYS = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados']
@@ -73,7 +86,7 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
       .order('snapshot_date', { ascending: true }),
     admin.from('transaction_categories').select('code, parent_code'),
     admin.from('user_financial_config').select('*').eq('user_id', userId).maybeSingle(),
-    admin.from('savings_envelopes').select('id, parent_envelope_id').eq('user_id', userId).eq('is_active', true),
+    admin.from('savings_envelopes').select('id, name, parent_envelope_id').eq('user_id', userId).eq('is_active', true),
     admin.from('envelope_movements').select('amount, movement_type, envelope_id').eq('user_id', userId),
     admin.from('user_investment_buckets')
       .select('id, name, bucket_type, vendors, concept_map, account_id, baseline_date, baseline_value_crc')
@@ -90,12 +103,30 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
   const facts: DailyFact[] = []
   const expenseTxs = txs.filter(t => (t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal') && t.amount > 0)
 
+  const firstDate = txs.reduce((min, t) => (t.date && t.date < min ? t.date : min), txs[0].date ?? todayStr)
+  const daysSince = (dateStr: string) =>
+    Math.max(1, Math.floor((now.getTime() - new Date(dateStr + 'T12:00:00').getTime()) / 86_400_000))
+
+  // Shared seed for phrasing variety — one draw per day, independent of
+  // which fact ends up chosen, so the tone doesn't feel templated.
+  const phraseSeed = `${userId}-${todayStr}-phrasing`
+
+  const parentEnvelopeIds = new Set(
+    (envelopesRaw ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
+  )
+  const envelopeNameById = Object.fromEntries((envelopesRaw ?? []).map(e => [e.id, (e as { name?: string | null }).name ?? '']))
+
   // 1. Biggest single expense ever
   if (expenseTxs.length > 0) {
     const biggest = expenseTxs.reduce((a, b) => (b.amount > a.amount ? b : a))
+    const detail = biggest.concept ? ` (${biggest.concept})` : ''
     facts.push({
       emoji: '💸',
-      text: `Tu gasto más grande registrado es de ${fmtCRC(biggest.amount)}, el ${fmtDate(biggest.date!)}${biggest.concept ? ` (${biggest.concept})` : ''}.`,
+      text: pickPhrasing([
+        `Tu gasto más grande registrado es de ${fmtCRC(biggest.amount)}, el ${fmtDate(biggest.date!)}${detail}.`,
+        `El récord de gasto en una sola transacción lo tenés vos: ${fmtCRC(biggest.amount)}${detail}, el ${fmtDate(biggest.date!)}.`,
+        `¿Te acordás del ${fmtDate(biggest.date!)}? Ahí hiciste tu gasto más grande hasta ahora: ${fmtCRC(biggest.amount)}${detail}.`,
+      ], `${phraseSeed}-biggest`),
     })
   }
 
@@ -117,9 +148,57 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
   }
   const topVendor = Object.entries(vendorTotals).sort((a, b) => b[1] - a[1])[0]
   if (topVendor) {
+    const [name, total] = topVendor
     facts.push({
       emoji: '🛍️',
-      text: `${topVendor[0]} es tu comercio histórico número 1 — llevás ${fmtCRC(topVendor[1])} gastados ahí en total.`,
+      text: pickPhrasing([
+        `${name} es tu comercio histórico número 1 — llevás ${fmtCRC(total)} gastados ahí en total.`,
+        `Nadie se lleva más plata tuya que ${name}: ${fmtCRC(total)} acumulados a lo largo de tu historial.`,
+        `Si tuvieras que nombrar un lugar favorito según tu billetera, sería ${name} — ${fmtCRC(total)} invertidos ahí.`,
+      ], `${phraseSeed}-topvendor`),
+    })
+  }
+
+  // 3b. Vendor frequency — different axis than "spent the most": who you see
+  // most *often*, even if each visit is modest.
+  const vendorStats: Record<string, { total: number; count: number }> = {}
+  for (const t of expenseTxs) {
+    const v = (t.vendor ?? '').trim()
+    if (!v || v.toLowerCase() === 'na') continue
+    const s = (vendorStats[v] ??= { total: 0, count: 0 })
+    s.total += t.amount
+    s.count += 1
+  }
+  const mostFrequent = Object.entries(vendorStats).filter(([, s]) => s.count >= 5).sort((a, b) => b[1].count - a[1].count)[0]
+  if (mostFrequent) {
+    const [name, s] = mostFrequent
+    const everyDays = Math.round(daysSince(firstDate) / s.count)
+    facts.push({
+      emoji: '🔁',
+      text: pickPhrasing([
+        `${name} es donde más repetís: ${s.count} transacciones, una cada ${everyDays} días en promedio.`,
+        `En promedio volvés a ${name} cada ${everyDays} días — ${s.count} veces en total.`,
+      ], `${phraseSeed}-frequency`),
+    })
+  }
+
+  // 3c. "Gasto hormiga" — frequent small-ticket vendor whose lifetime total
+  // becomes surprising once annualized. The aha is the contrast between
+  // "feels small each time" and "adds up to real money per year."
+  const hormiga = Object.entries(vendorStats)
+    .filter(([, s]) => s.count >= 8 && s.total / s.count < 15_000)
+    .sort((a, b) => b[1].total - a[1].total)[0]
+  if (hormiga) {
+    const [name, s] = hormiga
+    const perVisit = s.total / s.count
+    const monthsOfHistory = Math.max(1, daysSince(firstDate) / 30)
+    const perYear = (s.total / monthsOfHistory) * 12
+    facts.push({
+      emoji: '🐜',
+      text: pickPhrasing([
+        `${name} parece poca cosa cada vez (${fmtCRC(perVisit)} en promedio) — pero a tu ritmo actual, son ${fmtCRC(perYear)} al año.`,
+        `Gasto hormiga detectado: ${name}, ${s.count} veces por ${fmtCRC(perVisit)} cada una. Anualizado, eso es ${fmtCRC(perYear)}.`,
+      ], `${phraseSeed}-hormiga`),
     })
   }
 
@@ -192,22 +271,75 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
     }
   }
 
-  // 7. Account age
-  const firstDate = txs.reduce((min, t) => (t.date && t.date < min ? t.date : min), txs[0].date ?? todayStr)
-  if (firstDate) {
-    const days = Math.floor((now.getTime() - new Date(firstDate + 'T12:00:00').getTime()) / 86_400_000)
-    if (days > 30) {
-      facts.push({
-        emoji: '🗓️',
-        text: `Llevás ${Math.floor(days / 30)} meses (${days.toLocaleString('es-CR')} días) registrando tus finanzas — desde el ${fmtDate(firstDate)}.`,
-      })
+  // 6b. Cheapest month ever (complete months only — never the in-progress one)
+  const monthlyExpense: Record<string, number> = {}
+  for (const t of expenseTxs) {
+    if (!t.date) continue
+    const ym = t.date.slice(0, 7)
+    monthlyExpense[ym] = (monthlyExpense[ym] ?? 0) + t.amount
+  }
+  const completeMonths = Object.entries(monthlyExpense).filter(([ym]) => ym !== todayStr.slice(0, 7))
+  if (completeMonths.length >= 3) {
+    const cheapest = completeMonths.reduce((a, b) => (b[1] < a[1] ? b : a))
+    facts.push({
+      emoji: '🏆',
+      text: pickPhrasing([
+        `Tu mes más barato hasta ahora fue ${fmtMonth(cheapest[0])}, con solo ${fmtCRC(cheapest[1])} gastados en total.`,
+        `El récord de mes más disciplinado es de ${fmtMonth(cheapest[0])}: ${fmtCRC(cheapest[1])} y nada más.`,
+      ], `${phraseSeed}-cheapmonth`),
+    })
+
+    // 6c. Same calendar month vs. a year ago — strips out seasonality noise
+    // that a flat rolling-12m comparison can hide (e.g. December is always
+    // pricier than August, regardless of any real trend).
+    const lastComplete = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastCompleteYm = lastComplete.toISOString().slice(0, 7)
+    const sameMonthLastYearYm = new Date(lastComplete.getFullYear() - 1, lastComplete.getMonth(), 1).toISOString().slice(0, 7)
+    const lastCompleteTotal = monthlyExpense[lastCompleteYm] ?? 0
+    const sameMonthLastYearTotal = monthlyExpense[sameMonthLastYearYm] ?? 0
+    if (lastCompleteTotal > 0 && sameMonthLastYearTotal > 50_000) {
+      const pct = ((lastCompleteTotal - sameMonthLastYearTotal) / sameMonthLastYearTotal) * 100
+      if (Math.abs(pct) >= 10) {
+        facts.push({
+          emoji: pct < 0 ? '🙌' : '👀',
+          text: `${fmtMonth(lastCompleteYm)} gastaste ${Math.abs(pct).toFixed(0)}% ${pct < 0 ? 'menos' : 'más'} que en ${fmtMonth(sameMonthLastYearYm)} — mismo mes, un año de diferencia.`,
+        })
+      }
     }
+  }
+
+  // 7. Account age
+  const daysTracking = daysSince(firstDate)
+  if (daysTracking > 30) {
+    facts.push({
+      emoji: '🗓️',
+      text: pickPhrasing([
+        `Llevás ${Math.floor(daysTracking / 30)} meses (${daysTracking.toLocaleString('es-CR')} días) registrando tus finanzas — desde el ${fmtDate(firstDate)}.`,
+        `Todo esto arrancó el ${fmtDate(firstDate)} — ${daysTracking.toLocaleString('es-CR')} días construyendo este historial.`,
+      ], `${phraseSeed}-age`),
+    })
+  }
+
+  // 7b. Average daily spend — the same money feels different as a daily drip
+  if (daysTracking > 30) {
+    const totalExpense = expenseTxs.reduce((s, t) => s + t.amount, 0)
+    const perDay = totalExpense / daysTracking
+    facts.push({
+      emoji: '☕',
+      text: pickPhrasing([
+        `En promedio gastás ${fmtCRC(perDay)} por día — unos ${fmtCRC(perDay * 30)} al mes.`,
+        `Visto día a día, tu ritmo de gasto es de ${fmtCRC(perDay)} diarios.`,
+      ], `${phraseSeed}-perday`),
+    })
   }
 
   // 8. Transaction volume
   facts.push({
     emoji: '🧾',
-    text: `Llevás ${txs.length.toLocaleString('es-CR')} transacciones registradas en total. Cada una de esas es una decisión que ya tomaste — este dashboard solo te ayuda a verla.`,
+    text: pickPhrasing([
+      `Llevás ${txs.length.toLocaleString('es-CR')} transacciones registradas en total. Cada una de esas es una decisión que ya tomaste — este dashboard solo te ayuda a verla.`,
+      `${txs.length.toLocaleString('es-CR')} transacciones y contando — cada una es un dato real sobre cómo vivís, no una suposición.`,
+    ], `${phraseSeed}-txcount`),
   })
 
   // ── Patrimonio ────────────────────────────────────────────────────────────
@@ -224,6 +356,43 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
         emoji: pct >= 0 ? '🏔️' : '🩹',
         text: `Tu patrimonio neto ${pct >= 0 ? 'creció' : 'bajó'} ${Math.abs(pct).toFixed(0)}% en los últimos 12 meses: de ${fmtCRC(yearAgoNw)} a ${fmtCRC(latestNw)}.`,
       })
+    }
+  }
+
+  // 9b. Streak of consecutive snapshots where net worth didn't drop
+  if (snapshots && snapshots.length > 2) {
+    let streak = 0
+    for (let i = snapshots.length - 1; i > 0; i--) {
+      if (Number(snapshots[i].net_worth_crc) >= Number(snapshots[i - 1].net_worth_crc)) streak++
+      else break
+    }
+    if (streak >= 2) {
+      facts.push({
+        emoji: '🧱',
+        text: pickPhrasing([
+          `Llevás ${streak} meses seguidos en que tu patrimonio neto no baja — seguís construyendo, mes a mes.`,
+          `${streak} cortes de mes consecutivos sin retroceder en patrimonio neto. Esa es la racha que importa.`,
+        ], `${phraseSeed}-streak`),
+      })
+    }
+  }
+
+  // 9c. Distance to the next round-number net worth milestone
+  if (snapshots && snapshots.length > 0) {
+    const latestNw = Number(snapshots[snapshots.length - 1].net_worth_crc)
+    if (latestNw > 500_000) {
+      const step = latestNw >= 50_000_000 ? 10_000_000 : latestNw >= 10_000_000 ? 5_000_000 : 1_000_000
+      const nextMilestone = Math.ceil((latestNw + 1) / step) * step
+      const falta = nextMilestone - latestNw
+      if (falta > 0 && falta < step) {
+        facts.push({
+          emoji: '🎯',
+          text: pickPhrasing([
+            `Te faltan ${fmtCRC(falta)} para llegar a ${fmtCRC(nextMilestone)} de patrimonio neto.`,
+            `${fmtCRC(nextMilestone)} de patrimonio está a solo ${fmtCRC(falta)} de distancia.`,
+          ], `${phraseSeed}-milestone`),
+        })
+      }
     }
   }
 
@@ -299,11 +468,29 @@ export async function getDailyFact(userId: string): Promise<DailyFact | null> {
     })
   }
 
+  // 11b. Envelope/sobre that's grown the most — leaf sobres only, since a
+  // parent container's "growth" is really just its children's growth double-counted.
+  const envelopeGrowth: Record<string, number> = {}
+  for (const m of (movementsRaw ?? [])) {
+    if (m.movement_type === 'interes') continue
+    envelopeGrowth[m.envelope_id] = (envelopeGrowth[m.envelope_id] ?? 0) + Number(m.amount)
+  }
+  const topGrowthEnvelope = Object.entries(envelopeGrowth)
+    .filter(([id]) => !parentEnvelopeIds.has(id) && envelopeNameById[id])
+    .sort((a, b) => b[1] - a[1])[0]
+  if (topGrowthEnvelope && topGrowthEnvelope[1] > 0) {
+    const name = envelopeNameById[topGrowthEnvelope[0]]
+    facts.push({
+      emoji: '🌱',
+      text: pickPhrasing([
+        `Tu sobre "${name}" es el que más ha crecido: ${fmtCRC(topGrowthEnvelope[1])} acumulados.`,
+        `"${name}" lidera entre tus sobres — ${fmtCRC(topGrowthEnvelope[1])} y sumando.`,
+      ], `${phraseSeed}-envgrowth`),
+    })
+  }
+
   // ── FIRE ──────────────────────────────────────────────────────────────────
 
-  const parentEnvelopeIds = new Set(
-    (envelopesRaw ?? []).filter(e => e.parent_envelope_id !== null).map(e => e.parent_envelope_id as string)
-  )
   const liquidBalance = (movementsRaw ?? [])
     .filter(m => m.movement_type !== 'interes' && !parentEnvelopeIds.has(m.envelope_id))
     .reduce((s, m) => s + Number(m.amount), 0)
