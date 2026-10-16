@@ -336,6 +336,10 @@ export default async function InversionesPage() {
           if (tx.movement_type === 'income' && tx.is_settlement) delta = -amt
           else if (tx.expense_group === 'objetivos_financieros' && !tx.is_settlement) delta = amt
           else if (tx.is_passive_income) delta = amt
+          // Spent straight from the bucket (e.g. a crypto debit card purchase) —
+          // same directSpend case computeBucketTotals subtracts; missing here
+          // let real card spend keep inflating this chart's replay.
+          else if (tx.movement_type === 'expense') delta = -amt
         } else if (ciIncludes(cm.depositConcepts))       delta = amt
         else if (ciIncludes(cm.rendimientosConcepts))    delta = amt
         else if (ciIncludes(cm.valorizacionConcepts))    delta = amt
