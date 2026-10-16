@@ -30,6 +30,15 @@ function fmtUSDFull(n: number) {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Crypto position quantities come straight from floating-point math (e.g.
+// 196.99768320000013) — fewer decimals as the amount gets bigger, since a
+// whole token's worth of precision matters a lot more on 0.0096 BTC than on
+// 268,548 of a cent-fraction token.
+function fmtQty(n: number): string {
+  const digits = Math.abs(n) >= 1000 ? 2 : Math.abs(n) >= 1 ? 4 : 6
+  return n.toLocaleString('en-US', { maximumFractionDigits: digits })
+}
+
 function fmtPct(n: number) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
@@ -235,6 +244,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   const [editingTargets, setEditingTargets] = useState(false)
   const [cryptoSyncPending, startCryptoSync] = useTransition()
   const [cryptoSyncMsg, setCryptoSyncMsg] = useState<string | null>(null)
+  const [balanceHistoryOpen, setBalanceHistoryOpen] = useState(false)
+  const [txHistoryOpen, setTxHistoryOpen] = useState(false)
 
   function runCryptoSync() {
     setCryptoSyncMsg(null)
@@ -278,6 +289,8 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
     setSelected(prev => prev === key ? null : key)
     setShowAllTx(false)
     setSyncOpen(false)
+    setBalanceHistoryOpen(false)
+    setTxHistoryOpen(false)
   }
 
   const donutSlices = allItems.map(b => ({
@@ -521,7 +534,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                     {sel.positions.map(p => (
                       <div key={p.symbol} className="flex items-center gap-3 px-3 py-2">
                         <span className="text-xs font-bold text-zinc-200 w-16 shrink-0">{p.symbol}</span>
-                        <span className="text-[10px] text-zinc-600 flex-1">{p.quantity} u.</span>
+                        <span className="text-[10px] text-zinc-600 flex-1">{fmtQty(p.quantity)} u.</span>
                         <span className="text-xs font-black tabular-nums text-zinc-100">
                           {currency === 'CRC' ? fmtCRCFull(p.market_value_usd * rate) : fmtUSDFull(p.market_value_usd)}
                         </span>
@@ -555,25 +568,31 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                   history of real-balance updates instead so the section isn't just blank. */}
               {!!sel.accountId && (
                 <div className="space-y-1 pt-1">
-                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] px-1 pb-1">
-                    Historial de balance real · {sel.balanceHistory?.length ?? 0} registro{(sel.balanceHistory?.length ?? 0) === 1 ? '' : 's'}
-                  </p>
-                  {!sel.balanceHistory?.length ? (
-                    <p className="text-[10px] text-zinc-600 italic px-3 py-2">
-                      Sin registros todavía — el gráfico y este historial se van a ir llenando cada vez que actualices el balance.
+                  <button onClick={() => setBalanceHistoryOpen(v => !v)}
+                    className="w-full flex items-center gap-1.5 px-1 pb-1 text-left">
+                    <span className={`text-[8px] text-zinc-600 transition-transform ${balanceHistoryOpen ? 'rotate-90' : ''}`}>▶</span>
+                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em]">
+                      Historial de balance real · {sel.balanceHistory?.length ?? 0} registro{(sel.balanceHistory?.length ?? 0) === 1 ? '' : 's'}
                     </p>
-                  ) : (
-                    sel.balanceHistory.map(h => (
-                      <div key={h.date} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors">
-                        <span className="text-[9px] tabular-nums text-zinc-600 w-20 shrink-0">{h.date}</span>
-                        <span className="flex-1 text-[10px] text-zinc-500">Balance real</span>
-                        <span className="text-[10px] font-black tabular-nums text-zinc-200">
-                          {currency === 'USD' && sel.accountCurrency === 'USD' && h.balanceNative != null
-                            ? fmtUSDFull(h.balanceNative)
-                            : fmtFull(h.balance)}
-                        </span>
-                      </div>
-                    ))
+                  </button>
+                  {balanceHistoryOpen && (
+                    !sel.balanceHistory?.length ? (
+                      <p className="text-[10px] text-zinc-600 italic px-3 py-2">
+                        Sin registros todavía — el gráfico y este historial se van a ir llenando cada vez que actualices el balance.
+                      </p>
+                    ) : (
+                      sel.balanceHistory.map(h => (
+                        <div key={h.date} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors">
+                          <span className="text-[9px] tabular-nums text-zinc-600 w-20 shrink-0">{h.date}</span>
+                          <span className="flex-1 text-[10px] text-zinc-500">Balance real</span>
+                          <span className="text-[10px] font-black tabular-nums text-zinc-200">
+                            {currency === 'USD' && sel.accountCurrency === 'USD' && h.balanceNative != null
+                              ? fmtUSDFull(h.balanceNative)
+                              : fmtFull(h.balance)}
+                          </span>
+                        </div>
+                      ))
+                    )
                   )}
                 </div>
               )}
@@ -585,10 +604,14 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                 const visible = showAllTx ? txList : txList.slice(0, 15)
                 return (
                   <div className="space-y-1 pt-1">
-                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em] px-1 pb-1">
-                      Historial · {txList.length} movimientos
-                    </p>
-                    {visible.map(tx => {
+                    <button onClick={() => setTxHistoryOpen(v => !v)}
+                      className="w-full flex items-center gap-1.5 px-1 pb-1 text-left">
+                      <span className={`text-[8px] text-zinc-600 transition-transform ${txHistoryOpen ? 'rotate-90' : ''}`}>▶</span>
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.18em]">
+                        Historial · {txList.length} movimientos
+                      </p>
+                    </button>
+                    {txHistoryOpen && visible.map(tx => {
                       const meta = TX_META[tx.tx_type]
                       const label = tx.concept || tx.vendor || '—'
                       return (
@@ -608,7 +631,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
                         </div>
                       )
                     })}
-                    {txList.length > 15 && !showAllTx && (
+                    {txHistoryOpen && txList.length > 15 && !showAllTx && (
                       <button onClick={() => setShowAllTx(true)}
                         className="text-[9px] text-zinc-600 hover:text-zinc-400 px-3 py-1 transition-colors w-full text-left">
                         Ver {txList.length - 15} más...
