@@ -29,6 +29,7 @@ function createCryptoAdminClient() {
 
 type CryptoSell = {
   id: string
+  portfolio_id: string
   qty: number
   price_usd: number
   fee_usd: number | null
@@ -46,14 +47,26 @@ export async function syncCryptoFundedInvestments(): Promise<
 
   const { data: sells, error } = await crypto
     .from('transactions')
-    .select('id, qty, price_usd, fee_usd, date, notes, funds_bucket_id, asset:assets(symbol)')
+    .select('id, portfolio_id, qty, price_usd, fee_usd, date, notes, funds_bucket_id, asset:assets(symbol)')
     .eq('type', 'sell')
     .not('funds_bucket_id', 'is', null)
 
   if (error) return { error: error.message }
   if (!sells || sells.length === 0) return { synced: 0 }
 
-  const bucketIds = [...new Set((sells as CryptoSell[]).map(s => s.funds_bucket_id))]
+  // Which crypto-linked bucket (e.g. Crypto / DeFi) the sold portfolio
+  // itself feeds — lets the sell show up as an outflow on that side too,
+  // not just as a deposit in the bucket it funded.
+  const { data: links } = await admin
+    .from('crypto_portfolio_links')
+    .select('bucket_id, portfolio_id')
+    .eq('is_active', true)
+  const cryptoBucketIdByPortfolio = new Map((links ?? []).map(l => [l.portfolio_id, l.bucket_id]))
+
+  const bucketIds = [...new Set([
+    ...(sells as CryptoSell[]).map(s => s.funds_bucket_id),
+    ...cryptoBucketIdByPortfolio.values(),
+  ])]
   const { data: buckets } = await admin
     .from('user_investment_buckets')
     .select('id, name, user_id')
@@ -68,18 +81,20 @@ export async function syncCryptoFundedInvestments(): Promise<
 
     const proceedsUsd = Number(s.qty) * Number(s.price_usd) - Number(s.fee_usd ?? 0)
     const symbol = (Array.isArray(s.asset) ? s.asset[0]?.symbol : s.asset?.symbol) ?? 'cripto'
+    const amountCrc = +(proceedsUsd * rate.sell).toFixed(2)
+    const amountUsd = +proceedsUsd.toFixed(2)
 
-    return [{
+    const depositRow = {
       user_id: bucket.user_id,
       external_id: `crypto_sell::${s.id}`,
       date: String(s.date).slice(0, 10),
       vendor: bucket.name,
       concept: `Venta cripto → ${bucket.name}`,
       movement_type: 'expense',
-      amount: +(proceedsUsd * rate.sell).toFixed(2),
+      amount: amountCrc,
       currency_code: 'USD',
       exchange_rate_used: rate.sell,
-      amount_usd: +proceedsUsd.toFixed(2),
+      amount_usd: amountUsd,
       expense_group: 'objetivos_financieros',
       is_settlement: false,
       is_passive_income: false,
@@ -89,7 +104,36 @@ export async function syncCryptoFundedInvestments(): Promise<
       // pre-sync "Inversión IBKR" style entries it replaces.
       source: 'manual',
       investment_bucket_id: bucket.id,
-    }]
+    }
+
+    // Mirror entry on the crypto side, so the outflow is visible there too —
+    // display-only like the deposit row above: snapshot_based buckets never
+    // read these for their balance (that comes from account_balance_snapshots,
+    // fed separately by the live portfolio sync), only for the Historial list.
+    const cryptoBucketId = cryptoBucketIdByPortfolio.get(s.portfolio_id)
+    const cryptoBucket = cryptoBucketId ? bucketById.get(cryptoBucketId) : null
+    if (!cryptoBucket) return [depositRow]
+
+    const mirrorRow = {
+      user_id: cryptoBucket.user_id,
+      external_id: `crypto_sell_mirror::${s.id}`,
+      date: String(s.date).slice(0, 10),
+      vendor: cryptoBucket.name,
+      concept: `Venta cripto → ${bucket.name}`,
+      movement_type: 'income',
+      amount: amountCrc,
+      currency_code: 'USD',
+      exchange_rate_used: rate.sell,
+      amount_usd: amountUsd,
+      expense_group: 'na',
+      is_settlement: true,
+      is_passive_income: false,
+      notes: `Liquidación de ${s.qty} ${symbol} para financiar ${bucket.name} vía DeFiReTracker${s.notes ? ' · ' + s.notes : ''}`,
+      source: 'manual',
+      investment_bucket_id: cryptoBucket.id,
+    }
+
+    return [depositRow, mirrorRow]
   })
 
   if (rows.length === 0) return { synced: 0 }
