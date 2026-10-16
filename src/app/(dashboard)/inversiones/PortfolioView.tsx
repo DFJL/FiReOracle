@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { AccountSyncPanel } from '@/components/AccountSyncPanel'
+import { CryptoLinksPanel } from '@/components/CryptoLinksPanel'
 import { upsertPortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
 import { syncCryptoFundedInvestments } from '@/app/actions/cryptoSync'
 import { useCurrency } from './CurrencyContext'
@@ -415,7 +416,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
               {sel.accountId && (
                 <button onClick={() => setSyncOpen(v => !v)}
                   className="px-2.5 py-1 rounded-lg bg-blue-400/10 text-blue-300 text-[10px] font-bold hover:bg-blue-400/20 transition-colors">
-                  {syncOpen ? 'Cerrar' : 'Actualizar'}
+                  {syncOpen ? 'Cerrar' : sel.cryptoLinked ? 'Portfolios' : 'Actualizar'}
                 </button>
               )}
               <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
@@ -428,11 +429,18 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
 
           {syncOpen && sel.accountId && (
             <div className="rounded-xl bg-white/[0.02] border border-blue-400/20 overflow-hidden">
-              <AccountSyncPanel
-                accountId={sel.accountId}
-                currencyCode={sel.accountCurrency ?? 'CRC'}
-                onClose={() => setSyncOpen(false)}
-              />
+              {sel.cryptoLinked ? (
+                <CryptoLinksPanel
+                  bucketId={sel.key}
+                  onClose={() => setSyncOpen(false)}
+                />
+              ) : (
+                <AccountSyncPanel
+                  accountId={sel.accountId}
+                  currencyCode={sel.accountCurrency ?? 'CRC'}
+                  onClose={() => setSyncOpen(false)}
+                />
+              )}
             </div>
           )}
 

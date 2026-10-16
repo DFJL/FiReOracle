@@ -245,6 +245,15 @@ export default async function InversionesPage() {
     }))
     .sort((a, b) => b.total - a.total)
 
+  // Snapshot_based buckets fed by DeFiReTracker (vs. ones synced by hand, like
+  // IBKR) get the ownership-%/live-sync panel instead of the manual form.
+  const { data: cryptoLinkedBucketRows } = await admin
+    .from('crypto_portfolio_links')
+    .select('bucket_id')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+  const cryptoLinkedBucketIds = new Set((cryptoLinkedBucketRows ?? []).map(r => r.bucket_id))
+
   // Compute bucket balances (current)
   const buckets: BucketData[] = (bucketRows ?? []).map(def => {
     if (def.bucket_type === 'snapshot_based') {
@@ -263,6 +272,7 @@ export default async function InversionesPage() {
         positions: snapshotPositions[def.id] ?? [],
         accountId: def.account_id,
         accountCurrency: def.account_id ? (accountCurrencyById[def.account_id] ?? 'CRC') : undefined,
+        cryptoLinked: cryptoLinkedBucketIds.has(def.id),
       }
     }
 

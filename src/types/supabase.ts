@@ -756,6 +756,47 @@ export type Database = {
         }
         Relationships: []
       }
+      crypto_portfolio_links: {
+        Row: {
+          bucket_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          ownership_pct: number
+          portfolio_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bucket_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          ownership_pct?: number
+          portfolio_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bucket_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          ownership_pct?: number
+          portfolio_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crypto_portfolio_links_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "user_investment_buckets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       currencies: {
         Row: {
           code: string

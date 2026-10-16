@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/sync-crypto-investments",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/sync-crypto-bucket-balance",
+      "schedule": "45 5 * * *"
     }
   ]
 }

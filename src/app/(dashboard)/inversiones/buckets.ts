@@ -22,6 +22,7 @@ export interface BucketData {
   positions?: BucketPosition[]
   accountId?: string | null
   accountCurrency?: string
+  cryptoLinked?: boolean
   balanceNative?: number
   balanceHistory?: { date: string; balance: number; balanceNative: number | null }[]
 }
