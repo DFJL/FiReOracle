@@ -84,7 +84,10 @@ export async function syncCryptoFundedInvestments(): Promise<
       is_settlement: false,
       is_passive_income: false,
       notes: `Liquidación de ${s.qty} ${symbol} vía DeFiReTracker${s.notes ? ' · ' + s.notes : ''}`,
-      source: 'crypto_sync',
+      // transactions.source has a check constraint allowing only
+      // sheets/manual/import/email — this is the closest fit, same as the
+      // pre-sync "Inversión IBKR" style entries it replaces.
+      source: 'manual',
       investment_bucket_id: bucket.id,
     }]
   })
