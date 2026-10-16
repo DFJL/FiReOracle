@@ -5,6 +5,7 @@ import type { BucketData, BucketTx } from './buckets'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 import { upsertPortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
+import { syncCryptoFundedInvestments } from '@/app/actions/cryptoSync'
 import { useCurrency } from './CurrencyContext'
 
 function fmtCRC(n: number) {
@@ -231,6 +232,16 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   const [syncOpen, setSyncOpen] = useState(false)
   const [targets, setTargets] = useState(initialTargets)
   const [editingTargets, setEditingTargets] = useState(false)
+  const [cryptoSyncPending, startCryptoSync] = useTransition()
+  const [cryptoSyncMsg, setCryptoSyncMsg] = useState<string | null>(null)
+
+  function runCryptoSync() {
+    setCryptoSyncMsg(null)
+    startCryptoSync(async () => {
+      const result = await syncCryptoFundedInvestments()
+      setCryptoSyncMsg(result.error ? `Error: ${result.error}` : `${result.synced} movimiento${result.synced === 1 ? '' : 's'} sincronizado${result.synced === 1 ? '' : 's'}`)
+    })
+  }
 
   const rate   = exchangeRate.sell
   const toUSD  = (crc: number) => crc / rate
@@ -396,6 +407,11 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
               <p className="text-xs text-zinc-500">{sel.industry}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              <button onClick={runCryptoSync} disabled={cryptoSyncPending}
+                title="Trae ventas de cripto en DeFiReTracker marcadas como fondeo de una inversión, y las refleja aquí"
+                className="px-2.5 py-1 rounded-lg bg-purple-400/10 text-purple-300 text-[10px] font-bold hover:bg-purple-400/20 transition-colors disabled:opacity-50">
+                {cryptoSyncPending ? '...' : 'Sinc. cripto'}
+              </button>
               {sel.accountId && (
                 <button onClick={() => setSyncOpen(v => !v)}
                   className="px-2.5 py-1 rounded-lg bg-blue-400/10 text-blue-300 text-[10px] font-bold hover:bg-blue-400/20 transition-colors">
@@ -405,6 +421,10 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
               <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
             </div>
           </div>
+
+          {cryptoSyncMsg && (
+            <p className="text-[10px] text-zinc-500 -mt-2">{cryptoSyncMsg}</p>
+          )}
 
           {syncOpen && sel.accountId && (
             <div className="rounded-xl bg-white/[0.02] border border-blue-400/20 overflow-hidden">
