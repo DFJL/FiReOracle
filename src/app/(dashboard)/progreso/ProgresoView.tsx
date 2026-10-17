@@ -110,7 +110,7 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
 
 export function ProgresoView({
   liquidityBreakdown,
-  fireNumber, leanFireNumber, runway, runwaySurvival,
+  fireNumber: fireNumberProp, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
@@ -178,6 +178,18 @@ export function ProgresoView({
   const [includeLocked, setIncludeLocked]         = useState(false)
   const [includeRealEstate, setIncludeRealEstate] = useState(false)
   const isDefaultScenario = includeLiquid && includeSemiLiquid && !includeLocked && !includeRealEstate
+
+  // FIRE number normally assumes loans are paid off by the time you retire
+  // (avgMonthlyExpenses categorically excludes the LOANS root category) — a
+  // real assumption, not a fact, and wrong if FIRE lands before the mortgages
+  // are actually gone. This toggle swaps in avgMonthlyObligations (lifestyle
+  // + the regular loan installment) instead, so the number stays honest for
+  // "what if I retire before the house is paid off".
+  const [includeLoansInFire, setIncludeLoansInFire] = useState(false)
+  const targetExpWithToggle = includeLoansInFire ? avgMonthlyObligations : fireConfig.targetExp
+  const fireNumber = includeLoansInFire
+    ? (fireConfig.swr > 0 ? (avgMonthlyObligations * 12) / fireConfig.swr : 0)
+    : fireNumberProp
   const effectiveActivos =
     (includeLiquid     ? liquidityBreakdown.liquid.total     : 0) +
     (includeSemiLiquid ? liquidityBreakdown.semiLiquid.total : 0) +
@@ -285,8 +297,17 @@ export function ProgresoView({
                 <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-0.5">FIRE Number</p>
                 <p className="text-lg font-bold text-zinc-300">{fmt(fireNumber)}</p>
                 <p className="text-[10px] text-zinc-600">
-                  {fmt(fireConfig.targetExp)}/mes · {(fireConfig.swr * 100).toFixed(1)}% SWR
+                  {fmt(targetExpWithToggle)}/mes · {(fireConfig.swr * 100).toFixed(1)}% SWR
                 </p>
+                <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-zinc-500 cursor-pointer select-none justify-center sm:justify-start">
+                  <input
+                    type="checkbox"
+                    checked={includeLoansInFire}
+                    onChange={() => setIncludeLoansInFire(v => !v)}
+                    className="w-3 h-3 accent-[#a3e635]"
+                  />
+                  Incluir cuota de préstamos
+                </label>
               </div>
               <div>
                 <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-0.5">
