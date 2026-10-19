@@ -71,8 +71,18 @@ type PassiveIncomeData = {
   reinvertido12m: number
 }
 
+type WealthMap = {
+  entradas: number
+  salidas: number
+  flujoNeto: number
+  activos: number
+  pasivos: number
+  riquezaNeta: number
+}
+
 type Props = {
   liquidityBreakdown: LiquidityBreakdown
+  wealthMap: WealthMap
   fireNumber: number
   leanFireNumber: number
   runway: number
@@ -108,8 +118,20 @@ function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
   return `${sym}${Math.round(val).toLocaleString('es-CR')}`
 }
 
+function WealthMapTile({ label, value, color, emphasized }: { label: string; value: string; color: string; emphasized?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.1em] truncate">{label}</p>
+      <p className={`font-black leading-tight mt-0.5 tabular-nums truncate ${emphasized ? 'text-lg' : 'text-base'}`} style={{ color }}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
 export function ProgresoView({
   liquidityBreakdown,
+  wealthMap,
   fireNumber: fireNumberProp, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
@@ -221,6 +243,40 @@ export function ProgresoView({
               {c === 'CRC' ? '₡' : '$'}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Mapa de riqueza — entradas/salidas/flujo neto (el mes) y
+          activos/pasivos/riqueza neta (el patrimonio), lado a lado, para
+          saber "dónde estoy parado" antes de entrar al detalle de FIRE. */}
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Mapa de Riqueza</p>
+          <p className="text-[9px] text-zinc-600">últimos 12 meses</p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <WealthMapTile label="Entradas" value={fmt(wealthMap.entradas)} color="#a3e635" />
+          <WealthMapTile label="Salidas" value={fmt(wealthMap.salidas)} color="#71717a" />
+          <WealthMapTile
+            label="Flujo Neto"
+            value={fmt(wealthMap.flujoNeto)}
+            color={wealthMap.flujoNeto >= 0 ? '#a3e635' : '#f43f5e'}
+            emphasized
+          />
+        </div>
+
+        <div className="h-px bg-white/[0.06]" />
+
+        <div className="grid grid-cols-3 gap-3">
+          <WealthMapTile label="Activos" value={fmt(wealthMap.activos)} color="#a3e635" />
+          <WealthMapTile label="Pasivos" value={fmt(wealthMap.pasivos)} color="#71717a" />
+          <WealthMapTile
+            label="Riqueza Neta"
+            value={fmt(wealthMap.riquezaNeta)}
+            color={wealthMap.riquezaNeta >= 0 ? '#a3e635' : '#f43f5e'}
+            emphasized
+          />
         </div>
       </div>
 

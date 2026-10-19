@@ -871,10 +871,35 @@ export default async function ProgresoPage() {
   const inversionSources = toSourceList(inversionSourceMap, ahorroInversion12m.inversion)
   const deudaSources     = toSourceList(deudaSourceMap, ahorroInversion12m.deuda)
 
+  // Mapa de riqueza: entradas/salidas/flujo neto + activos/pasivos/riqueza
+  // neta in one place, the classic personal-finance income-statement +
+  // balance-sheet pair. Reuses numbers computed above rather than
+  // re-deriving them, with two deliberate differences from activosInvertibles
+  // (the FIRE-ratio denominator): real estate here is GROSS value (not net
+  // of its mortgage — the mortgage shows up on its own as a pasivo instead,
+  // so nothing is subtracted twice), and bloqueado + bienes raíces are
+  // included (this is "what do I own", not "what can I retire on").
+  const realEstateGross = (assetRows ?? [])
+    .filter(a => a.is_investable)
+    .reduce((s, a) => s + Number(a.value_crc), 0)
+  const totalPasivos = [...loanBalanceById.values()].reduce((s, v) => s + v, 0)
+  const wealthMapEntradas = avgMonthlyIncome + avgMonthlyPassiveIncome
+  const wealthMapSalidas  = avgMonthlyObligations
+  const wealthMapActivos  = liquidBalance + semiLiquidInvested + lockedInvested + realEstateGross
+  const wealthMap = {
+    entradas: wealthMapEntradas,
+    salidas: wealthMapSalidas,
+    flujoNeto: wealthMapEntradas - wealthMapSalidas,
+    activos: wealthMapActivos,
+    pasivos: totalPasivos,
+    riquezaNeta: wealthMapActivos - totalPasivos,
+  }
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
       <ProgresoView
         liquidityBreakdown={liquidityBreakdown}
+        wealthMap={wealthMap}
         milestones={milestones}
         fireNumber={fireNumber}
         leanFireNumber={leanFireNumber}
