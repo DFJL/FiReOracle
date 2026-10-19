@@ -197,73 +197,19 @@ function computeYieldRows(
   return rows
 }
 
-// snapshot_based buckets have no concept_map to replay — computeYieldRows
-// above always skips them, which is exactly why IBKR has never had a single
-// yield-history row despite being snapshot_based for months. For a bucket
-// fed live by DeFiReTracker (crypto_portfolio_links), yield for a month is
-// derivable anyway: the month's balance change minus that month's net new
-// capital (buys/transfers in, minus sells/transfers out, weighted by
-// ownership %) is the part of the change that wasn't just money moving —
-// i.e. the actual gain. Only covers months where this bucket already has
-// two consecutive monthly snapshots, so it starts accumulating from the
-// sync's first full month forward; it doesn't back-fill history before that.
-async function computeSnapshotBucketYieldRows(
-  admin: ReturnType<typeof createAdminClient>,
+// Shared by both snapshot-bucket paths below: balance change minus net new
+// capital for the month is the actual gain. Only covers months where the
+// bucket already has two consecutive monthly snapshots, so it starts
+// accumulating from the first full month of history forward; it doesn't
+// back-fill before that.
+function buildSnapshotYieldRows(
   bucket: { id: string; name: string },
   userId: string,
   currentYearMonth: string,
   exchangeRate: number,
-): Promise<YieldRow[]> {
-  const { data: links } = await admin
-    .from('crypto_portfolio_links')
-    .select('portfolio_id, ownership_pct')
-    .eq('bucket_id', bucket.id)
-    .eq('is_active', true)
-  if (!links || links.length === 0) return []
-
-  const { data: bucketRow } = await admin
-    .from('user_investment_buckets')
-    .select('account_id')
-    .eq('id', bucket.id)
-    .maybeSingle()
-  if (!bucketRow?.account_id) return []
-
-  const { data: snaps } = await admin
-    .from('account_balance_snapshots')
-    .select('snapshot_date, real_balance_native')
-    .eq('account_id', bucketRow.account_id)
-    .order('snapshot_date', { ascending: true })
-  if (!snaps || snaps.length === 0) return []
-
-  // Last snapshot within a month wins (snaps are sorted ascending).
-  const monthlyBalance = new Map<string, number>()
-  for (const s of snaps) {
-    if (s.real_balance_native == null || !s.snapshot_date) continue
-    monthlyBalance.set(String(s.snapshot_date).slice(0, 7), Number(s.real_balance_native))
-  }
-
-  const crypto = createCryptoAdminClient()
-  const portfolioIds = links.map(l => l.portfolio_id)
-  const { data: txs } = await crypto
-    .from('transactions')
-    .select('portfolio_id, type, qty, price_usd, fee_usd, date')
-    .in('portfolio_id', portfolioIds)
-    .range(0, 49999)
-
-  const pctByPortfolio = new Map(links.map(l => [l.portfolio_id, Number(l.ownership_pct) / 100]))
-  const monthlyFlowUsd = new Map<string, number>()
-  for (const t of (txs ?? []) as { portfolio_id: string; type: string; qty: number; price_usd: number; fee_usd: number | null; date: string }[]) {
-    const pct = pctByPortfolio.get(t.portfolio_id)
-    if (pct == null || !t.date) continue
-    const ym = t.date.slice(0, 7)
-    const qty = Number(t.qty), price = Number(t.price_usd), fee = Number(t.fee_usd ?? 0)
-    let flow = 0
-    if (t.type === 'buy' || t.type === 'transfer_in') flow = (qty * price + fee) * pct
-    else if (t.type === 'sell' || t.type === 'transfer_out') flow = -(qty * price - fee) * pct
-    else continue
-    monthlyFlowUsd.set(ym, (monthlyFlowUsd.get(ym) ?? 0) + flow)
-  }
-
+  monthlyBalance: Map<string, number>,
+  monthlyFlowUsd: Map<string, number>,
+): YieldRow[] {
   const months = [...monthlyBalance.keys()].sort()
   const rows: YieldRow[] = []
   for (let i = 1; i < months.length; i++) {
@@ -289,8 +235,98 @@ async function computeSnapshotBucketYieldRows(
       source: 'computed',
     })
   }
-
   return rows
+}
+
+// snapshot_based buckets have no concept_map to replay — computeYieldRows
+// above always skips them. Two flavors of "net new capital" for the month,
+// depending on how this bucket is funded:
+//   - crypto_portfolio_links present (e.g. Crypto/DeFi): flow comes from the
+//     linked DeFiReTracker portfolios' buy/sell/transfer txs, weighted by
+//     ownership %.
+//   - no links (e.g. IBKR): flow comes from this bucket's own regular
+//     `transactions` rows (investment_bucket_id = bucket.id) — the deposit/
+//     mirror rows written by cryptoSync.ts and any manual "Inversión IBKR"
+//     entries. Passive-income rows (dividends) are excluded from flow since
+//     they're the yield itself, already inside the balance change, not new
+//     capital from outside.
+async function computeSnapshotBucketYieldRows(
+  admin: ReturnType<typeof createAdminClient>,
+  bucket: { id: string; name: string },
+  userId: string,
+  currentYearMonth: string,
+  exchangeRate: number,
+): Promise<YieldRow[]> {
+  const { data: bucketRow } = await admin
+    .from('user_investment_buckets')
+    .select('account_id')
+    .eq('id', bucket.id)
+    .maybeSingle()
+  if (!bucketRow?.account_id) return []
+
+  const { data: snaps } = await admin
+    .from('account_balance_snapshots')
+    .select('snapshot_date, real_balance_native')
+    .eq('account_id', bucketRow.account_id)
+    .order('snapshot_date', { ascending: true })
+  if (!snaps || snaps.length === 0) return []
+
+  // Last snapshot within a month wins (snaps are sorted ascending).
+  const monthlyBalance = new Map<string, number>()
+  for (const s of snaps) {
+    if (s.real_balance_native == null || !s.snapshot_date) continue
+    monthlyBalance.set(String(s.snapshot_date).slice(0, 7), Number(s.real_balance_native))
+  }
+
+  const { data: links } = await admin
+    .from('crypto_portfolio_links')
+    .select('portfolio_id, ownership_pct')
+    .eq('bucket_id', bucket.id)
+    .eq('is_active', true)
+
+  const monthlyFlowUsd = new Map<string, number>()
+
+  if (links && links.length > 0) {
+    const crypto = createCryptoAdminClient()
+    const portfolioIds = links.map(l => l.portfolio_id)
+    const { data: txs } = await crypto
+      .from('transactions')
+      .select('portfolio_id, type, qty, price_usd, fee_usd, date')
+      .in('portfolio_id', portfolioIds)
+      .range(0, 49999)
+
+    const pctByPortfolio = new Map(links.map(l => [l.portfolio_id, Number(l.ownership_pct) / 100]))
+    for (const t of (txs ?? []) as { portfolio_id: string; type: string; qty: number; price_usd: number; fee_usd: number | null; date: string }[]) {
+      const pct = pctByPortfolio.get(t.portfolio_id)
+      if (pct == null || !t.date) continue
+      const ym = t.date.slice(0, 7)
+      const qty = Number(t.qty), price = Number(t.price_usd), fee = Number(t.fee_usd ?? 0)
+      let flow = 0
+      if (t.type === 'buy' || t.type === 'transfer_in') flow = (qty * price + fee) * pct
+      else if (t.type === 'sell' || t.type === 'transfer_out') flow = -(qty * price - fee) * pct
+      else continue
+      monthlyFlowUsd.set(ym, (monthlyFlowUsd.get(ym) ?? 0) + flow)
+    }
+  } else {
+    const { data: bucketTxs } = await admin
+      .from('transactions')
+      .select('movement_type, is_settlement, is_passive_income, amount, amount_usd, date')
+      .eq('investment_bucket_id', bucket.id)
+      .range(0, 49999)
+
+    for (const t of (bucketTxs ?? []) as { movement_type: string | null; is_settlement: boolean | null; is_passive_income: boolean | null; amount: number | null; amount_usd: number | null; date: string | null }[]) {
+      if (!t.date || t.amount == null || t.is_passive_income) continue
+      const ym = t.date.slice(0, 7)
+      const usd = t.amount_usd != null ? Number(t.amount_usd) : Number(t.amount) / exchangeRate
+      let flow = 0
+      if (t.movement_type === 'expense') flow = usd
+      else if (t.movement_type === 'income' && t.is_settlement) flow = -usd
+      else continue
+      monthlyFlowUsd.set(ym, (monthlyFlowUsd.get(ym) ?? 0) + flow)
+    }
+  }
+
+  return buildSnapshotYieldRows(bucket, userId, currentYearMonth, exchangeRate, monthlyBalance, monthlyFlowUsd)
 }
 
 export async function computeYieldHistory(): Promise<{

@@ -77,6 +77,18 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
 
   const products = summaries.map(s => s.name)
 
+  // Blended portfolio-level return — money-weighted by what's invested in
+  // each instrument, not a plain average across instruments (a tiny position
+  // with a huge % shouldn't move this as much as the bulk of the capital).
+  // Same annualizing formula as each instrument's own card, so the headline
+  // number is directly comparable to them.
+  const totalInvested = summaries.reduce((s, r) => s + r.lastInvestedUsd, 0)
+  const blendedMonthlyAvg = totalInvested > 0
+    ? summaries.reduce((s, r) => s + r.avg * r.lastInvestedUsd, 0) / totalInvested
+    : 0
+  const blendedAnn = (Math.pow(1 + blendedMonthlyAvg / 100, 12) - 1) * 100
+  const blendedTotalUsd = summaries.reduce((s, r) => s + r.totalUsd, 0)
+
   const fmtUsd = (v: number) => {
     const val = currency === 'CRC' ? v * liveRate : v
     const sym = currency === 'CRC' ? '₡' : '$'
@@ -196,6 +208,23 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
         }`}>
           {recalcMsg}
         </p>
+      )}
+
+      {/* Portfolio-level blended return — the number that answers "¿está funcionando mi portafolio?",
+          not just each instrument on its own */}
+      {totalInvested > 0 && (
+        <div className="rounded-xl border border-[#a3e635]/20 bg-[#a3e635]/[0.06] p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-[9px] font-black text-[#a3e635]/80 uppercase tracking-[0.14em]">Rendimiento General del Portfolio</p>
+            <p className="text-3xl font-black text-[#a3e635] leading-tight mt-0.5">{blendedAnn.toFixed(2)}%</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">anualizado ({rangeLabel}) · ponderado por monto invertido</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Total Invertido</p>
+            <p className="text-sm font-bold text-zinc-300 mt-0.5">{fmtUsd(totalInvested)}</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">{fmtUsd(blendedTotalUsd)} yield {rangeLabel}</p>
+          </div>
+        </div>
       )}
 
       {/* Summary cards */}
