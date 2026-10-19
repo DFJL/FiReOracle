@@ -166,6 +166,18 @@ export function ProgresoView({
     runwaySurvival >= runwayGreen  ? '#a3e635' :
     runwaySurvival >= runwayYellow ? '#f59e0b' : '#f43f5e'
 
+  // FIRE number normally assumes loans are paid off by the time you retire
+  // (avgMonthlyExpenses categorically excludes the LOANS root category) — a
+  // real assumption, not a fact, and wrong if FIRE lands before the mortgages
+  // are actually gone. This toggle swaps in avgMonthlyObligations (lifestyle
+  // + the regular loan installment) instead, so the number stays honest for
+  // "what if I retire before the house is paid off".
+  const [includeLoansInFire, setIncludeLoansInFire] = useState(false)
+  const targetExpWithToggle = includeLoansInFire ? avgMonthlyObligations : fireConfig.targetExp
+  const fireNumber = includeLoansInFire
+    ? (fireConfig.swr > 0 ? (avgMonthlyObligations * 12) / fireConfig.swr : 0)
+    : fireNumberProp
+
   const yearsToFire = forecastYears.length > 1
     ? forecastYears.find(p => p.balance >= fireNumber)?.year ?? null
     : null
@@ -201,17 +213,6 @@ export function ProgresoView({
   const [includeRealEstate, setIncludeRealEstate] = useState(false)
   const isDefaultScenario = includeLiquid && includeSemiLiquid && !includeLocked && !includeRealEstate
 
-  // FIRE number normally assumes loans are paid off by the time you retire
-  // (avgMonthlyExpenses categorically excludes the LOANS root category) — a
-  // real assumption, not a fact, and wrong if FIRE lands before the mortgages
-  // are actually gone. This toggle swaps in avgMonthlyObligations (lifestyle
-  // + the regular loan installment) instead, so the number stays honest for
-  // "what if I retire before the house is paid off".
-  const [includeLoansInFire, setIncludeLoansInFire] = useState(false)
-  const targetExpWithToggle = includeLoansInFire ? avgMonthlyObligations : fireConfig.targetExp
-  const fireNumber = includeLoansInFire
-    ? (fireConfig.swr > 0 ? (avgMonthlyObligations * 12) / fireConfig.swr : 0)
-    : fireNumberProp
   const effectiveActivos =
     (includeLiquid     ? liquidityBreakdown.liquid.total     : 0) +
     (includeSemiLiquid ? liquidityBreakdown.semiLiquid.total : 0) +
