@@ -656,15 +656,29 @@ function EmailAccountsPanel({ accounts: initialAccounts }: { accounts: Connected
   // calls here until there's nothing left, instead of making the user click
   // "Sincronizar" over and over. Capped at 20 rounds (~600 emails) as a
   // safety net against looping forever on a server-side bug.
+  //
+  // `remaining` only counts new ids beyond the current 30-message batch —
+  // it says nothing about whether THIS batch actually got saved. If every
+  // message in a batch fails to insert (the AI call erroring, a transient
+  // DB issue), that same batch is still "new" next round and gets sent to
+  // the AI again, round after round, for zero progress — the exact loop
+  // that burned ~6M tokens in one day. Stop as soon as a round makes no
+  // progress instead of trusting remaining > 0 alone.
   async function doSync(acc: ConnectedAccount): Promise<boolean> {
     setSyncing(acc.id)
     setMsgs(m => ({ ...m, [acc.id]: { ok: true, text: 'Sincronizando...' } }))
     try {
       let hadNew = false
+      let prevRemaining = Infinity
       for (let round = 0; round < 20; round++) {
         const r = await doSyncOnce(acc)
         hadNew = hadNew || r.hadNew
         if (!r.ok || r.remaining === 0) break
+        if (r.remaining >= prevRemaining && !r.hadNew) {
+          setMsgs(m => ({ ...m, [acc.id]: { ok: false, text: `Se detuvo: ${r.remaining} correos no se pudieron procesar (revisá la cuenta o probá de nuevo más tarde)` } }))
+          break
+        }
+        prevRemaining = r.remaining
       }
       return hadNew
     } finally {

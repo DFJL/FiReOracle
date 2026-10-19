@@ -260,7 +260,7 @@ export async function syncGmailAccount(
         if (is_internal_transfer) extracted.is_internal_transfer = true
       }
 
-      await admin.from('transaction_inbox').insert({
+      const { error: insertErr } = await admin.from('transaction_inbox').insert({
         user_id:     userId,
         account_id:  accountId,
         email_id:    msgId,
@@ -270,6 +270,13 @@ export async function syncGmailAccount(
         extracted:   extracted as never,
         status:      'pending',
       })
+      // A silent insert failure here (e.g. a constraint violation) used to
+      // still count as `inserted++` and move on — the message was never
+      // actually saved, so the next sync's existingIds check never found it
+      // either, and it got sent to the AI model again every single sync,
+      // forever. Throwing routes it through the same catch as everything
+      // else below, which at least logs it instead of pretending success.
+      if (insertErr) throw insertErr
       inserted++
     } catch (err) {
       console.error(`Error processing Gmail message ${msgId}:`, err)
