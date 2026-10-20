@@ -9,23 +9,11 @@ import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMon
 import { GENERIC_PASSIVE_CATEGORIES, normalizeVendorKey } from '@/lib/passiveIncomeCategory'
 import { computeBucketTotals, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, computeFireMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
-
-function isValuation(concept: string | null) {
-  return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
-}
-
-// The bare 'SAVINGS' code ("Ahorro") doesn't start with 'SAVINGS_' — a
-// `.startsWith('SAVINGS_')` check silently excludes it. Real money: ₡7.37M
-// across 99 transactions in this account, invisible to the savings rate
-// until this helper replaced that check everywhere.
-function isSavingsCategoryCode(code: string | null | undefined): boolean {
-  return code === 'SAVINGS' || (code ?? '').startsWith('SAVINGS_')
-}
-
-
-// Within objetivos_financieros, which SAVINGS_* codes have market exposure
-// (inversión, expected return) vs just sit liquid (ahorro puro).
-const INVERSION_CATEGORY_CODES = new Set(['SAVINGS_INVESTMENT', 'SAVINGS_PENSION'])
+import {
+  isRealizedPassiveIncome,
+  isSavingsCategoryCode,
+  INVERSION_CATEGORY_CODES,
+} from '@/lib/incomeAllocation'
 
 export default async function ProgresoPage() {
   const supabase = await createClient()
@@ -325,10 +313,8 @@ export default async function ProgresoPage() {
   // "¿por qué tan bajo?" the user flagged.)
   // A few valuation entries were imported under the generic PASSIVE_INCOME
   // code instead of APPRECIATION (e.g. "Aumento de valor Criptomonedas") —
-  // isValuation catches those by concept text so they don't sneak back in.
-  const isRealizedPassiveIncome = (tx: { is_passive_income: boolean | null; is_settlement: boolean | null; category_code: string | null; concept: string | null }) =>
-    !!tx.is_passive_income && !tx.is_settlement && tx.category_code !== 'APPRECIATION' && !isValuation(tx.concept)
-
+  // isRealizedPassiveIncome catches those by concept text so they don't
+  // sneak back in.
   const passiveIncome12m = recent
     .filter(isRealizedPassiveIncome)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)

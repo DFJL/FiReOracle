@@ -491,7 +491,13 @@ export function ProgresoView({
       {/* Ahorro vs. inversión — of what you set aside each month, how much
           actually has market exposure vs. sits liquid */}
       {(ahorroInversionData.ahorroMonthly + ahorroInversionData.inversionMonthly) > 0 && (
-        <AhorroInversionSection data={ahorroInversionData} fmt={fmt} milestones={milestones} />
+        <AhorroInversionSection
+          data={ahorroInversionData}
+          fmt={fmt}
+          milestones={milestones}
+          avgMonthlyExpenses={avgMonthlyExpenses}
+          avgMonthlyIncome={avgMonthlyIncome}
+        />
       )}
 
       {/* Combined historical + forecast chart */}
@@ -1265,11 +1271,13 @@ function rawSourcesToDisplay(raw: AhorroInversionRawSource[], total: number): Ah
 }
 
 function AhorroInversionSection({
-  data, fmt, milestones,
+  data, fmt, milestones, avgMonthlyExpenses, avgMonthlyIncome,
 }: {
   data: AhorroInversionData
   fmt: (v: number) => string
   milestones: Milestone[]
+  avgMonthlyExpenses: number
+  avgMonthlyIncome: number
 }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -1301,36 +1309,51 @@ function AhorroInversionSection({
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ahorro vs. inversión</p>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ingreso → gasto / ahorro / inversión</p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
             {hasDeuda
-              ? 'De lo que apartás cada mes: cuánto queda líquido, cuánto trabaja con retorno esperado, y cuánto va a bajar deuda antes de tiempo'
-              : 'De lo que apartás cada mes, cuánto queda líquido vs. cuánto trabaja con retorno esperado'}
+              ? 'De tu ingreso activo: cuánto se gasta, cuánto queda líquido, cuánto trabaja con retorno esperado, y cuánto va a bajar deuda antes de tiempo'
+              : 'De tu ingreso activo: cuánto se gasta, cuánto queda líquido, y cuánto trabaja con retorno esperado'}
           </p>
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs font-black" style={{ color: shareColor }}>{sharePct.toFixed(0)}% inversión</p>
-          <p className="text-[9px] text-zinc-600">del total aportado</p>
+          <p className="text-[9px] text-zinc-600">del total apartado (no-gasto)</p>
         </div>
       </div>
 
-      {/* Mini KPI row */}
-      <div className={`grid gap-2 ${hasDeuda ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      {/* Mini KPI row — gasto/ahorro/inversión[/deuda], cada uno como % del
+          ingreso activo promedio (misma base que "Tasa de ahorro" arriba en
+          la página, para que nunca puedan leerse distinto entre sí) */}
+      <div className={`grid gap-2 ${hasDeuda ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Gasto</p>
+          <p className="text-sm font-black mt-1 text-zinc-300">{fmt(avgMonthlyExpenses)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">
+            {avgMonthlyIncome > 0 ? `${((avgMonthlyExpenses / avgMonthlyIncome) * 100).toFixed(0)}% del ingreso` : 'promedio mensual'}
+          </p>
+        </div>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ahorro (líquido)</p>
           <p className="text-sm font-black mt-1 text-[#22d3ee]">{fmt(displayAhorro)}</p>
-          <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">
+            {!selected && avgMonthlyIncome > 0 ? `${((displayAhorro / avgMonthlyIncome) * 100).toFixed(0)}% del ingreso` : selected ? selected.label : 'promedio mensual'}
+          </p>
         </div>
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Inversión</p>
           <p className="text-sm font-black mt-1 text-[#a78bfa]">{fmt(displayInversion)}</p>
-          <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5">
+            {!selected && avgMonthlyIncome > 0 ? `${((displayInversion / avgMonthlyIncome) * 100).toFixed(0)}% del ingreso` : selected ? selected.label : 'promedio mensual'}
+          </p>
         </div>
         {hasDeuda && (
           <div className="bg-black/20 rounded-xl p-3">
             <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Abono extra deuda</p>
             <p className="text-sm font-black mt-1 text-[#fb923c]">{fmt(displayDeuda)}</p>
-            <p className="text-[8px] text-zinc-600 mt-0.5">{selected ? selected.label : 'promedio mensual'}</p>
+            <p className="text-[8px] text-zinc-600 mt-0.5">
+              {!selected && avgMonthlyIncome > 0 ? `${((displayDeuda / avgMonthlyIncome) * 100).toFixed(0)}% del ingreso` : selected ? selected.label : 'promedio mensual'}
+            </p>
           </div>
         )}
       </div>

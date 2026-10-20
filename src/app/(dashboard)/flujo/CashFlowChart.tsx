@@ -134,7 +134,7 @@ export function MonthlyBarsChart({
   const OVERLAYS: { key: typeof overlay; label: string }[] = [
     { key: 'net', label: 'Flujo neto' },
     { key: 'cumulative', label: 'Acumulado' },
-    { key: 'rate', label: 'Ahorro %' },
+    { key: 'rate', label: 'Margen neto %' },
     { key: 'none', label: 'Sin línea' },
   ]
 
@@ -168,7 +168,7 @@ export function MonthlyBarsChart({
                         : 'bg-rose-500/10 text-rose-400'
                   }`}
                 >
-                  {hp.rate.toFixed(1)}% ahorro
+                  {hp.rate.toFixed(1)}% margen neto
                 </span>
               )}
             </div>

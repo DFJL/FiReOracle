@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
-import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from '../resumen/categoryUtils'
+import { isDepositTx, isValuationConcept } from '@/lib/incomeAllocation'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -45,10 +45,6 @@ function periodCutoff(p: PeriodKey): string | null {
   return null
 }
 
-function isValuationEntry(concept: string | null) {
-  return /p[eé]rdida\s*valor|aumento\s*valor/i.test(concept ?? '')
-}
-
 function fmt(n: number) {
   return new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 0 }).format(n)
 }
@@ -63,9 +59,10 @@ function monthlyAggregates(txs: TxRow[]): (MonthData & { hasData: boolean })[] {
     if (tx.movement_type === 'income' && !tx.is_settlement) {
       map[key].income += amt
     } else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') {
-      const isSavings = tx.expense_group === SAVINGS_EXPENSE_GROUP
-        && !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-      if (!isSavings && !isValuationEntry(tx.concept)) {
+      // Shared with /resumen and /progreso (@/lib/incomeAllocation) — a
+      // deposit (ahorro/inversión) is never an expense, same definition
+      // everywhere instead of each page excluding its own version of it.
+      if (!isDepositTx(tx) && !isValuationConcept(tx.concept)) {
         if (tx.movement_type === 'cash_withdrawal') map[key].withdrawals += amt
         else map[key].expenses += amt
       }

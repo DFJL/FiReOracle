@@ -7,6 +7,7 @@ import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
+import { isDepositTx, isActiveIncome } from '@/lib/incomeAllocation'
 import {
   deleteTransaction, type UpdateTransactionInput,
   getEnvelopeEditData, updateTransactionEnvelopeLink,
@@ -202,14 +203,10 @@ function isPatrimonialIncome(tx: TxClient) {
 // Mantener isInflow como alias de isLiquidIncome para compatibilidad interna
 const isInflow = isLiquidIncome
 
-function isSavings(tx: TxClient) {
-  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  if (!(tx.category_code ?? '').startsWith('SAVINGS_')) return false
-  if (tx.is_settlement) return false  // liquidations are not new deposits
-  if (/p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/i.test(tx.concept ?? '')) return false
-  return true
-}
+// Shared with /progreso and /flujo (@/lib/incomeAllocation) — this used to
+// check only `.startsWith('SAVINGS_')`, silently missing the bare 'SAVINGS'
+// code ("Ahorro", ₡7.37M / 99 transactions in this account).
+const isSavings = isDepositTx
 
 const INVEST_CODES = new Set(['SAVINGS_FUND', 'SAVINGS_CRYPTO', 'SAVINGS_PENSION', 'INVESTMENT', 'REAL_ESTATE', 'SAVINGS_INVESTMENT'])
 const isInvestment = (tx: TxClient) => {
@@ -1356,7 +1353,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
       } else if (isSavings(tx)) {
         invested += amt
       }
-      if (tx.movement_type === 'income' && !tx.is_passive_income) activeIncomeForSavings += amt
+      if (isActiveIncome(tx)) activeIncomeForSavings += amt
     }
     const discrecionalExp = lifestyleExp - survivalExp
     const expenses  = lifestyleExp + loanPayments
