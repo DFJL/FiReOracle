@@ -32,7 +32,10 @@ function fmtPct(n: number) {
   return `${n.toFixed(1)}%`
 }
 
-const ASSIGNABLE_CATEGORIES = ALL_CATEGORIES.filter(c => c !== 'cash')
+// Cash itself is assignable — a stablecoin position (e.g. USDC) can be
+// reclassified as Liquidez and adds on top of the synthetic bank-liquidity
+// row in holdingsFor('cash'), it doesn't replace it.
+const ASSIGNABLE_CATEGORIES = ALL_CATEGORIES
 
 // Default inclusion mirrors the FIRE liquidity scenario panel in /progreso:
 // slices you can actually buy/sell/move are on by default, real estate is off
