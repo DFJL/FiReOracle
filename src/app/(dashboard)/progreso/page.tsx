@@ -362,6 +362,44 @@ export default async function ProgresoPage() {
     return null
   }
 
+  // The podcast's own taxonomy (Intereses / Dividendos / Rentas / Regalías)
+  // plus Airdrop, which the podcast doesn't have a clean bucket for — it's
+  // not a recurring yield on an asset you hold, it's a one-off protocol
+  // allocation, so it gets its own type rather than being forced into
+  // Regalía (licensing/royalty income) where it doesn't actually belong.
+  // Reuses passiveSubtype's detection first (it already reads the same
+  // notes/detail text the user hand-writes); falls back to the resolved
+  // category_code for everything passiveSubtype doesn't recognize (bank
+  // interest, rental income, crypto farming with no detail written in).
+  // Minería/Nodos and the generic PASSIVE_INCOME code don't map cleanly to
+  // any of the four — those land in 'Otro' instead of a wrong guess.
+  function passiveIncomeType(tx: { notes: string | null; detail: string | null; category_code: string | null; vendor: string | null }): string {
+    const sub = passiveSubtype(tx.notes, tx.detail)
+    if (sub === 'Airdrops') return 'Airdrop'
+    if (sub === 'LP fees')  return 'Renta'
+    if (sub === 'Staking')  return 'Interés'
+    if (sub === 'Minería' || sub === 'Nodos') return 'Otro'
+    const resolvedCode = resolveCategoryCode(tx)
+    switch (resolvedCode) {
+      case 'INTEREST':
+      case 'SAVINGS_INTEREST':
+      case 'SAVINGS_EXCEDENTES':
+      case 'INVESTMENT_RETURN':
+      case 'INVESTMENT_RETURN_LIQUID':
+        return 'Interés'
+      case 'RENTAL_INCOME':
+        return 'Renta'
+      case 'INVESTMENT_RETURN_CRYPTO':
+        // No detail written in and no vendor-votes match a specific
+        // mechanism — most of this user's undetailed crypto farming rows
+        // are LP/yield-farming, so that's the default, not a hard rule.
+        return 'Renta'
+      case 'INVESTMENT_RETURN_MINING':
+      default:
+        return 'Otro'
+    }
+  }
+
   // Data drift correction #1: some entries (mostly AI-parsed quick-entry,
   // by the look of the dates) land on a generic catch-all category_code
   // (PASSIVE_INCOME, MISC_INCOME) instead of the specific one the same
@@ -472,6 +510,48 @@ export default async function ProgresoPage() {
   for (const ym of allYMs) {
     passiveSourcesByMonth[ym] = buildPassiveSources([ym], 1)
   }
+
+  // Same aggregation as buildPassiveSources, grouped by the podcast's
+  // Interés/Dividendo/Renta/Regalía/Airdrop/Otro instead of by raw category —
+  // a second lens on the same underlying transactions, not a different
+  // dataset, so it can never disagree with passiveIncome12m's total.
+  function buildPassiveTypeSources(yms: string[], divideBy: number) {
+    const sourceMap: Record<string, number> = {}
+    const subMap: Record<string, Record<string, number>> = {}
+    for (const tx of passiveTxsAll) {
+      if (!tx.date || !yms.includes(tx.date.slice(0, 7))) continue
+      const typeName = passiveIncomeType(tx)
+      const resolvedCode = resolveCategoryCode(tx)
+      const vendorLabel = tx.vendor && !/^na$/i.test(tx.vendor.trim())
+        ? vendorCanonicalLabel[normalizeVendorKey(tx.vendor)]
+        : null
+      const subName = (resolvedCode && catNameMap.get(resolvedCode)) || vendorLabel || tx.concept || typeName
+      const amt = Number(tx.amount ?? 0)
+      sourceMap[typeName] = (sourceMap[typeName] ?? 0) + amt
+      subMap[typeName] ??= {}
+      subMap[typeName][subName] = (subMap[typeName][subName] ?? 0) + amt
+    }
+    const periodTotal = Object.values(sourceMap).reduce((s, v) => s + v, 0)
+    return Object.entries(sourceMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amountSum]) => {
+        const subEntries = Object.entries(subMap[name] ?? {})
+          .sort((a, b) => b[1] - a[1])
+          .map(([subName, subSum]) => ({
+            name: subName,
+            amountMonthly: subSum / divideBy,
+            pct: amountSum > 0 ? (subSum / amountSum) * 100 : 0,
+          }))
+        const subSources = subEntries.length === 1 && subEntries[0].name === name ? [] : subEntries
+        return {
+          name,
+          amountMonthly: amountSum / divideBy,
+          pct: periodTotal > 0 ? (amountSum / periodTotal) * 100 : 0,
+          subSources,
+        }
+      })
+  }
+  const passiveTypeSources = buildPassiveTypeSources(curYMs, 12)
 
   // 24-month trend, same month range as the Lifestyle Inflation section above.
   const passiveTrend = allYMs.map(ym => {
@@ -901,6 +981,7 @@ export default async function ProgresoPage() {
         passiveIncomeData={{
           sources: passiveSources,
           sourcesByMonth: passiveSourcesByMonth,
+          typeSources: passiveTypeSources,
           trend: passiveTrend,
           topSourcePct: passiveTopSourcePct,
           yoyPct: passiveYoyPct,

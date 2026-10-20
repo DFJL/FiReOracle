@@ -64,6 +64,7 @@ type PassiveIncomeSource = { name: string; amountMonthly: number; pct: number; s
 type PassiveIncomeData = {
   sources: PassiveIncomeSource[]
   sourcesByMonth: Record<string, PassiveIncomeSource[]>
+  typeSources: PassiveIncomeSource[]
   trend: { ym: string; label: string; amount: number }[]
   topSourcePct: number
   yoyPct: number | null
@@ -1050,10 +1051,20 @@ function PassiveIncomeSection({
   const [hovIdx, setHovIdx] = useState<number | null>(null)
   const [expandedSource, setExpandedSource] = useState<string | null>(null)
   const [selectedYm, setSelectedYm] = useState<string | null>(null)
+  // 'categoria' = how the transaction is tagged in the ledger (TRANSCOMER,
+  // Rendimientos Farming/Crypto, etc.) — unchanged from before. 'tipo' = the
+  // podcast's Interés/Dividendo/Renta/Regalía/Airdrop taxonomy, same
+  // transactions regrouped by economic function instead of by source. Month
+  // click-to-filter only applies to 'categoria' (no per-month breakdown
+  // computed for 'tipo' — not worth doubling the server-side work for a
+  // view that's meant to answer "¿de qué tipo es?", not "¿cuándo?").
+  const [sourceView, setSourceView] = useState<'categoria' | 'tipo'>('categoria')
   const maxAmount = Math.max(...data.trend.map(d => d.amount), 1)
   const hov = hovIdx !== null ? data.trend[hovIdx] : null
-  const selectedMonth = selectedYm ? data.trend.find(m => m.ym === selectedYm) ?? null : null
-  const displaySources = selectedYm ? (data.sourcesByMonth[selectedYm] ?? []) : data.sources
+  const selectedMonth = sourceView === 'categoria' && selectedYm ? data.trend.find(m => m.ym === selectedYm) ?? null : null
+  const displaySources = sourceView === 'tipo'
+    ? data.typeSources
+    : selectedYm ? (data.sourcesByMonth[selectedYm] ?? []) : data.sources
 
   const concentrationColor = data.topSourcePct >= 70 ? '#f43f5e' : data.topSourcePct >= 45 ? '#f59e0b' : '#a3e635'
   const yoyColor = data.yoyPct === null ? '#71717a' : data.yoyPct >= 0 ? '#a3e635' : '#f43f5e'
@@ -1168,18 +1179,28 @@ function PassiveIncomeSection({
           single month when a bar above is selected, instead of the default
           trailing-12m average. */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">
             {selectedMonth ? `Fuentes — ${selectedMonth.label}` : 'Fuentes (promedio mensual)'}
           </p>
-          {selectedMonth && (
-            <button
-              onClick={() => setSelectedYm(null)}
-              className="text-[9px] font-black text-zinc-600 uppercase tracking-wider hover:text-[#84cc16] transition-colors"
-            >
-              ✕ ver promedio
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {selectedMonth && (
+              <button
+                onClick={() => setSelectedYm(null)}
+                className="text-[9px] font-black text-zinc-600 uppercase tracking-wider hover:text-[#84cc16] transition-colors"
+              >
+                ✕ ver promedio
+              </button>
+            )}
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+              {([{ k: 'categoria' as const, l: 'Categoría' }, { k: 'tipo' as const, l: 'Tipo' }]).map(o => (
+                <button key={o.k} onClick={() => setSourceView(o.k)}
+                  className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
+                    sourceView === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>{o.l}</button>
+              ))}
+            </div>
+          </div>
         </div>
         {displaySources.length === 0 ? (
           <p className="text-[10px] text-zinc-600">
