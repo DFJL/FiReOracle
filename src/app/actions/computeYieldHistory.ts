@@ -107,8 +107,16 @@ function computeYieldRows(
       const vendors = bucket.vendors ?? []
       if (!matchesVendor(tx.vendor, vendors)) continue
 
-      if (tx.is_passive_income && tx.movement_type === 'income') {
-        // Passive income: yield for the month
+      if (tx.is_passive_income && (tx.movement_type === 'income' || tx.movement_type == null)) {
+        // Passive income: yield for the month, whether it landed as cash
+        // (movement_type 'income') or stayed compounding/reinvested in the
+        // fund (movement_type null) — same distinction isRealizedPassiveIncome
+        // in progreso/page.tsx already makes. Requiring movement_type ===
+        // 'income' here meant a vendor_based bucket whose rendimientos are
+        // always reinvested (TRANSCOMER: 69 rendimiento rows, all null,
+        // ₡6.4M total) never had a single month with income_crc > 0 below,
+        // so it silently never appeared in "Rendimiento por Instrumento" at
+        // all — the same bug class as IBKR's missing snapshot yield.
         isIncome = true
         isDelta = true
         sign = 1
@@ -123,10 +131,6 @@ function computeYieldRows(
         // Liquidacion: decreases balance
         isDelta = true
         sign = -1
-      } else if (tx.is_passive_income && tx.movement_type == null) {
-        // Passive valuation: increases balance (not income)
-        isDelta = true
-        sign = 1
       } else {
         continue
       }
