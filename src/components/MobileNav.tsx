@@ -64,12 +64,12 @@ const ALL_GROUPS = [
     items: [
       { href: '/progreso', label: 'Progreso', iconName: 'target' },
       { href: '/metas',    label: 'Metas',    iconName: 'flag' },
-      { href: '/oracle',   label: 'Oracle',   iconName: 'sparkles' },
     ],
   },
   {
     label: 'Herramientas',
     items: [
+      { href: '/oracle',        label: 'Oracle',        iconName: 'sparkles' },
       { href: '/reporte',       label: 'Reporte',       iconName: 'filetext' },
       { href: '/auditoria',     label: 'Auditoría',     iconName: 'shield' },
       { href: '/configuracion', label: 'Configuración', iconName: 'settings' },

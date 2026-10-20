@@ -55,12 +55,12 @@ function buildNavGroups(pendingCount: number): NavGroup[] {
       items: [
         { href: '/progreso', label: 'Progreso',  icon: <Target size={16} /> },
         { href: '/metas',    label: 'Metas',     icon: <Flag size={16} /> },
-        { href: '/oracle',   label: 'Oracle',    icon: <Sparkles size={16} /> },
       ],
     },
     {
       label: 'Herramientas',
       items: [
+        { href: '/oracle',    label: 'Oracle',          icon: <Sparkles size={16} /> },
         { href: '/reporte',   label: 'Reporte Mensual', icon: <FileText size={16} /> },
         { href: '/auditoria', label: 'Auditoría',       icon: <ShieldCheck size={16} /> },
       ],
