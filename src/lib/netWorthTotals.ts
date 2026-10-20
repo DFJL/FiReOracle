@@ -68,6 +68,30 @@ export async function computeNetWorthTotals(
       .eq('is_active', true),
   ])
 
+  // Manually-tracked pension/retirement items (net_worth_items, category
+  // 'invertido' — OPC/ROP values not captured by any transaction-based
+  // bucket) — patrimonio/page.tsx adds these to its own activos total, so
+  // this canonical function has to as well or the auto snapshot cron (which
+  // calls only this function) silently undercounts activos the moment a
+  // user adds one of these. Same dedup rule as page.tsx: each item_name is
+  // a running value corrected over time via new dated rows, not a sum of
+  // all of them — take only the latest row per item_name (as of asOfDate).
+  const { data: investedItemsRaw } = await (() => {
+    let q = admin.from('net_worth_items')
+      .select('item_name, value_crc, snapshot_date')
+      .eq('user_id', userId)
+      .eq('category', 'invertido')
+    if (asOfDate) q = q.lte('snapshot_date', asOfDate)
+    return q.order('snapshot_date', { ascending: false })
+  })()
+  const seenItemNames = new Set<string>()
+  let itemsInvertido = 0
+  for (const item of investedItemsRaw ?? []) {
+    if (seenItemNames.has(item.item_name)) continue
+    seenItemNames.add(item.item_name)
+    itemsInvertido += Number(item.value_crc)
+  }
+
   const snapshotBuckets = (bucketRows ?? []).filter(b => b.bucket_type === 'snapshot_based' && b.account_id)
   const snapshotResults = await Promise.all(
     snapshotBuckets.map(async b => {
@@ -84,7 +108,7 @@ export async function computeNetWorthTotals(
 
   const liquidBalance = sumLiquid(movements ?? [], countableEnvelopeIds(envelopes ?? []))
 
-  let totalInvested = 0
+  let totalInvested = itemsInvertido
   for (const def of bucketRows ?? []) {
     if (def.bucket_type === 'snapshot_based') {
       totalInvested += snapshotBalances[def.id] ?? 0

@@ -834,8 +834,15 @@ export function PatrimonioView({
   const itemsInvertido = netWorthItems
     .filter(i => i.category === 'invertido')
     .reduce((s, i) => s + Number(i.value_crc), 0)
+  // totalInvested (prop) excludes pension buckets — page.tsx tracks those
+  // separately as totalPensiones for the Inversiones/Pensiones breakdown
+  // split, but this KPI card wants the full activos picture, same as
+  // page.tsx's own totalActivos. Dropping totalPensiones here used to make
+  // this card disagree with both that prop AND with the auto net-worth
+  // snapshot (which calls the canonical computeNetWorthTotals, not this
+  // local recompute) by however much is parked in pension funds.
   const dispLiq     = liquidBalance
-  const dispInv     = totalInvested + itemsInvertido
+  const dispInv     = totalInvested + totalPensiones + itemsInvertido
   const dispIliq    = iliquidTotal
   const dispPasivos = totalLiabilities
   const dispActivos = dispLiq + dispInv + dispIliq
