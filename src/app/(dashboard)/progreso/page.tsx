@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { computeNetWorthTotals } from '@/lib/netWorthTotals'
 import { ProgresoView } from './ProgresoView'
 import { isLoanPayment } from '../resumen/categoryUtils'
 import { buildRootCodeMap, cleanLifestyleOutliers, cleanSurvivalOutliers, avgMonthlyInWindow, outlierFence, computeGlobalP95, isExtraLoanPrincipalPayment } from '@/lib/lifestyleExpenses'
@@ -871,25 +872,27 @@ export default async function ProgresoPage() {
   const inversionSources = toSourceList(inversionSourceMap, ahorroInversion12m.inversion)
   const deudaSources     = toSourceList(deudaSourceMap, ahorroInversion12m.deuda)
 
-  // Mapa de riqueza: activos/pasivos/riqueza neta — the balance-sheet half
-  // only. Entradas/salidas/flujo neto live on /flujo (Flujo de Caja)
-  // instead, which already has a real period selector, a chart and a
-  // monthly table — duplicating that here with a second period picker
-  // would just be the same numbers shown worse. Two deliberate differences
-  // from activosInvertibles (the FIRE-ratio denominator): real estate here
-  // is GROSS value (not net of its mortgage — the mortgage shows up on its
-  // own as a pasivo instead, so nothing is subtracted twice), and bloqueado
-  // + bienes raíces are included (this is "what do I own", not "what can I
-  // retire on").
-  const realEstateGross = (assetRows ?? [])
-    .filter(a => a.is_investable)
-    .reduce((s, a) => s + Number(a.value_crc), 0)
-  const totalPasivos = [...loanBalanceById.values()].reduce((s, v) => s + v, 0)
-  const wealthMapActivos = liquidBalance + semiLiquidInvested + lockedInvested + realEstateGross
+  // Mapa de riqueza — all 6 numbers in one glance (the podcast's whole
+  // point: see where you stand before diving into the FIRE number). Each
+  // half still lives in its own detail page for the real work — /flujo has
+  // the period selector, chart and monthly table for entradas/salidas;
+  // /patrimonio has the history chart and the full asset/liability editor
+  // for activos/pasivos — this card just surfaces the headline numbers with
+  // a link to each, instead of re-deriving (and risking drifting from)
+  // either one. Activos/pasivos reuse computeNetWorthTotals verbatim — the
+  // exact same function /patrimonio's own snapshot tooling calls — so this
+  // card can never show a different riqueza neta than that page does.
+  const netWorthTotals = await computeNetWorthTotals(admin, user.id)
+  const wealthMapActivos = netWorthTotals.liquid_crc + netWorthTotals.invested_crc + netWorthTotals.iliquid_crc
+  const wealthMapEntradas = avgMonthlyIncome + avgMonthlyPassiveIncome
+  const wealthMapSalidas  = avgMonthlyObligations
   const wealthMap = {
+    entradas: wealthMapEntradas,
+    salidas: wealthMapSalidas,
+    flujoNeto: wealthMapEntradas - wealthMapSalidas,
     activos: wealthMapActivos,
-    pasivos: totalPasivos,
-    riquezaNeta: wealthMapActivos - totalPasivos,
+    pasivos: netWorthTotals.liabilities_crc,
+    riquezaNeta: wealthMapActivos - netWorthTotals.liabilities_crc,
   }
 
   return (

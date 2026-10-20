@@ -72,6 +72,9 @@ type PassiveIncomeData = {
 }
 
 type WealthMap = {
+  entradas: number
+  salidas: number
+  flujoNeto: number
   activos: number
   pasivos: number
   riquezaNeta: number
@@ -244,16 +247,33 @@ export function ProgresoView({
         </div>
       </div>
 
-      {/* Mapa de riqueza — activos/pasivos/riqueza neta ahora mismo. El lado
-          de entradas/salidas/flujo neto vive en /flujo (Flujo de Caja), que
-          ya tiene su propio selector de período, gráfico y tabla mensual. */}
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-3">
+      {/* Mapa de riqueza — las 6 cifras en una sola tarjeta, de un vistazo:
+          entradas/salidas/flujo neto (12m) arriba, activos/pasivos/riqueza
+          neta (ahora) abajo. El detalle de cada mitad — selector de período,
+          gráfico, tabla mensual, historial — sigue viviendo en /flujo y
+          /patrimonio respectivamente, linkeados desde acá, para no duplicar
+          esas vistas completas dentro de /progreso. */}
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-4">
         <div className="flex items-center justify-between">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Mapa de Riqueza</p>
-          <Link href="/flujo" className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
-            ver flujo de caja →
-          </Link>
+          <p className="text-[9px] text-zinc-600">últimos 12 meses</p>
         </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <WealthMapTile label="Entradas" value={fmt(wealthMap.entradas)} color="#a3e635" />
+          <WealthMapTile label="Salidas" value={fmt(wealthMap.salidas)} color="#71717a" />
+          <WealthMapTile
+            label="Flujo Neto"
+            value={fmt(wealthMap.flujoNeto)}
+            color={wealthMap.flujoNeto >= 0 ? '#a3e635' : '#f43f5e'}
+            emphasized
+          />
+        </div>
+        <Link href="/flujo" className="block text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors -mt-1">
+          ver flujo de caja (período, gráfico, detalle mensual) →
+        </Link>
+
+        <div className="h-px bg-white/[0.06]" />
 
         <div className="grid grid-cols-3 gap-3">
           <WealthMapTile label="Activos" value={fmt(wealthMap.activos)} color="#a3e635" />
@@ -265,6 +285,9 @@ export function ProgresoView({
             emphasized
           />
         </div>
+        <Link href="/patrimonio" className="block text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors -mt-1">
+          ver patrimonio (historial, detalle de activos y pasivos) →
+        </Link>
       </div>
 
       {/* FIRE config missing banner */}
