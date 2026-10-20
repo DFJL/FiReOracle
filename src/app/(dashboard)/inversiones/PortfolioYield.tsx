@@ -3,6 +3,7 @@
 import { useState, useTransition, useRef } from 'react'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { recomputeYieldHistory } from '@/app/actions/computeYieldHistory'
+import { useCurrency } from '@/lib/currency'
 
 type YieldRow = {
   product_name: string
@@ -16,7 +17,6 @@ type YieldRow = {
 type Props = {
   rows: YieldRow[]
   exchangeRate: ExchangeRate
-  defaultCurrency: 'CRC' | 'USD'
 }
 
 const INSTRUMENT_COLORS: [string, string][] = [
@@ -36,8 +36,8 @@ function instrumentColor(name: string) {
   return '#818cf8'
 }
 
-export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
-  const [currency, setCurrency]         = useState<'CRC' | 'USD'>(defaultCurrency)
+export function PortfolioYield({ rows, exchangeRate }: Props) {
+  const { currency } = useCurrency()
   const [rangeMonths, setRangeMonths]   = useState<number>(24)
   const [hoverIdx, setHoverIdx]         = useState<number | null>(null)
   const [recalcMsg, setRecalcMsg]       = useState<string | null>(null)
@@ -164,7 +164,7 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Header + range selector + currency toggle + recalculate button */}
+      {/* Header + range selector + recalculate button */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Rendimiento por Instrumento</p>
         <div className="flex items-center gap-2 flex-wrap">
@@ -175,16 +175,6 @@ export function PortfolioYield({ rows, exchangeRate, defaultCurrency }: Props) {
                 className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
                   rangeMonths === r.v ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
                 }`}>{r.l}</button>
-            ))}
-          </div>
-
-          {/* Currency toggle */}
-          <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-            {(['CRC', 'USD'] as const).map(c => (
-              <button key={c} onClick={() => setCurrency(c)}
-                className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
-                  currency === c ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                }`}>{c === 'CRC' ? '₡' : '$'}</button>
             ))}
           </div>
 

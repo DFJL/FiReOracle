@@ -7,7 +7,7 @@ import { AccountSyncPanel } from '@/components/AccountSyncPanel'
 import { CryptoLinksPanel } from '@/components/CryptoLinksPanel'
 import { upsertPortfolioTarget, type PortfolioTarget } from '@/app/actions/portfolio'
 import { syncCryptoFundedInvestments } from '@/app/actions/cryptoSync'
-import { useCurrency } from './CurrencyContext'
+import { useCurrency } from '@/lib/currency'
 
 function fmtCRC(n: number) {
   if (Math.abs(n) >= 1_000_000) return `₡${(n / 1_000_000).toFixed(2)}M`
@@ -91,23 +91,6 @@ function Donut({
         )
       })}
     </svg>
-  )
-}
-
-// ── Currency toggle ───────────────────────────────────────────────────────────
-
-function CurrencyToggle({ currency, onChange }: { currency: 'CRC' | 'USD'; onChange: (c: 'CRC' | 'USD') => void }) {
-  return (
-    <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-      {(['CRC', 'USD'] as const).map(c => (
-        <button key={c} onClick={() => onChange(c)}
-          className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
-            currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-          }`}>
-          {c === 'CRC' ? '₡ CRC' : '$ USD'}
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -237,7 +220,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   targets: PortfolioTarget[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
-  const { currency, setCurrency } = useCurrency()
+  const { currency } = useCurrency()
   const [showAllTx, setShowAllTx] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [targets, setTargets] = useState(initialTargets)
@@ -318,7 +301,6 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
           <p className="text-3xl font-black text-white tracking-tight leading-none">Portafolio</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <CurrencyToggle currency={currency} onChange={setCurrency} />
           <p className="text-[9px] text-zinc-600">
             TC venta ₡{rate.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             {' · '}{exchangeRate.source} · {exchangeRate.date}

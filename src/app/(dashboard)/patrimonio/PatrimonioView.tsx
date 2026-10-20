@@ -21,6 +21,7 @@ import type { ExchangeRate } from '@/lib/exchange-rate'
 import type { NetWorthItem } from '@/app/actions/netWorthItems'
 import type { Milestone } from '@/lib/milestones'
 import { ComposicionDetallada } from './ComposicionDetallada'
+import { useCurrency, formatCurrency } from '@/lib/currency'
 
 type Asset = {
   id: string; name: string; asset_type: string
@@ -91,14 +92,6 @@ function fmtShort(v: number) {
   if (abs >= 1_000_000) return `₡${(v / 1_000_000).toFixed(1)}M`
   if (abs >= 1_000)     return `₡${(v / 1_000).toFixed(0)}K`
   return `₡${Math.round(v).toLocaleString('es-CR')}`
-}
-
-function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
-  const val  = curr === 'CRC' ? v : v / rate
-  const sym  = curr === 'CRC' ? '₡' : '$'
-  const abs  = Math.abs(val)
-  if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(2)}M`
-  return `${sym}${Math.round(val).toLocaleString('es-CR')}`
 }
 
 // Full precision, never abbreviated — used on per-item lines so a bucket can be
@@ -644,10 +637,10 @@ export function PatrimonioView({
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
+  const { currency } = useCurrency()
 
   const rate = exchangeRate.sell
-  const fmt = (v: number) => fmtAmt(v, currency, rate)
+  const fmt = (v: number) => formatCurrency(v, currency, rate)
   const fmtFull = (v: number) => fmtAmtFull(v, currency, rate)
   const loanById = Object.fromEntries(loans.map(l => [l.id, l]))
 
@@ -870,14 +863,6 @@ export function PatrimonioView({
           {lastSnap && (
             <p className="text-[10px] text-zinc-600 mt-0.5">Snapshot {lastSnap.snapshot_date.slice(0,7)}</p>
           )}
-        </div>
-        <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] mt-1 shrink-0">
-          {(['CRC', 'USD'] as const).map(c => (
-            <button key={c} onClick={() => setCurrency(c)}
-              className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
-                currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-              }`}>{c === 'CRC' ? '₡' : '$'}</button>
-          ))}
         </div>
       </div>
 

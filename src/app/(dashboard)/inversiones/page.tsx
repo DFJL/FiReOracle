@@ -14,7 +14,6 @@ import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
 import type { PortfolioModelCategory } from '@/lib/portfolioModel'
-import { CurrencyProvider } from './CurrencyContext'
 
 const LIQUID_KEY = '__liquidez__'
 
@@ -31,7 +30,6 @@ export default async function InversionesPage() {
     { data: movements },
     { data: envelopes },
     { data: yieldRows },
-    { data: fireConfig },
     { data: incomeTxs },
     { data: categories },
     { data: lifeEventRows },
@@ -70,11 +68,6 @@ export default async function InversionesPage() {
       .select('product_name, year_month, yield_usd, invested_usd, yield_pct, exchange_rate, source, bucket_id')
       .eq('user_id', user.id)
       .order('year_month', { ascending: true }),
-    admin
-      .from('user_financial_config')
-      .select('preferred_currency')
-      .eq('user_id', user.id)
-      .maybeSingle(),
     admin
       .from('transactions')
       .select('date, amount, movement_type')
@@ -589,7 +582,6 @@ export default async function InversionesPage() {
   }))
 
   return (
-    <CurrencyProvider>
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PortfolioView
         buckets={buckets}
@@ -617,7 +609,6 @@ export default async function InversionesPage() {
           exchange_rate: Number(r.exchange_rate),
         }))}
         exchangeRate={exchangeRate}
-        defaultCurrency={(fireConfig?.preferred_currency as 'CRC' | 'USD') ?? 'USD'}
       />
       <PortfolioAnalysis
         buckets={buckets.filter(b => b.key !== LIQUID_KEY)}
@@ -635,6 +626,5 @@ export default async function InversionesPage() {
         exchangeRate={exchangeRate}
       />
     </div>
-    </CurrencyProvider>
   )
 }

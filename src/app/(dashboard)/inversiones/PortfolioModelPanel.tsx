@@ -15,7 +15,7 @@ import {
   updateAssetModelCategory,
   updatePositionModelCategory,
 } from '@/app/actions/portfolioModel'
-import { useCurrency } from './CurrencyContext'
+import { useCurrency } from '@/lib/currency'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 
 function fmtCRC(n: number) {

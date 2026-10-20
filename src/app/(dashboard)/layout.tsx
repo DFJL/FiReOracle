@@ -26,6 +26,8 @@ import {
 import { getPendingCount } from '@/app/actions/inbox'
 import { AlertsServer } from './AlertsServer'
 import { DailyFactServer } from './DailyFactServer'
+import { CurrencyProvider } from '@/lib/currency'
+import { CurrencyToggle } from '@/components/CurrencyToggle'
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: number }
 type NavGroup = { label: string; items: NavItem[] }
@@ -90,16 +92,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const NAV_GROUPS = buildNavGroups(pendingCount)
 
   return (
+    <CurrencyProvider>
     <div className="min-h-screen bg-[#080c08] text-[#f0f4ee] flex">
       {/* Sidebar — hidden on mobile, visible md+ */}
       <aside className="hidden md:flex w-52 shrink-0 border-r border-[#a3e635]/[0.08] p-4 flex-col gap-1 fixed h-full z-20 bg-[#080c08]">
-        <div className="mb-8 px-2 flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-[#a3e635] flex items-center justify-center text-xs font-black text-black shrink-0">
-            F
+        <div className="mb-8 px-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-md bg-[#a3e635] flex items-center justify-center text-xs font-black text-black shrink-0">
+              F
+            </div>
+            <span className="text-xs font-black tracking-widest uppercase text-[#a3e635] truncate">
+              FiReOracle
+            </span>
           </div>
-          <span className="text-xs font-black tracking-widest uppercase text-[#a3e635]">
-            FiReOracle
-          </span>
+          <CurrencyToggle />
         </div>
 
         <nav className="flex flex-col gap-3">
@@ -144,6 +150,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <MobilePageTitle />
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <CurrencyToggle />
             <Link href="/configuracion" className="p-2 rounded-lg text-zinc-500 hover:text-[#a3e635] hover:bg-white/[0.04] transition-colors">
               <Settings size={17} />
             </Link>
@@ -187,5 +194,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* Mobile bottom nav — 5 pinned tabs + slide-up "Más" menu covering all modules */}
       <MobileNav pendingCount={pendingCount} />
     </div>
+    </CurrencyProvider>
   )
 }

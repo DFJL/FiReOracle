@@ -5,6 +5,7 @@ import { Info, X } from 'lucide-react'
 import Link from 'next/link'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { createLifeEvent, deleteLifeEvent } from '@/app/actions/lifeEvents'
+import { useCurrency, formatCurrency } from '@/lib/currency'
 
 export type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
 
@@ -110,14 +111,6 @@ type Props = {
   milestones: Milestone[]
 }
 
-function fmtAmt(v: number, curr: 'CRC' | 'USD', rate: number) {
-  const val = curr === 'CRC' ? v : v / rate
-  const sym = curr === 'CRC' ? '₡' : '$'
-  const abs = Math.abs(val)
-  if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(2)}M`
-  return `${sym}${Math.round(val).toLocaleString('es-CR')}`
-}
-
 function WealthMapTile({ label, value, color, emphasized }: { label: string; value: string; color: string; emphasized?: boolean }) {
   return (
     <div className="min-w-0">
@@ -138,9 +131,9 @@ export function ProgresoView({
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle, milestones,
 }: Props) {
-  const [currency, setCurrency] = useState<'CRC' | 'USD'>('USD')
+  const { currency } = useCurrency()
   const rate = exchangeRate.sell
-  const fmt  = (v: number) => fmtAmt(v, currency, rate)
+  const fmt  = (v: number) => formatCurrency(v, currency, rate)
 
   // Savings rate = investment deposits / total income
   const savingsRate    = avgMonthlyIncome > 0 ? Math.min(avgMonthlyDeposits / avgMonthlyIncome, 1) : 0
@@ -230,21 +223,9 @@ export function ProgresoView({
     <div className="space-y-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Independencia Financiera</p>
-          <h1 className="text-xl font-black text-white">Progreso FIRE</h1>
-        </div>
-        <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-1 border border-white/[0.06]">
-          {(['CRC', 'USD'] as const).map(c => (
-            <button key={c} onClick={() => setCurrency(c)}
-              className={`px-2.5 py-1 rounded text-xs font-bold transition-colors ${
-                currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-              }`}>
-              {c === 'CRC' ? '₡' : '$'}
-            </button>
-          ))}
-        </div>
+      <div>
+        <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Independencia Financiera</p>
+        <h1 className="text-xl font-black text-white">Progreso FIRE</h1>
       </div>
 
       {/* Mapa de riqueza — las 6 cifras en una sola tarjeta, de un vistazo:

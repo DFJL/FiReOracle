@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import type { Milestone } from '@/lib/milestones'
+import { useCurrency, formatCurrency } from '@/lib/currency'
 
 export type HistoryPoint = {
   month: string  // "YYYY-MM"
@@ -26,14 +27,6 @@ const TOTAL_COLOR = '#a3e635'
 // Both are aggregates, never components — they must not be summed into anything.
 const INVESTED_KEY   = '__invertido__'
 const INVESTED_COLOR = '#38bdf8'
-
-function fmtV(n: number, currency: 'CRC' | 'USD', rate: number) {
-  const v = currency === 'CRC' ? n : n / rate
-  const sym = currency === 'CRC' ? '₡' : '$'
-  const abs = Math.abs(v)
-  if (abs >= 1_000_000) return `${sym}${(v / 1_000_000).toFixed(2)}M`
-  return `${sym}${Math.round(v).toLocaleString('es-CR')}`
-}
 
 function monthLabel(m: string) {
   const [y, mo] = m.split('-')
@@ -62,9 +55,9 @@ export function PortfolioHistory({
   exchangeRate: ExchangeRate
   milestones: Milestone[]
 }) {
+  const { currency } = useCurrency()
   const [rangeMonths, setRangeMonths] = useState<number>(12)
   const [visible, setVisible]         = useState<Set<string>>(new Set([TOTAL_KEY, INVESTED_KEY]))
-  const [currency, setCurrency]       = useState<'CRC' | 'USD'>('USD')
   const [hoverIdx, setHoverIdx]       = useState<number | null>(null)
   const [selectedMilestone, setSelectedMilestone] = useState<Milestone | null>(null)
   const svgRef                        = useRef<SVGSVGElement>(null)
@@ -73,7 +66,7 @@ export function PortfolioHistory({
 
   const rate      = exchangeRate.sell
   const toDisplay = (v: number) => currency === 'CRC' ? v : v / rate
-  const fmt       = (v: number) => fmtV(v, currency, rate)
+  const fmt       = (v: number) => formatCurrency(v, currency, rate)
 
   // Slice by time range
   const filtered = points.slice(-rangeMonths)
@@ -150,15 +143,6 @@ export function PortfolioHistory({
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-[9px] font-black text-[#a3e635]/50 uppercase tracking-[0.18em]">Evolución histórica</p>
         <div className="flex items-center gap-2">
-          {/* Currency */}
-          <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-            {(['CRC', 'USD'] as const).map(c => (
-              <button key={c} onClick={() => setCurrency(c)}
-                className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
-                  currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-                }`}>{c === 'CRC' ? '₡' : '$'}</button>
-            ))}
-          </div>
           {/* Range */}
           <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
             {RANGE_OPTIONS.map(r => (

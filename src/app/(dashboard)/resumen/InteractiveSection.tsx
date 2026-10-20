@@ -6,6 +6,7 @@ import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, i
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
+import { useCurrency } from '@/lib/currency'
 import {
   deleteTransaction, type UpdateTransactionInput,
   getEnvelopeEditData, updateTransactionEnvelopeLink,
@@ -1138,13 +1139,12 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, defaultCurrency }: {
+export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate }: {
   transactions: TxClient[]
   categories: Category[]
   buckets?: InvestmentBucket[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
-  defaultCurrency?: 'CRC' | 'USD'
 }) {
   // Local copy so edits/deletes are reflected instantly without a page re-render
   const [txList, setTxList] = useState<TxClient[]>(transactions)
@@ -1162,7 +1162,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const [egresosSubtab, setEgresosSub]   = useState<EgresosSubtab>('gastos')
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
-  const [currency, setCurrency]     = useState<'CRC' | 'USD'>(defaultCurrency ?? 'USD')
+  const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
   const [showSankey, setShowSankey] = useState(false)
   const [showDetail, setShowDetail] = useState(true)
@@ -1384,18 +1384,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
             </p>
             <p className="text-3xl font-black text-white tracking-tight leading-none">Felipe</p>
           </div>
-          {/* Currency toggle */}
           <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-1 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-              {(['CRC', 'USD'] as const).map(c => (
-                <button key={c} onClick={() => setCurrency(c)}
-                  className={`px-3 py-1 rounded-md text-[10px] font-black tracking-wider transition-all ${
-                    currency === c ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}>
-                  {c === 'CRC' ? '₡ CRC' : '$ USD'}
-                </button>
-              ))}
-            </div>
             {exchangeRate && (
               <p className="text-[9px] text-zinc-600">
                 TC ₡{tcSell.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
