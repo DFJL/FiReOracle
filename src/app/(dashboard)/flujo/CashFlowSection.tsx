@@ -18,7 +18,7 @@ export interface TxRow {
   is_passive_income: boolean | null
 }
 
-type PeriodKey = 'mtd' | 'ytd' | '1a' | '2a' | 'all'
+type PeriodKey = 'mtd' | '3m' | '6m' | 'ytd' | '1a' | '2a' | 'all'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,8 @@ const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct'
 
 const PERIODS: { key: PeriodKey; label: string; full: string }[] = [
   { key: 'mtd', label: 'MTD',  full: 'Mes en curso' },
+  { key: '3m',  label: '3M',   full: 'Últimos 3 meses' },
+  { key: '6m',  label: '6M',   full: 'Últimos 6 meses' },
   { key: 'ytd', label: 'YTD',  full: 'Año en curso' },
   { key: '1a',  label: '1A',   full: 'Últimos 12 meses' },
   { key: '2a',  label: '2A',   full: 'Últimos 24 meses' },
@@ -35,6 +37,8 @@ const PERIODS: { key: PeriodKey; label: string; full: string }[] = [
 function periodCutoff(p: PeriodKey): string | null {
   const now = new Date()
   if (p === 'mtd') return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`
+  if (p === '3m')  { const d = new Date(now); d.setMonth(d.getMonth()-3); return d.toISOString().slice(0,10) }
+  if (p === '6m')  { const d = new Date(now); d.setMonth(d.getMonth()-6); return d.toISOString().slice(0,10) }
   if (p === 'ytd') return `${now.getFullYear()}-01-01`
   if (p === '1a')  { const d = new Date(now); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,10) }
   if (p === '2a')  { const d = new Date(now); d.setFullYear(d.getFullYear()-2); return d.toISOString().slice(0,10) }

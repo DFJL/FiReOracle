@@ -72,9 +72,6 @@ type PassiveIncomeData = {
 }
 
 type WealthMap = {
-  entradas: number
-  salidas: number
-  flujoNeto: number
   activos: number
   pasivos: number
   riquezaNeta: number
@@ -247,27 +244,16 @@ export function ProgresoView({
         </div>
       </div>
 
-      {/* Mapa de riqueza — entradas/salidas/flujo neto (el mes) y
-          activos/pasivos/riqueza neta (el patrimonio), lado a lado, para
-          saber "dónde estoy parado" antes de entrar al detalle de FIRE. */}
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-4">
+      {/* Mapa de riqueza — activos/pasivos/riqueza neta ahora mismo. El lado
+          de entradas/salidas/flujo neto vive en /flujo (Flujo de Caja), que
+          ya tiene su propio selector de período, gráfico y tabla mensual. */}
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Mapa de Riqueza</p>
-          <p className="text-[9px] text-zinc-600">últimos 12 meses</p>
+          <Link href="/flujo" className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            ver flujo de caja →
+          </Link>
         </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <WealthMapTile label="Entradas" value={fmt(wealthMap.entradas)} color="#a3e635" />
-          <WealthMapTile label="Salidas" value={fmt(wealthMap.salidas)} color="#71717a" />
-          <WealthMapTile
-            label="Flujo Neto"
-            value={fmt(wealthMap.flujoNeto)}
-            color={wealthMap.flujoNeto >= 0 ? '#a3e635' : '#f43f5e'}
-            emphasized
-          />
-        </div>
-
-        <div className="h-px bg-white/[0.06]" />
 
         <div className="grid grid-cols-3 gap-3">
           <WealthMapTile label="Activos" value={fmt(wealthMap.activos)} color="#a3e635" />
