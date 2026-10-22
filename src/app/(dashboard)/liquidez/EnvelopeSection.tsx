@@ -470,10 +470,18 @@ function EnvelopeHistoryPanel({
         )}
         {movements && movements.length > 0 && (
           <div>
-            <div className="px-4 pt-2 pb-1">
+            <div className="px-4 pt-2 pb-1 flex items-center justify-between gap-2">
               <p className="text-[8px] font-black text-zinc-700 uppercase tracking-[0.16em]">
                 Historial · {movements.length} movimiento{movements.length !== 1 ? 's' : ''}
               </p>
+              {(() => {
+                const totalInterest = movements.filter(isInterestCredit).reduce((s, m) => s + m.amount, 0)
+                return totalInterest > 0 ? (
+                  <p className="text-[8px] font-black text-amber-500/70 uppercase tracking-[0.1em] shrink-0">
+                    Int. acreditado: {fmtCRC(totalInterest)}
+                  </p>
+                ) : null
+              })()}
             </div>
             {movements.map(m => (
               <div key={m.id}>
@@ -490,8 +498,12 @@ function EnvelopeHistoryPanel({
                     <span className="text-[9px] text-zinc-600 tabular-nums shrink-0 w-11">
                       {fmtDate(m.date)}
                     </span>
-                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 ${TYPE_STYLE[m.movement_type]}`}>
-                      {TYPE_LABEL[m.movement_type]}
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 ${
+                      isInterestCredit(m) ? TYPE_STYLE.interes : TYPE_STYLE[m.movement_type]
+                    }`}
+                      title={isInterestCredit(m) && m.movement_type === 'traslado_in' ? 'Interés acreditado proporcionalmente' : undefined}
+                    >
+                      {isInterestCredit(m) ? 'Int' : TYPE_LABEL[m.movement_type]}
                     </span>
                     <span className={`text-[11px] font-black tabular-nums shrink-0 ${
                       m.amount >= 0 ? 'text-[#a3e635]' : 'text-rose-400'
