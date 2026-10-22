@@ -17,6 +17,7 @@ export type SubEnvelope = {
   parent_envelope_id: string
   balance: number   // principal only (excludes interes movements)
   interest: number  // sum of interes movements (reference only)
+  interestCredited: number  // every interest credit ever received, legacy + ongoing (reference only, display annotation)
   counts_as_ahorro: boolean
   receivesInterest: boolean
   createdAt: string  // YYYY-MM-DD — authoritative start for time-weighting, not inferred from movement history
@@ -35,6 +36,7 @@ export type Envelope = {
   parent_envelope_id: null
   balance: number   // principal only; sum of children if has children
   interest: number  // reference only; sum of children if has children
+  interestCredited: number  // every interest credit ever received, legacy + ongoing (reference only, display annotation)
   counts_as_ahorro: boolean
   receivesInterest: boolean
   createdAt: string
@@ -111,7 +113,7 @@ export default async function LiquidezPage() {
   }
 
   // Canonical envelope rule, shared with /auditoria and /patrimonio
-  const { ownBalance, ownInterest, countableIds } =
+  const { ownBalance, ownInterest, ownInterestCredited, countableIds } =
     computeEnvelopeBalances(envelopes ?? [], movements ?? [])
 
   // Per-envelope dated movement history — only leaves need this (interest
@@ -153,6 +155,7 @@ export default async function LiquidezPage() {
       // rolled up: an intermediate parent's balance includes its grandchildren
       balance: rollupBalance(e.id, childrenByParent, ownBalance, countableIds),
       interest: ownInterest[e.id] ?? 0,
+      interestCredited: ownInterestCredited[e.id] ?? 0,
       counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
       receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
       createdAt: ((e as { created_at?: string }).created_at ?? '').slice(0, 10),
@@ -180,6 +183,9 @@ export default async function LiquidezPage() {
       const interest = children.length > 0
         ? children.reduce((s, c) => s + c.interest, 0)
         : (ownInterest[e.id] ?? 0)
+      const interestCredited = children.length > 0
+        ? children.reduce((s, c) => s + c.interestCredited, 0)
+        : (ownInterestCredited[e.id] ?? 0)
       return {
         id: e.id,
         name: e.name,
@@ -191,6 +197,7 @@ export default async function LiquidezPage() {
         parent_envelope_id: null,
         balance,
         interest,
+        interestCredited,
         counts_as_ahorro: (e as { counts_as_ahorro?: boolean }).counts_as_ahorro ?? false,
         receivesInterest: (e as { receives_interest?: boolean }).receives_interest ?? true,
         createdAt: ((e as { created_at?: string }).created_at ?? '').slice(0, 10),

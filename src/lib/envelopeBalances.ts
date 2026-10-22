@@ -22,6 +22,22 @@ export type MovementRow = {
   envelope_id: string
   amount: string | number
   movement_type: string | null
+  notes?: string | null
+}
+
+/**
+ * True for any movement that represents a real bank interest credit —
+ * either the legacy direct-credit path (movement_type 'interes', money
+ * created from nothing — used before a custodio had a holding sobre) or
+ * the current conservation-respecting path (a transfer out of that
+ * holding sobre, typed 'traslado_in' so it doesn't inflate the liquid
+ * total, tagged by notes instead of type). Needed wherever "interest
+ * credited" has to mean both, not just the older of the two.
+ */
+export function isInterestCredit(
+  m: { movement_type?: string | null; type?: string | null; notes?: string | null }
+): boolean {
+  return (m.movement_type ?? m.type) === 'interes' || /acreditado proporcionalmente/i.test(m.notes ?? '')
 }
 
 function isActive(e: EnvelopeRow): boolean {
@@ -60,8 +76,17 @@ export function sumLiquid(movements: MovementRow[], countable: Set<string>): num
 export type EnvelopeBalances = {
   /** Principal per envelope (excludes 'interes' movements). */
   ownBalance: Record<string, number>
-  /** Accrued interest per envelope, tracked separately for reference. */
+  /** Legacy direct-credit interest per envelope ('interes' movements only — reference only). */
   ownInterest: Record<string, number>
+  /**
+   * Every interest credit ever received, legacy and ongoing combined
+   * (isInterestCredit) — reference only, for display. Deliberately NOT
+   * part of the ownBalance/ownInterest partition above (that split stays
+   * exactly as it was so nothing that adds balance + interest for a total
+   * double-counts the ongoing credits, which already sit inside ownBalance
+   * since they're typed 'traslado_in').
+   */
+  ownInterestCredited: Record<string, number>
   parentIds: Set<string>
   /** Root-level containers — own movements excluded from the total. */
   rootParentIds: Set<string>
@@ -76,9 +101,13 @@ export function computeEnvelopeBalances(
 ): EnvelopeBalances {
   const ownBalance: Record<string, number> = {}
   const ownInterest: Record<string, number> = {}
+  const ownInterestCredited: Record<string, number> = {}
   for (const m of movements) {
     const target = m.movement_type === 'interes' ? ownInterest : ownBalance
     target[m.envelope_id] = (target[m.envelope_id] ?? 0) + Number(m.amount)
+    if (isInterestCredit(m)) {
+      ownInterestCredited[m.envelope_id] = (ownInterestCredited[m.envelope_id] ?? 0) + Number(m.amount)
+    }
   }
 
   const parentIds = parentEnvelopeIds(envelopes)
@@ -92,6 +121,7 @@ export function computeEnvelopeBalances(
   return {
     ownBalance,
     ownInterest,
+    ownInterestCredited,
     parentIds,
     rootParentIds,
     countableIds,

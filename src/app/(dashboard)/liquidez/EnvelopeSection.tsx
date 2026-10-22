@@ -11,7 +11,7 @@ import type { MovType, EnvelopeMovement } from './actions'
 import { createEnvelope, createSubEnvelope, deleteSubEnvelope, updateEnvelope } from '@/app/actions/envelopes'
 import { addFinancialAccount, updateFinancialAccount, deleteFinancialAccount } from '@/app/actions/financialAccounts'
 import type { FinancialAccountDetail } from '@/app/actions/financialAccounts'
-import { timeWeightedAvgBalance } from '@/lib/envelopeBalances'
+import { timeWeightedAvgBalance, isInterestCredit } from '@/lib/envelopeBalances'
 
 function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
@@ -541,13 +541,9 @@ function EnvelopeHistoryPanel({
 // has opted in (persisted per-envelope, so "Corte de pelo" stays excluded
 // without re-choosing it every time).
 
-// A movement is a past interest distribution if it's tagged 'interes' (no
-// source sobre existed for that custodio) or its notes carry the marker
-// distributeInterest writes either way — needed because a sourced credit is
-// typed 'traslado_in' for conservation, not 'interes'.
-function isInterestCredit(m: { type: string; notes?: string | null }): boolean {
-  return m.type === 'interes' || /acreditado proporcionalmente/i.test(m.notes ?? '')
-}
+// isInterestCredit now lives in @/lib/envelopeBalances — shared with the
+// balance computation in page.tsx so the "+X int." annotation and this
+// modal's weighting agree on what counts as a real interest credit.
 
 function InterestModal({
   custodio, envelopes, onClose,
@@ -791,9 +787,9 @@ function SubEnvelopeRow({ sub, isOpen, onToggle, leafEnvelopes }: {
           <span className={`text-[11px] font-black tabular-nums ${
             (sub.balance + sub.interest) > 0 ? 'text-zinc-300' : 'text-zinc-600'
           }`}>{fmtCRC(sub.balance + sub.interest)}</span>
-          {sub.interest > 0 && (
+          {sub.interestCredited > 0 && (
             <span className="text-[8px] tabular-nums text-amber-500/50">
-              +{fmtCRC(sub.interest)} int.
+              +{fmtCRC(sub.interestCredited)} int.
             </span>
           )}
         </div>
@@ -1286,9 +1282,9 @@ export function EnvelopeSection({
                   <span className={`text-xs font-black tabular-nums ${
                     env.balance > 0 ? 'text-zinc-100' : 'text-zinc-600'
                   }`}>{fmtCRC(env.balance)}</span>
-                  {env.interest > 0 && (
+                  {env.interestCredited > 0 && (
                     <span className="text-[8px] tabular-nums text-amber-500/50">
-                      +{fmtCRC(env.interest)} int.
+                      +{fmtCRC(env.interestCredited)} int.
                     </span>
                   )}
                 </div>
