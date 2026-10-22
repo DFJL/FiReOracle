@@ -616,21 +616,21 @@ function InterestModal({
   // created).
   const weighted = targetEnvelopes.map(e => {
     const effectiveFrom = e.createdAt && e.createdAt > dateFrom ? e.createdAt : dateFrom
-    return {
-      id: e.id,
-      name: e.name,
-      weight: included[e.id] && effectiveFrom <= dateTo
-        ? Math.max(0, timeWeightedAvgBalance(
-            e.ownMovements.filter(m => !isInterestCredit(m)), effectiveFrom, dateTo,
-          ))
-        : 0,
-    }
+    const rawWeight = included[e.id] && effectiveFrom <= dateTo
+      ? timeWeightedAvgBalance(e.ownMovements.filter(m => !isInterestCredit(m)), effectiveFrom, dateTo)
+      : 0
+    return { id: e.id, name: e.name, weight: Math.max(0, rawWeight), rawWeight }
   })
   const totalWeight = weighted.reduce((s, w) => s + w.weight, 0)
   const allocations = weighted.map(w => ({
     envelopeId: w.id,
     name: w.name,
     amount: totalWeight > 0 ? (w.weight / totalWeight) * totalInterest : 0,
+    // Clamped to 0 above but still negative here — the sobre was in the
+    // hole (e.g. a self-loan draw) for most of the period, not just empty.
+    // Surfaced separately so it doesn't read the same as a sobre with no
+    // money in it at all.
+    wasNegative: w.rawWeight < -0.5,
   }))
 
   function submit() {
@@ -700,10 +700,19 @@ function InterestModal({
                 onChange={() => toggle(a.envelopeId)}
                 className="accent-[#a3e635] w-3.5 h-3.5 shrink-0" />
               <span className="flex-1 text-[10px] text-zinc-400 truncate">{a.name}</span>
-              <span className={`text-[10px] tabular-nums shrink-0 ${included[a.envelopeId] ? 'text-[#a3e635]' : 'text-zinc-700'}`}>
+              <span
+                className={`text-[10px] tabular-nums shrink-0 ${
+                  included[a.envelopeId] ? (a.wasNegative && a.amount <= 0.01 ? 'text-orange-500/70' : 'text-[#a3e635]') : 'text-zinc-700'
+                }`}
+                title={included[a.envelopeId] && a.wasNegative && a.amount <= 0.01
+                  ? 'Saldo promedio negativo en este período (p.ej. autopréstamo), no vacío — no entra en este reparto'
+                  : undefined}
+              >
                 {included[a.envelopeId] && a.amount > 0.01
                   ? `+₡${a.amount.toLocaleString('es-CR', { maximumFractionDigits: 0 })}`
-                  : '—'}
+                  : included[a.envelopeId] && a.wasNegative
+                    ? 'saldo neg.'
+                    : '—'}
               </span>
             </label>
           ))}
