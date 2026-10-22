@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef } from 'react'
-import { Plus, RefreshCw, Trash2, TrendingUp, Download, Upload, Camera } from 'lucide-react'
+import { Plus, Pencil, History, Trash2, TrendingUp, Download, Upload, Camera } from 'lucide-react'
 import {
   createAsset,
   updateAssetValue,
@@ -30,6 +30,12 @@ type Asset = {
   loan_id: string | null
 }
 
+type AssetHistoryEntry = {
+  id: string; asset_id: string
+  value_crc: number; snapshot_date: string
+  notes: string | null
+}
+
 type Liability = {
   id: string; name: string; liability_type: string
   current_balance: number; original_balance: number | null
@@ -53,6 +59,7 @@ type Props = {
   patrimonioNeto: number
   activosInvertibles: number
   assets: Asset[]
+  assetHistory: AssetHistoryEntry[]
   liabilities: Liability[]
   loans: Loan[]
   monthlyTrend: TrendPoint[]
@@ -632,7 +639,7 @@ function parsePastedSnapshots(raw: string): Array<{
 export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
-  assets, liabilities, loans, monthlyTrend, snapshots, exchangeRate, netWorthItems,
+  assets, assetHistory, liabilities, loans, monthlyTrend, snapshots, exchangeRate, netWorthItems,
   envelopeBreakdown, bucketBreakdown, pensionesBreakdown, totalPensiones, milestones,
 }: Props) {
   const [isPending, startTransition] = useTransition()
@@ -656,7 +663,9 @@ export function PatrimonioView({
   const [newAssetLoanId, setNewAssetLoanId]   = useState('')
   const [assetNewVal, setAssetNewVal]         = useState('')
   const [assetNewDate, setAssetNewDate]       = useState(today())
+  const [assetNewNotes, setAssetNewNotes]     = useState('')
   const [linkingLoanAsset, setLinkingLoanAsset] = useState<string | null>(null)
+  const [viewingHistoryAsset, setViewingHistoryAsset] = useState<string | null>(null)
 
   // Liability CRUD state
   const [showAddLiab, setShowAddLiab]         = useState(false)
@@ -720,10 +729,11 @@ export function PatrimonioView({
         asset_id: assetId,
         value_crc: parseFloat(assetNewVal),
         snapshot_date: assetNewDate,
+        notes: assetNewNotes || undefined,
       })
       if (result.error) { setError(result.error); return }
       setUpdatingAsset(null)
-      setAssetNewVal(''); setAssetNewDate(today())
+      setAssetNewVal(''); setAssetNewDate(today()); setAssetNewNotes('')
     })
   }
 
@@ -1227,11 +1237,20 @@ export function PatrimonioView({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <p className="text-base font-black text-white">{fmtShort(asset.value_crc)}</p>
                     <button
-                      onClick={() => { setUpdatingAsset(asset.id); setAssetNewVal(String(asset.value_crc)); setAssetNewDate(today()) }}
+                      onClick={() => { setUpdatingAsset(asset.id); setAssetNewVal(String(asset.value_crc)); setAssetNewDate(today()); setAssetNewNotes('') }}
                       className="p-1.5 rounded-lg text-zinc-600 hover:text-[#a3e635] hover:bg-[#a3e635]/10 transition-colors"
                       title="Actualizar valor"
                     >
-                      <RefreshCw size={13} />
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => setViewingHistoryAsset(viewingHistoryAsset === asset.id ? null : asset.id)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        viewingHistoryAsset === asset.id ? 'bg-blue-400/15 text-blue-400' : 'text-zinc-600 hover:text-blue-400 hover:bg-blue-400/10'
+                      }`}
+                      title="Ver historial de valuaciones"
+                    >
+                      <History size={13} />
                     </button>
                     {loans.length > 0 && (
                       <button
@@ -1280,6 +1299,12 @@ export function PatrimonioView({
                       <input type="date" value={assetNewDate} onChange={e => setAssetNewDate(e.target.value)}
                         className="bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[#a3e635]/40" />
                     </div>
+                    <div className="w-full sm:w-auto sm:flex-1 min-w-[12rem]">
+                      <label className={lbl}>Nota <span className="text-zinc-700 normal-case tracking-normal">— opcional</span></label>
+                      <input value={assetNewNotes} onChange={e => setAssetNewNotes(e.target.value)}
+                        placeholder="Ej. vendido a plazos, queda saldo por cobrar…"
+                        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                    </div>
                     <button onClick={() => handleUpdateAsset(asset.id)} disabled={isPending || !assetNewVal}
                       className="px-3 py-1.5 rounded-lg bg-[#a3e635] text-black text-xs font-black hover:bg-[#b4f040] disabled:opacity-50 transition-colors">
                       {isPending ? '…' : 'Actualizar'}
@@ -1288,6 +1313,28 @@ export function PatrimonioView({
                       className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
                       Cancelar
                     </button>
+                  </div>
+                )}
+
+                {viewingHistoryAsset === asset.id && (
+                  <div className="mt-3 pt-3 border-t border-white/[0.06]">
+                    {assetHistory.filter(h => h.asset_id === asset.id).length === 0 ? (
+                      <p className="text-xs text-zinc-600">Sin valuaciones históricas registradas todavía.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {assetHistory
+                          .filter(h => h.asset_id === asset.id)
+                          .map(h => (
+                            <div key={h.id} className="flex items-start justify-between gap-3 text-xs">
+                              <div className="min-w-0">
+                                <span className="text-zinc-500">{h.snapshot_date}</span>
+                                {h.notes && <span className="text-zinc-600"> — {h.notes}</span>}
+                              </div>
+                              <span className="shrink-0 font-bold text-zinc-300">{fmtShort(h.value_crc)}</span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1431,7 +1478,7 @@ export function PatrimonioView({
                         className="p-1.5 rounded-lg text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
                         title="Actualizar saldo"
                       >
-                        <RefreshCw size={13} />
+                        <Pencil size={13} />
                       </button>
                       <button
                         onClick={() => handleDeleteLiab(liab.id)} disabled={isPending}

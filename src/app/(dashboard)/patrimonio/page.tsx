@@ -22,6 +22,7 @@ export default async function PatrimonioPage() {
     { data: movements },
     { data: envelopes },
     { data: assetRows },
+    { data: assetHistoryRows },
     { data: liabilityRows },
     { data: loansRaw },
     { data: snapshotRows },
@@ -52,6 +53,10 @@ export default async function PatrimonioPage() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('sort_order'),
+    admin.from('asset_value_history')
+      .select('id, asset_id, value_crc, snapshot_date, notes')
+      .eq('user_id', user.id)
+      .order('snapshot_date', { ascending: false }),
     admin.from('liabilities')
       .select('id, name, liability_type, current_balance, original_balance, interest_rate, is_active, as_of_date')
       .eq('user_id', user.id)
@@ -269,6 +274,7 @@ export default async function PatrimonioPage() {
         patrimonioNeto={patrimonioNeto}
         activosInvertibles={activosInvertibles}
         assets={activeAssets}
+        assetHistory={assetHistoryRows ?? []}
         liabilities={activeLiabilities}
         loans={loansForPatrimonio}
         monthlyTrend={monthlyTrend}
