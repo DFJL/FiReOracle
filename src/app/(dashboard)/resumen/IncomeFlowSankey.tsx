@@ -1,6 +1,10 @@
 'use client'
 
-// Ingreso → gasto/ahorro/inversión/deuda, window-selectable. Two layers:
+// Ingreso → gasto/ahorro/inversión/deuda for whatever period the page's own
+// period tabs have selected (/resumen already has one — Todo/5A/2A/YTD/12M/
+// 6M/3M/1M/MTD — the existing "Flujo de ingresos" Sankey card above this one
+// already uses it via periodTxs; this card used to carry its own separate
+// 6-tab window selector, which just duplicated that control. Two layers:
 // 1. Summary cards — the "general" view, amount + % del ingreso per bucket,
 //    answers the question at a glance without reading anything else.
 // 2. A bar per branch below for "quiero ver el detalle" — click one to drop
@@ -13,9 +17,8 @@
 //    block-flow space.
 //
 // Built on computeFlowWindow (@/lib/ahorroInversionFlow) — the same
-// classification AhorroInversionSection below uses, just parametrized by
-// window instead of fixed to 12 rolling months, so the two can never
-// disagree about what counts as ahorro vs. inversión vs. gasto.
+// classification AhorroInversionSection (/progreso) uses, so the two can
+// never disagree about what counts as ahorro vs. inversión vs. gasto.
 //
 // Two different percentage bases are used on purpose, each labeled:
 // cards show "% del ingreso" (can exceed 100% — a real deficit month should
@@ -43,17 +46,6 @@ export type FlowWindow = {
   inversionSources: SourceAmount[]
   deudaSources: SourceAmount[]
 }
-
-export type IncomeFlowWindows = Record<'mes' | 'm3' | 'm6' | 'm12' | 'ytd' | 'todo', FlowWindow>
-
-const WINDOW_TABS: { key: keyof IncomeFlowWindows; label: string }[] = [
-  { key: 'mes',  label: 'Este mes' },
-  { key: 'm3',   label: '3M' },
-  { key: 'm6',   label: '6M' },
-  { key: 'm12',  label: '12M' },
-  { key: 'ytd',  label: 'Año' },
-  { key: 'todo', label: 'Todo' },
-]
 
 type BranchKey = 'gasto' | 'ahorro' | 'inversion' | 'deuda' | 'remanente'
 
@@ -92,16 +84,25 @@ function foldSources(sources: SourceAmount[]): SourceAmount[] {
 }
 
 export function IncomeFlowSankey({
-  windows, fmt, onCollapse,
+  flow, fmt, onCollapse,
 }: {
-  windows: IncomeFlowWindows
+  flow: FlowWindow
   fmt: (v: number) => string
   onCollapse?: () => void
 }) {
-  const [windowKey, setWindowKey] = useState<keyof IncomeFlowWindows>('m12')
   const [expandedBranch, setExpandedBranch] = useState<BranchKey | null>(null)
+  // Collapse any open drill-down when the page's period selection changes
+  // the data underneath it, instead of showing a stale branch's sources.
+  // Adjusted during render (React's documented pattern for this), not in an
+  // effect — an effect here would flash the stale drill-down for one frame.
+  const flowKey = `${flow.from}|${flow.to}`
+  const [lastFlowKey, setLastFlowKey] = useState(flowKey)
+  if (flowKey !== lastFlowKey) {
+    setLastFlowKey(flowKey)
+    setExpandedBranch(null)
+  }
 
-  const w = windows[windowKey]
+  const w = flow
 
   const branches: { key: BranchKey; amount: number; sources: SourceAmount[] }[] = [
     { key: 'gasto', amount: w.gasto, sources: w.gastoSources },
@@ -142,29 +143,14 @@ export function IncomeFlowSankey({
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Flujo de ingreso</p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            Cuánto entró, cuánto se gastó, cuánto se guardó
+            Cuánto entró, cuánto se gastó, cuánto se guardó · según el período de arriba
           </p>
         </div>
-        <div className="flex items-start gap-2">
-          <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
-            {WINDOW_TABS.map(t => (
-              <button
-                key={t.key}
-                onClick={() => { setWindowKey(t.key); setExpandedBranch(null) }}
-                className={`px-2 py-1 rounded-md text-[9px] font-black transition-colors ${
-                  windowKey === t.key ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {onCollapse && (
-            <button onClick={onCollapse} className="text-zinc-600 hover:text-zinc-400 transition-colors p-1" title="Colapsar">
-              <ChevronUp size={14} />
-            </button>
-          )}
-        </div>
+        {onCollapse && (
+          <button onClick={onCollapse} className="text-zinc-600 hover:text-zinc-400 transition-colors p-1" title="Colapsar">
+            <ChevronUp size={14} />
+          </button>
+        )}
       </div>
 
       {w.income <= 0 ? (

@@ -5,10 +5,11 @@ import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
-import { IncomeFlowSankey, type IncomeFlowWindows } from './IncomeFlowSankey'
+import { IncomeFlowSankey } from './IncomeFlowSankey'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
 import { isDepositTx, isActiveIncome } from '@/lib/incomeAllocation'
+import { computeFlowWindow } from '@/lib/ahorroInversionFlow'
 import {
   deleteTransaction, type UpdateTransactionInput,
   getEnvelopeEditData, updateTransactionEnvelopeLink,
@@ -1137,13 +1138,14 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, incomeFlowWindows }: {
+export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, envelopeMovements, envelopes }: {
   transactions: TxClient[]
   categories: Category[]
   buckets?: InvestmentBucket[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
-  incomeFlowWindows?: IncomeFlowWindows
+  envelopeMovements?: { amount: number | string; movement_type: string | null; envelope_id: string; date: string | null; notes: string | null }[]
+  envelopes?: { id: string; name: string | null; counts_as_ahorro: boolean | null }[]
 }) {
   // Local copy so edits/deletes are reflected instantly without a page re-render
   const [txList, setTxList] = useState<TxClient[]>(transactions)
@@ -1221,6 +1223,39 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const periodTxs = useMemo(() =>
     cutoff ? txList.filter(tx => tx.date && tx.date >= cutoff) : txList,
   [txList, cutoff])
+
+  // Ahorro e inversión flow card — same period the tabs above already
+  // control (periodCutoff), not its own separate window selector. computeFlowWindow
+  // does its own date filtering, so this runs against the full txList/
+  // envelopeMovements rather than the already-filtered periodTxs, with the
+  // exact same [cutoff, tomorrow) range periodTxs uses.
+  const catNameMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const cat of categories) m.set(cat.code, cat.name)
+    return m
+  }, [categories])
+  const savingsEnvelopeIds = useMemo(
+    () => new Set((envelopes ?? []).filter(e => e.counts_as_ahorro === true).map(e => e.id)),
+    [envelopes]
+  )
+  const envelopeNameMap = useMemo(
+    () => new Map((envelopes ?? []).map(e => [e.id, e.name ?? 'Sobre'])),
+    [envelopes]
+  )
+  const earliestTxDate = useMemo(
+    () => txList.reduce<string | null>((min, tx) => (tx.date && (!min || tx.date < min) ? tx.date : min), null),
+    [txList]
+  )
+  const flowWindow = useMemo(() => {
+    const now = new Date()
+    const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
+    const fromStr = cutoff ?? earliestTxDate ?? tomorrowStr
+    return computeFlowWindow(
+      txList as Parameters<typeof computeFlowWindow>[0],
+      (envelopeMovements ?? []) as Parameters<typeof computeFlowWindow>[1],
+      savingsEnvelopeIds, envelopeNameMap, catNameMap, fromStr, tomorrowStr,
+    )
+  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate])
 
   // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
   const tabTxs = useMemo(() => {
@@ -1526,27 +1561,26 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         }
       </div>
 
-      {/* ── Ahorro e inversión — monto y % del ingreso por ventana, distinto
-          del Sankey de arriba (ese reparte por categoría de gasto; este
-          separa ahorro puro de inversión con retorno esperado y deuda,
-          con selector de ventana 1M–todo). */}
-      {incomeFlowWindows && (
-        <div className="mb-4">
-          {showIncomeFlow
-            ? <IncomeFlowSankey windows={incomeFlowWindows} fmt={(n) => fmtAmt(n)} onCollapse={() => setShowIncomeFlow(false)} />
-            : (
-              <button onClick={() => setShowIncomeFlow(true)}
-                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
-                <div>
-                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Ahorro e inversión</p>
-                  <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Monto y % del ingreso · 1 mes a todo el historial</p>
-                </div>
-                <ChevronDown size={14} className="text-zinc-600" />
-              </button>
-            )
-          }
-        </div>
-      )}
+      {/* ── Ahorro e inversión — monto y % del ingreso para el período de
+          arriba, distinto del Sankey de arriba (ese reparte por categoría
+          de gasto; este separa ahorro puro de inversión con retorno
+          esperado y deuda). Same periodCutoff as the rest of the page —
+          no separate window selector. */}
+      <div className="mb-4">
+        {showIncomeFlow
+          ? <IncomeFlowSankey flow={flowWindow} fmt={(n) => fmtAmt(n)} onCollapse={() => setShowIncomeFlow(false)} />
+          : (
+            <button onClick={() => setShowIncomeFlow(true)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
+              <div>
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Ahorro e inversión</p>
+                <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Monto y % del ingreso · ahorro vs. inversión vs. deuda</p>
+              </div>
+              <ChevronDown size={14} className="text-zinc-600" />
+            </button>
+          )
+        }
+      </div>
 
       {/* ── Content tabs ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 mb-4">

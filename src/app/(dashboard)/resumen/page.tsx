@@ -3,8 +3,6 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { InteractiveSection, TxClient, AccountSummary } from './InteractiveSection'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
-import { computeFlowWindow } from '@/lib/ahorroInversionFlow'
-import type { IncomeFlowWindows } from './IncomeFlowSankey'
 
 export default async function ResumenPage() {
   const supabase = await createClient()
@@ -78,41 +76,6 @@ export default async function ResumenPage() {
   const accounts: AccountSummary = { liquidBalance, savingsBalance }
   const exchangeRate = await fetchExchangeRate()
 
-  // ── Ahorro e Inversión flow — same classification /progreso's
-  // AhorroInversionSection uses (@/lib/ahorroInversionFlow, built on
-  // @/lib/incomeAllocation), parametrized across 6 preset windows so the
-  // card can switch between them without re-deriving the rules. 3M/6M/12M
-  // stay "last N complete months"; "este mes", YTD and "todo" reach into
-  // the current partial month.
-  const catNameMap = new Map<string, string>()
-  for (const cat of categories ?? []) catNameMap.set(cat.code, cat.name)
-  const savingsEnvelopeIds = new Set(
-    (envelopes ?? []).filter(e => e.counts_as_ahorro === true).map(e => e.id)
-  )
-  const envelopeNameMap = new Map((envelopes ?? []).map(e => [e.id, e.name ?? 'Sobre']))
-
-  const now = new Date()
-  const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
-  const thisMonthStartStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const monthsAgoStartStr = (n: number) => new Date(now.getFullYear(), now.getMonth() - n, 1).toISOString().slice(0, 10)
-  const rolling12EndStr = thisMonthStartStr
-  const yearStartStr = `${now.getFullYear()}-01-01`
-  const earliestTxDate = (rawTx ?? []).reduce<string | null>(
-    (min, tx) => (tx.date && (!min || tx.date < min) ? tx.date : min), null
-  )
-
-  const flowTxs = (rawTx ?? []) as Parameters<typeof computeFlowWindow>[0]
-  const flowMovements = (envelopeMovements ?? []) as Parameters<typeof computeFlowWindow>[1]
-
-  const incomeFlowWindows: IncomeFlowWindows = {
-    mes:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, thisMonthStartStr, tomorrowStr),
-    m3:   computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, monthsAgoStartStr(3), rolling12EndStr),
-    m6:   computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, monthsAgoStartStr(6), rolling12EndStr),
-    m12:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, monthsAgoStartStr(12), rolling12EndStr),
-    ytd:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, yearStartStr, tomorrowStr),
-    todo: computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, earliestTxDate ?? yearStartStr, tomorrowStr),
-  }
-
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
       <InteractiveSection
@@ -121,7 +84,8 @@ export default async function ResumenPage() {
         buckets={buckets ?? []}
         accounts={accounts}
         exchangeRate={exchangeRate}
-        incomeFlowWindows={incomeFlowWindows}
+        envelopeMovements={envelopeMovements ?? []}
+        envelopes={envelopes ?? []}
       />
     </div>
   )
