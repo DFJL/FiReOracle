@@ -6,6 +6,7 @@ import Link from 'next/link'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { createLifeEvent, deleteLifeEvent } from '@/app/actions/lifeEvents'
 import { useCurrency, formatCurrency } from '@/lib/currency'
+import { IncomeFlowSankey, type IncomeFlowWindows } from './IncomeFlowSankey'
 
 export type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
 
@@ -108,6 +109,7 @@ type Props = {
   wealthDelta: WealthDeltaMonth[]
   savingsRateTrend: SavingsRateMonth[]
   ahorroInversionData: AhorroInversionData
+  incomeFlowWindows: IncomeFlowWindows
   lifestyle: LifestyleData
   milestones: Milestone[]
 }
@@ -130,7 +132,7 @@ export function ProgresoView({
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
-  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, lifestyle, milestones,
+  fireConfig, runwayGreen, runwayYellow, wealthDelta, savingsRateTrend, ahorroInversionData, incomeFlowWindows, lifestyle, milestones,
 }: Props) {
   const { currency } = useCurrency()
   const rate = exchangeRate.sell
@@ -488,6 +490,8 @@ export function ProgresoView({
       {savingsRateTrend.length > 0 && (
         <SavingsRateTrendChart data={savingsRateTrend} avg12m={savingsRate} fmt={fmt} />
       )}
+
+      <IncomeFlowSankey windows={incomeFlowWindows} fmt={fmt} />
 
       {/* Ahorro vs. inversión — of what you set aside each month, how much
           actually has market exposure vs. sits liquid */}
