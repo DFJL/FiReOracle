@@ -2,13 +2,15 @@
 
 // Ingreso → gasto/ahorro/inversión/deuda, window-selectable. Two layers:
 // 1. Summary cards — the "general" view, amount + % del ingreso per bucket,
-//    answers the question at a glance without reading a diagram.
-// 2. A flow (Sankey-style ribbon) diagram below for "quiero ver el detalle" —
-//    click a branch to drop its top sources into a plain list underneath it
-//    (not a 3rd SVG column: with several small sobres that column's labels
-//    collided no matter how tight the packing got, so the drill-down is a
-//    normal list instead, same pattern as the sources lists elsewhere on
-//    this page).
+//    answers the question at a glance without reading anything else.
+// 2. A bar per branch below for "quiero ver el detalle" — click one to drop
+//    its top sources into a plain list underneath it. Started as a Sankey
+//    ribbon diagram; dropped in favor of plain HTML bars after two rounds of
+//    real-data screenshots kept finding new label-collision cases (the
+//    income label running off the viewBox edge, then branch labels
+//    colliding once Gasto dominated and squeezed the other segments thin) —
+//    a bar chart has no equivalent geometry to fight: every row owns its own
+//    block-flow space.
 //
 // Built on computeFlowWindow (@/lib/ahorroInversionFlow) — the same
 // classification AhorroInversionSection below uses, just parametrized by
@@ -88,13 +90,6 @@ function foldSources(sources: SourceAmount[]): SourceAmount[] {
   return [...top, { name: 'Otros', amount: restTotal }]
 }
 
-// A horizontal ribbon: thick stroked bezier, uniform width (no taper) —
-// simplest link shape that still reads as "flow" at this scale.
-function ribbonPath(x0: number, y0: number, x1: number, y1: number): string {
-  const midX = (x0 + x1) / 2
-  return `M ${x0},${y0} C ${midX},${y0} ${midX},${y1} ${x1},${y1}`
-}
-
 export function IncomeFlowSankey({
   windows, fmt,
 }: {
@@ -103,7 +98,6 @@ export function IncomeFlowSankey({
 }) {
   const [windowKey, setWindowKey] = useState<keyof IncomeFlowWindows>('m12')
   const [expandedBranch, setExpandedBranch] = useState<BranchKey | null>(null)
-  const [hoverKey, setHoverKey] = useState<string | null>(null)
 
   const w = windows[windowKey]
 
@@ -120,7 +114,6 @@ export function IncomeFlowSankey({
   const deficit = w.remainder < -remainderThreshold ? -w.remainder : 0
 
   const branchTotal = branches.reduce((s, b) => s + b.amount, 0)
-  const total = Math.max(w.income, branchTotal, 1)
 
   // % del ingreso — can exceed 100% (deficit); used only in the summary cards.
   function pctIncome(amount: number): string {
@@ -130,30 +123,6 @@ export function IncomeFlowSankey({
   function pctAllocated(amount: number): string {
     return branchTotal > 0 ? `${((amount / branchTotal) * 100).toFixed(0)}%` : '—'
   }
-
-  // ── Diagram layout ─────────────────────────────────────────────────────
-  const W = 640
-  const plotH = 240
-  const topPad = 36 // room for the Ingreso label above its bar
-  const nodeW = 10
-  const gap = 8
-  const colIncomeX  = 60
-  const colBranchX  = 340
-  const scale = (plotH - gap * (branches.length - 1)) / total
-
-  const incomeH = Math.max(w.income * scale, 2)
-  const incomeY = topPad + (plotH - incomeH) / 2
-
-  let cursorIncome = incomeY
-  let cursorBranch = topPad
-  const branchLayout = branches.map(b => {
-    const h = Math.max(b.amount * scale, 2)
-    const incomeSegY = cursorIncome
-    const branchY = cursorBranch
-    cursorIncome += h
-    cursorBranch += h + gap
-    return { ...b, h, incomeSegY, branchY }
-  })
 
   const expandedData = expandedBranch ? branches.find(b => b.key === expandedBranch) ?? null : null
   const expandedSources = expandedData ? foldSources(expandedData.sources) : []
@@ -208,65 +177,45 @@ export function IncomeFlowSankey({
             ))}
           </div>
 
-          {/* Detail — the diagram, for "quiero ver el detalle" */}
+          {/* Detail — a bar per branch, abs + % de lo asignado. Plain HTML,
+              not SVG: each row owns its own block-flow space, so there's no
+              geometry to collide no matter how small a branch gets. */}
           <div>
-            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-1">
+            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-2">
               Detalle · tocá un destino para ver sus fuentes
             </p>
-            <svg viewBox={`0 0 ${W} ${plotH + topPad}`} className="w-full" role="img" aria-label="Flujo de ingreso hacia gasto, ahorro, inversión y deuda">
-              {/* Links: income → branch */}
-              {branchLayout.map(b => (
-                <path
-                  key={`link-${b.key}`}
-                  d={ribbonPath(colIncomeX + nodeW, b.incomeSegY + b.h / 2, colBranchX, b.branchY + b.h / 2)}
-                  stroke={BRANCH_COLOR[b.key]}
-                  strokeWidth={b.h}
-                  fill="none"
-                  opacity={hoverKey === null || hoverKey === b.key ? 0.32 : 0.1}
-                  style={{ transition: 'opacity 120ms' }}
-                />
-              ))}
-
-              {/* Income node — label centered above the bar, never clipped */}
-              <rect x={colIncomeX} y={incomeY} width={nodeW} height={incomeH} rx={2} fill="#a3e635" />
-              <text x={colIncomeX + nodeW / 2} y={incomeY - 20} textAnchor="middle" className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
-                Ingreso
-              </text>
-              <text x={colIncomeX + nodeW / 2} y={incomeY - 8} textAnchor="middle" className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
-                {fmt(w.income)}
-              </text>
-
-              {/* Branch nodes — % here is share of lo asignado (sums to 100%) */}
-              {branchLayout.map(b => {
+            <div className="space-y-2.5">
+              {branches.map(b => {
                 const isExpanded = expandedBranch === b.key
                 const canExpand = b.key !== 'remanente' && b.sources.length > 0
+                const barPct = branchTotal > 0 ? (b.amount / branchTotal) * 100 : 0
                 return (
-                  <g
+                  <div
                     key={b.key}
-                    onMouseEnter={() => setHoverKey(b.key)}
-                    onMouseLeave={() => setHoverKey(null)}
                     onClick={() => canExpand && setExpandedBranch(isExpanded ? null : b.key)}
                     style={{ cursor: canExpand ? 'pointer' : 'default' }}
                   >
-                    <rect
-                      x={colBranchX} y={b.branchY} width={nodeW} height={b.h} rx={2}
-                      fill={BRANCH_COLOR[b.key]}
-                      stroke={isExpanded ? '#fff' : 'none'}
-                      strokeWidth={isExpanded ? 1 : 0}
-                    />
-                    <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 - 6} className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
-                      {BRANCH_LABEL[b.key]}{canExpand ? ' ›' : ''}
-                    </text>
-                    <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 + 8} className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(b.amount)} · {pctAllocated(b.amount)} de lo asignado
-                    </text>
-                  </g>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[10px] font-black text-zinc-300">
+                        {BRANCH_LABEL[b.key]}{canExpand ? (isExpanded ? ' ⌄' : ' ›') : ''}
+                      </span>
+                      <span className="text-[10px] tabular-nums shrink-0">
+                        <span className="text-zinc-300 font-bold">{fmt(b.amount)}</span>
+                        <span className="text-zinc-600"> · {pctAllocated(b.amount)} de lo asignado</span>
+                      </span>
+                    </div>
+                    <div className="h-3.5 rounded-full bg-black/25 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${Math.max(barPct, barPct > 0 ? 1.5 : 0)}%`, background: BRANCH_COLOR[b.key] }}
+                      />
+                    </div>
+                  </div>
                 )
               })}
-            </svg>
+            </div>
 
-            {/* Drill-down — plain list, not another SVG column (collided with
-                several small sobres no matter how tightly packed). */}
+            {/* Drill-down — appears under the bars when a branch is tapped. */}
             {expandedData && (
               <div className="mt-2 pt-3 border-t border-white/[0.06] space-y-1.5">
                 <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: BRANCH_COLOR[expandedData.key] }}>
