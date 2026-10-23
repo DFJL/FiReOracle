@@ -5,6 +5,7 @@ import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
+import { IncomeFlowSankey, type IncomeFlowWindows } from './IncomeFlowSankey'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
 import { isDepositTx, isActiveIncome } from '@/lib/incomeAllocation'
@@ -1136,12 +1137,13 @@ const TABS: { key: TabKey; label: string; color: string }[] = [
   { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
 ]
 
-export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate }: {
+export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, incomeFlowWindows }: {
   transactions: TxClient[]
   categories: Category[]
   buckets?: InvestmentBucket[]
   accounts?: AccountSummary
   exchangeRate?: ExchangeRate
+  incomeFlowWindows?: IncomeFlowWindows
 }) {
   // Local copy so edits/deletes are reflected instantly without a page re-render
   const [txList, setTxList] = useState<TxClient[]>(transactions)
@@ -1162,6 +1164,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
   const [showSankey, setShowSankey] = useState(false)
+  const [showIncomeFlow, setShowIncomeFlow] = useState(false)
   const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
@@ -1522,6 +1525,28 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
           )
         }
       </div>
+
+      {/* ── Ahorro e inversión — monto y % del ingreso por ventana, distinto
+          del Sankey de arriba (ese reparte por categoría de gasto; este
+          separa ahorro puro de inversión con retorno esperado y deuda,
+          con selector de ventana 1M–todo). */}
+      {incomeFlowWindows && (
+        <div className="mb-4">
+          {showIncomeFlow
+            ? <IncomeFlowSankey windows={incomeFlowWindows} fmt={(n) => fmtAmt(n)} onCollapse={() => setShowIncomeFlow(false)} />
+            : (
+              <button onClick={() => setShowIncomeFlow(true)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
+                <div>
+                  <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Ahorro e inversión</p>
+                  <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Monto y % del ingreso · 1 mes a todo el historial</p>
+                </div>
+                <ChevronDown size={14} className="text-zinc-600" />
+              </button>
+            )
+          }
+        </div>
+      )}
 
       {/* ── Content tabs ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 mb-4">

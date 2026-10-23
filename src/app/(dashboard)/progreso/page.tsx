@@ -14,7 +14,6 @@ import {
   isSavingsCategoryCode,
   INVERSION_CATEGORY_CODES,
 } from '@/lib/incomeAllocation'
-import { computeFlowWindow, type FlowWindow } from '@/lib/ahorroInversionFlow'
 
 export default async function ProgresoPage() {
   const supabase = await createClient()
@@ -939,30 +938,6 @@ export default async function ProgresoPage() {
   const inversionSources = toSourceList(inversionSourceMap, ahorroInversion12m.inversion)
   const deudaSources     = toSourceList(deudaSourceMap, ahorroInversion12m.deuda)
 
-  // ── Income flow (Sankey) — same classification as above, parametrized by
-  // window so the diagram can switch between "este mes" / 3M / 6M / 12M /
-  // YTD / todo without re-deriving the rules. 3M/6M/12M stay "last N
-  // complete months" (same convention as rolling12Start/End above); only
-  // "este mes", YTD and "todo" reach into the current partial month.
-  const flowTxs = (txs ?? []) as Parameters<typeof computeFlowWindow>[0]
-  const flowMovements = (movements ?? []) as Parameters<typeof computeFlowWindow>[1]
-  const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
-  const thisMonthStartStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const monthsAgoStartStr = (n: number) => new Date(now.getFullYear(), now.getMonth() - n, 1).toISOString().slice(0, 10)
-  const yearStartStr = `${now.getFullYear()}-01-01`
-  const earliestTxDate = (txs ?? []).reduce<string | null>(
-    (min, tx) => (tx.date && (!min || tx.date < min) ? tx.date : min), null
-  )
-
-  const incomeFlowWindows: Record<'mes' | 'm3' | 'm6' | 'm12' | 'ytd' | 'todo', FlowWindow> = {
-    mes:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, thisMonthStartStr, tomorrowStr),
-    m3:   computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, monthsAgoStartStr(3), rolling12EndStr),
-    m6:   computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, monthsAgoStartStr(6), rolling12EndStr),
-    m12:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, rolling12StartStr, rolling12EndStr),
-    ytd:  computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, yearStartStr, tomorrowStr),
-    todo: computeFlowWindow(flowTxs, flowMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, earliestTxDate ?? yearStartStr, tomorrowStr),
-  }
-
   // Mapa de riqueza — all 6 numbers in one glance (the podcast's whole
   // point: see where you stand before diving into the FIRE number). Each
   // half still lives in its own detail page for the real work — /flujo has
@@ -1039,7 +1014,6 @@ export default async function ProgresoPage() {
           inversionSources,
           deudaSources,
         }}
-        incomeFlowWindows={incomeFlowWindows}
         lifestyle={{
           inflationRate: inflation,
           curTotal:      liCurTotal,

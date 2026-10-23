@@ -25,6 +25,7 @@
 // distribuye el 100%".
 
 import { useState } from 'react'
+import { ChevronUp } from 'lucide-react'
 
 type SourceAmount = { name: string; amount: number }
 
@@ -91,10 +92,11 @@ function foldSources(sources: SourceAmount[]): SourceAmount[] {
 }
 
 export function IncomeFlowSankey({
-  windows, fmt,
+  windows, fmt, onCollapse,
 }: {
   windows: IncomeFlowWindows
   fmt: (v: number) => string
+  onCollapse?: () => void
 }) {
   const [windowKey, setWindowKey] = useState<keyof IncomeFlowWindows>('m12')
   const [expandedBranch, setExpandedBranch] = useState<BranchKey | null>(null)
@@ -143,18 +145,25 @@ export function IncomeFlowSankey({
             Cuánto entró, cuánto se gastó, cuánto se guardó
           </p>
         </div>
-        <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
-          {WINDOW_TABS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => { setWindowKey(t.key); setExpandedBranch(null) }}
-              className={`px-2 py-1 rounded-md text-[9px] font-black transition-colors ${
-                windowKey === t.key ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {t.label}
+        <div className="flex items-start gap-2">
+          <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
+            {WINDOW_TABS.map(t => (
+              <button
+                key={t.key}
+                onClick={() => { setWindowKey(t.key); setExpandedBranch(null) }}
+                className={`px-2 py-1 rounded-md text-[9px] font-black transition-colors ${
+                  windowKey === t.key ? 'bg-[#a3e635] text-black' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {onCollapse && (
+            <button onClick={onCollapse} className="text-zinc-600 hover:text-zinc-400 transition-colors p-1" title="Colapsar">
+              <ChevronUp size={14} />
             </button>
-          ))}
+          )}
         </div>
       </div>
 
