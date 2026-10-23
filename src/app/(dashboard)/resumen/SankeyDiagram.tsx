@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { ChevronUp } from 'lucide-react'
 import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
+import { isValuationConcept, isInversionCategoryCode } from '@/lib/incomeAllocation'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -64,8 +65,7 @@ function getExpenseLabel(tx: TxClient): string {
 // Valuation entries (no movement_type): mark-to-market / unrealized, no cash impact
 function isValuationEntry(tx: TxClient): boolean {
   if (tx.movement_type) return false
-  const c = (tx.concept ?? '').toLowerCase()
-  return /p[eé]rdida\s*valor|aumento\s*valor|valorizaci[oó]n/.test(c)
+  return isValuationConcept(tx.concept)
 }
 
 function isPatrimonialIncome(tx: TxClient): boolean {
@@ -136,6 +136,10 @@ interface SankeyFlow {
 const COLOR_ACTIVE_INCOME  = '#a3e635'
 const COLOR_PASSIVE_INCOME = '#34d399'
 const COLOR_SAVINGS        = '#60a5fa'
+// Teal, not another blue/violet — COLOR_SAVINGS and COLOR_MARGIN already sit
+// close enough on the wheel to be a known weak pair here; a 3rd blue-family
+// hue for Inversión would only add to that instead of reading as distinct.
+const COLOR_INVESTMENT     = '#2dd4bf'
 const COLOR_MARGIN         = '#a78bfa'
 const EXPENSE_COLORS       = ['#f87171', '#fb923c', '#fbbf24', '#e879f9', '#94a3b8', '#64748b']
 
@@ -265,7 +269,12 @@ export function SankeyDiagram({
   let patrimonial   = 0
 
   const expenseMap: Record<string, number> = {}
-  let totalSavings = 0
+  // Ahorro puro vs. inversión con retorno esperado — previously one lumped
+  // "Ahorros / Inv." node; split via isInversionCategoryCode (@/lib/
+  // incomeAllocation), the same test the Ahorro e inversión card above uses,
+  // so the two never disagree on which SAVINGS_* codes count as which.
+  let totalAhorro    = 0
+  let totalInversion = 0
 
   for (const tx of transactions) {
     const amt = Number(tx.amount ?? 0)
@@ -274,7 +283,11 @@ export function SankeyDiagram({
     if (isActivIncome(tx))    { activeIncome  += amt; continue }
     if (isPassiveIncome(tx))  { passiveIncome += amt; continue }
     if (isPatrimonialIncome(tx) && amt > 0) { patrimonial += amt; continue }
-    if (isSavingsTx(tx))      { totalSavings  += amt; continue }
+    if (isSavingsTx(tx)) {
+      if (isInversionCategoryCode(tx.category_code)) totalInversion += amt
+      else totalAhorro += amt
+      continue
+    }
     if (isExpenseTx(tx)) {
       const label = getExpenseLabel(tx)
       expenseMap[label] = (expenseMap[label] ?? 0) + amt
@@ -285,7 +298,7 @@ export function SankeyDiagram({
   if (totalIncome === 0) return null
 
   const totalExpenses = Object.values(expenseMap).reduce((s, v) => s + v, 0)
-  const margin = totalIncome - totalExpenses - totalSavings
+  const margin = totalIncome - totalExpenses - totalAhorro - totalInversion
 
   // ── Left nodes ────────────────────────────────────────────────────────────
 
@@ -342,12 +355,22 @@ export function SankeyDiagram({
     })
   }
 
-  if (totalSavings > 0) {
+  if (totalAhorro > 0) {
     rightRaw.push({
-      key:   'savings',
-      label: 'Ahorros / Inv.',
-      amount: totalSavings,
+      key:   'ahorro',
+      label: 'Ahorro',
+      amount: totalAhorro,
       color: COLOR_SAVINGS,
+      side:  'right',
+    })
+  }
+
+  if (totalInversion > 0) {
+    rightRaw.push({
+      key:   'inversion',
+      label: 'Inversión',
+      amount: totalInversion,
+      color: COLOR_INVESTMENT,
       side:  'right',
     })
   }
