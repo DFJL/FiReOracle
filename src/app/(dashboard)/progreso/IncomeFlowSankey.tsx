@@ -1,18 +1,26 @@
 'use client'
 
-// Ingreso → gasto/ahorro/inversión/deuda as a flow (Sankey-style ribbon)
-// diagram, window-selectable, with one optional drill-down layer per branch
-// (click a branch to see its top sources). Built on computeFlowWindow
-// (@/lib/ahorroInversionFlow) — the same classification AhorroInversionSection
-// below uses, just parametrized by window instead of fixed to 12 rolling
-// months, so the two can never disagree about what counts as ahorro vs.
-// inversión vs. gasto.
+// Ingreso → gasto/ahorro/inversión/deuda, window-selectable. Two layers:
+// 1. Summary cards — the "general" view, amount + % del ingreso per bucket,
+//    answers the question at a glance without reading a diagram.
+// 2. A flow (Sankey-style ribbon) diagram below for "quiero ver el detalle" —
+//    click a branch to drop its top sources into a plain list underneath it
+//    (not a 3rd SVG column: with several small sobres that column's labels
+//    collided no matter how tight the packing got, so the drill-down is a
+//    normal list instead, same pattern as the sources lists elsewhere on
+//    this page).
 //
-// Hand-rolled SVG (no chart lib in this app) — a ribbon is a thick stroked
-// bezier between a source segment and a target segment; both ends use the
-// same vertical scale, so a straight sum of segment heights always equals
-// the node height on each side (conservation reads directly from the
-// geometry, not just the numbers).
+// Built on computeFlowWindow (@/lib/ahorroInversionFlow) — the same
+// classification AhorroInversionSection below uses, just parametrized by
+// window instead of fixed to 12 rolling months, so the two can never
+// disagree about what counts as ahorro vs. inversión vs. gasto.
+//
+// Two different percentage bases are used on purpose, each labeled:
+// cards show "% del ingreso" (can exceed 100% — a real deficit month should
+// read as >100%, that's the signal); the diagram and drill-down lists show
+// "% de lo asignado" (share of gasto+ahorro+inversión+deuda+remanente,
+// always sums to 100% by construction) — that's "de lo que sale, cómo se
+// distribuye el 100%".
 
 import { useState } from 'react'
 
@@ -65,7 +73,13 @@ const BRANCH_LABEL: Record<BranchKey, string> = {
   deuda: 'Abono extra deuda', remanente: 'Remanente',
 }
 
-const MAX_SOURCES_SHOWN = 6
+// Static literal classes — Tailwind's JIT scanner can't pick up a
+// template-literal class name built from a runtime count.
+const GRID_COLS_SM: Record<number, string> = {
+  1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4',
+}
+
+const MAX_SOURCES_SHOWN = 8
 
 function foldSources(sources: SourceAmount[]): SourceAmount[] {
   if (sources.length <= MAX_SOURCES_SHOWN) return sources
@@ -108,15 +122,23 @@ export function IncomeFlowSankey({
   const branchTotal = branches.reduce((s, b) => s + b.amount, 0)
   const total = Math.max(w.income, branchTotal, 1)
 
-  // ── Layout ──────────────────────────────────────────────────────────────
+  // % del ingreso — can exceed 100% (deficit); used only in the summary cards.
+  function pctIncome(amount: number): string {
+    return w.income > 0 ? `${((amount / w.income) * 100).toFixed(0)}%` : '—'
+  }
+  // % de lo asignado — always sums to 100% across branches; used in the diagram/lists.
+  function pctAllocated(amount: number): string {
+    return branchTotal > 0 ? `${((amount / branchTotal) * 100).toFixed(0)}%` : '—'
+  }
+
+  // ── Diagram layout ─────────────────────────────────────────────────────
   const W = 640
-  const plotH = 260
-  const topPad = 16
+  const plotH = 240
+  const topPad = 36 // room for the Ingreso label above its bar
   const nodeW = 10
-  const gap = 6
-  const colIncomeX  = 10
-  const colBranchX  = 300
-  const colSourceX  = 560
+  const gap = 8
+  const colIncomeX  = 60
+  const colBranchX  = 340
   const scale = (plotH - gap * (branches.length - 1)) / total
 
   const incomeH = Math.max(w.income * scale, 2)
@@ -133,20 +155,15 @@ export function IncomeFlowSankey({
     return { ...b, h, incomeSegY, branchY }
   })
 
-  const expanded = expandedBranch ? branchLayout.find(b => b.key === expandedBranch) ?? null : null
-  const expandedSources = expanded ? foldSources(expanded.sources) : []
-  const sourceScale = expanded && expanded.amount > 0 ? expanded.h / expanded.amount : 0
-  let cursorSource = expanded ? expanded.branchY : 0
-  const sourceLayout = expandedSources.map(s => {
-    const h = Math.max(s.amount * sourceScale, 2)
-    const y = cursorSource
-    cursorSource += h + 3
-    return { ...s, h, y }
-  })
+  const expandedData = expandedBranch ? branches.find(b => b.key === expandedBranch) ?? null : null
+  const expandedSources = expandedData ? foldSources(expandedData.sources) : []
 
-  function pct(amount: number): string {
-    return w.income > 0 ? `${((amount / w.income) * 100).toFixed(0)}%` : '—'
-  }
+  const cards: { key: BranchKey; amount: number }[] = [
+    { key: 'gasto', amount: w.gasto },
+    ...(w.ahorro > 0.5    ? [{ key: 'ahorro' as const,    amount: w.ahorro }]    : []),
+    ...(w.inversion > 0.5 ? [{ key: 'inversion' as const, amount: w.inversion }] : []),
+    ...(w.deuda > 0.5     ? [{ key: 'deuda' as const,     amount: w.deuda }]     : []),
+  ]
 
   return (
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
@@ -154,7 +171,7 @@ export function IncomeFlowSankey({
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Flujo de ingreso</p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            De dónde a dónde — tocá un destino para ver sus fuentes
+            Cuánto entró, cuánto se gastó, cuánto se guardó
           </p>
         </div>
         <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
@@ -176,82 +193,97 @@ export function IncomeFlowSankey({
         <p className="text-[11px] text-zinc-600 text-center py-10">Sin ingresos registrados en esta ventana.</p>
       ) : (
         <>
-          <svg viewBox={`0 0 ${W} ${plotH + topPad * 2}`} className="w-full" role="img" aria-label="Flujo de ingreso hacia gasto, ahorro, inversión y deuda">
-            {/* Links: income → branch */}
-            {branchLayout.map(b => (
-              <path
-                key={`link-${b.key}`}
-                d={ribbonPath(colIncomeX + nodeW, b.incomeSegY + b.h / 2, colBranchX, b.branchY + b.h / 2)}
-                stroke={BRANCH_COLOR[b.key]}
-                strokeWidth={b.h}
-                fill="none"
-                opacity={hoverKey === null || hoverKey === b.key ? 0.32 : 0.1}
-                style={{ transition: 'opacity 120ms' }}
-              />
+          {/* Summary — the "general" view: amount + % del ingreso, no diagram needed */}
+          <div className="bg-black/20 rounded-xl p-3">
+            <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ingreso</p>
+            <p className="text-base font-black mt-1 text-[#a3e635] tabular-nums">{fmt(w.income)}</p>
+          </div>
+          <div className={`grid gap-2 grid-cols-2 ${GRID_COLS_SM[cards.length] ?? GRID_COLS_SM[4]}`}>
+            {cards.map(c => (
+              <div key={c.key} className="bg-black/20 rounded-xl p-3">
+                <p className="text-[8px] text-zinc-500 uppercase tracking-wider truncate">{BRANCH_LABEL[c.key]}</p>
+                <p className="text-sm font-black mt-1 tabular-nums" style={{ color: BRANCH_COLOR[c.key] }}>{fmt(c.amount)}</p>
+                <p className="text-[8px] text-zinc-600 mt-0.5">{pctIncome(c.amount)} del ingreso</p>
+              </div>
             ))}
+          </div>
 
-            {/* Links: branch → sources (only the expanded one) */}
-            {expanded && sourceLayout.map((s, i) => (
-              <path
-                key={`srclink-${i}`}
-                d={ribbonPath(colBranchX + nodeW, expanded.branchY + expanded.h / 2, colSourceX, s.y + s.h / 2)}
-                stroke={BRANCH_COLOR[expanded.key]}
-                strokeWidth={s.h}
-                fill="none"
-                opacity={0.28}
-              />
-            ))}
+          {/* Detail — the diagram, for "quiero ver el detalle" */}
+          <div>
+            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-1">
+              Detalle · tocá un destino para ver sus fuentes
+            </p>
+            <svg viewBox={`0 0 ${W} ${plotH + topPad}`} className="w-full" role="img" aria-label="Flujo de ingreso hacia gasto, ahorro, inversión y deuda">
+              {/* Links: income → branch */}
+              {branchLayout.map(b => (
+                <path
+                  key={`link-${b.key}`}
+                  d={ribbonPath(colIncomeX + nodeW, b.incomeSegY + b.h / 2, colBranchX, b.branchY + b.h / 2)}
+                  stroke={BRANCH_COLOR[b.key]}
+                  strokeWidth={b.h}
+                  fill="none"
+                  opacity={hoverKey === null || hoverKey === b.key ? 0.32 : 0.1}
+                  style={{ transition: 'opacity 120ms' }}
+                />
+              ))}
 
-            {/* Income node */}
-            <rect x={colIncomeX} y={incomeY} width={nodeW} height={incomeH} rx={2} fill="#a3e635" />
-            <text x={colIncomeX - 6} y={incomeY + incomeH / 2 - 6} textAnchor="end" className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
-              Ingreso
-            </text>
-            <text x={colIncomeX - 6} y={incomeY + incomeH / 2 + 8} textAnchor="end" className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
-              {fmt(w.income)}
-            </text>
+              {/* Income node — label centered above the bar, never clipped */}
+              <rect x={colIncomeX} y={incomeY} width={nodeW} height={incomeH} rx={2} fill="#a3e635" />
+              <text x={colIncomeX + nodeW / 2} y={incomeY - 20} textAnchor="middle" className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
+                Ingreso
+              </text>
+              <text x={colIncomeX + nodeW / 2} y={incomeY - 8} textAnchor="middle" className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt(w.income)}
+              </text>
 
-            {/* Branch nodes */}
-            {branchLayout.map(b => {
-              const isExpanded = expandedBranch === b.key
-              const canExpand = b.key !== 'remanente' && b.sources.length > 0
-              return (
-                <g
-                  key={b.key}
-                  onMouseEnter={() => setHoverKey(b.key)}
-                  onMouseLeave={() => setHoverKey(null)}
-                  onClick={() => canExpand && setExpandedBranch(isExpanded ? null : b.key)}
-                  style={{ cursor: canExpand ? 'pointer' : 'default' }}
-                >
-                  <rect
-                    x={colBranchX} y={b.branchY} width={nodeW} height={b.h} rx={2}
-                    fill={BRANCH_COLOR[b.key]}
-                    stroke={isExpanded ? '#fff' : 'none'}
-                    strokeWidth={isExpanded ? 1 : 0}
-                  />
-                  <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 - 6} className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
-                    {BRANCH_LABEL[b.key]}{canExpand ? ' ›' : ''}
-                  </text>
-                  <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 + 8} className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(b.amount)} · {pct(b.amount)}
-                  </text>
-                </g>
-              )
-            })}
+              {/* Branch nodes — % here is share of lo asignado (sums to 100%) */}
+              {branchLayout.map(b => {
+                const isExpanded = expandedBranch === b.key
+                const canExpand = b.key !== 'remanente' && b.sources.length > 0
+                return (
+                  <g
+                    key={b.key}
+                    onMouseEnter={() => setHoverKey(b.key)}
+                    onMouseLeave={() => setHoverKey(null)}
+                    onClick={() => canExpand && setExpandedBranch(isExpanded ? null : b.key)}
+                    style={{ cursor: canExpand ? 'pointer' : 'default' }}
+                  >
+                    <rect
+                      x={colBranchX} y={b.branchY} width={nodeW} height={b.h} rx={2}
+                      fill={BRANCH_COLOR[b.key]}
+                      stroke={isExpanded ? '#fff' : 'none'}
+                      strokeWidth={isExpanded ? 1 : 0}
+                    />
+                    <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 - 6} className="fill-zinc-300" style={{ fontSize: 10, fontWeight: 900 }}>
+                      {BRANCH_LABEL[b.key]}{canExpand ? ' ›' : ''}
+                    </text>
+                    <text x={colBranchX + nodeW + 8} y={b.branchY + b.h / 2 + 8} className="fill-zinc-500" style={{ fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(b.amount)} · {pctAllocated(b.amount)} de lo asignado
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
 
-            {/* Source nodes (expanded branch's breakdown) */}
-            {expanded && sourceLayout.map((s, i) => (
-              <g key={`src-${i}`}>
-                <rect x={colSourceX} y={s.y} width={nodeW} height={s.h} rx={2} fill={BRANCH_COLOR[expanded.key]} opacity={0.7} />
-                <text x={colSourceX + nodeW + 8} y={s.y + s.h / 2 - 2} className="fill-zinc-400" style={{ fontSize: 9, fontWeight: 700 }}>
-                  {s.name.length > 26 ? s.name.slice(0, 25) + '…' : s.name}
-                </text>
-                <text x={colSourceX + nodeW + 8} y={s.y + s.h / 2 + 10} className="fill-zinc-600" style={{ fontSize: 8, fontVariantNumeric: 'tabular-nums' }}>
-                  {fmt(s.amount)}
-                </text>
-              </g>
-            ))}
-          </svg>
+            {/* Drill-down — plain list, not another SVG column (collided with
+                several small sobres no matter how tightly packed). */}
+            {expandedData && (
+              <div className="mt-2 pt-3 border-t border-white/[0.06] space-y-1.5">
+                <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: BRANCH_COLOR[expandedData.key] }}>
+                  Fuentes de {BRANCH_LABEL[expandedData.key]}
+                </p>
+                {expandedSources.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="flex-1 text-[10px] text-zinc-400 truncate">{s.name}</span>
+                    <span className="text-[10px] tabular-nums text-zinc-300 shrink-0">{fmt(s.amount)}</span>
+                    <span className="text-[9px] tabular-nums text-zinc-600 shrink-0 w-8 text-right">
+                      {expandedData.amount > 0 ? `${((s.amount / expandedData.amount) * 100).toFixed(0)}%` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {deficit > 0.5 && (
             <p className="text-[10px] text-orange-400/80 bg-orange-500/5 border border-orange-500/15 rounded-lg px-3 py-2">
