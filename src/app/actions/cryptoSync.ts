@@ -96,6 +96,15 @@ export async function syncCryptoFundedInvestments(): Promise<
       exchange_rate_used: rate.sell,
       amount_usd: amountUsd,
       expense_group: 'objetivos_financieros',
+      // The sell form only ever funds an investment bucket (DeFiReTracker's
+      // picker is scoped to user_investment_buckets, "Financia inversión en
+      // FireOracle") — never a plain cash/liquid destination — so this is
+      // always SAVINGS_INVESTMENT. Without a category_code, isSavingsCategoryCode
+      // (@/lib/incomeAllocation) can't tell this apart from a plain expense,
+      // so every page that splits ahorro/inversión/gasto (AhorroInversionSection,
+      // the income-flow breakdown) silently miscounted a crypto-funded IBKR
+      // deposit as Gasto instead of Inversión.
+      category_code: 'SAVINGS_INVESTMENT',
       is_settlement: false,
       is_passive_income: false,
       notes: `Liquidación de ${s.qty} ${symbol} vía DeFiReTracker${s.notes ? ' · ' + s.notes : ''}`,

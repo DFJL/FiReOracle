@@ -13,7 +13,7 @@
 // outlier would make money vanish from the picture instead of just the
 // average.
 
-import { isSavingsCategoryCode, INVERSION_CATEGORY_CODES, isValuationConcept } from './incomeAllocation'
+import { isActiveIncome, isSavingsCategoryCode, INVERSION_CATEGORY_CODES, isValuationConcept } from './incomeAllocation'
 import { isExtraLoanPrincipalPayment } from './lifestyleExpenses'
 
 export type FlowTx = {
@@ -83,9 +83,12 @@ export function computeFlowWindow(
   const windowTxs = txs.filter(tx => tx.date && tx.date >= from && tx.date < to)
   const windowMovements = movements.filter(m => m.date && m.date >= from && m.date < to)
 
-  // Include settlement income — same as avgMonthlyIncome elsewhere on this page.
+  // isActiveIncome, not a hand-rolled check — includes settlement income on
+  // purpose (same as avgMonthlyIncome elsewhere on this page; see that
+  // function's own comment for why this is a deliberate, still-open call
+  // rather than a drift bug).
   const income = windowTxs
-    .filter(tx => tx.movement_type === 'income' && !tx.is_passive_income)
+    .filter(isActiveIncome)
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
   const gastoSourceMap: SourceMap = {}
