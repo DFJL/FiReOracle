@@ -354,6 +354,14 @@ export function SankeyDiagram({
   // not re-derived here.
   const margin = totalIncome - flow.gasto - flow.cuotas - flow.ahorro - flow.inversion - flow.deuda
 
+  // Window can span anywhere from one month (period tabs like 'mtd'/'1m') to
+  // several years ('all'/'5y') — a raw total alone answers "how much" but not
+  // "is that a lot", so wide windows also get a per-month average. ~30.44
+  // days/month (365.25/12) rather than calendar-month counting: `to` is
+  // exclusive and doesn't line up on month boundaries for every period.
+  const daysInWindow = (new Date(flow.to).getTime() - new Date(flow.from).getTime()) / 86_400_000
+  const monthsInWindow = Math.max(1, Math.round(daysInWindow / 30.44))
+
   const amountFor = (b: UiBucket): number => {
     if (b === 'necesario') return flow.gastoSurvival
     if (b === 'discrecional') return flow.gastoDiscrecional
@@ -439,6 +447,9 @@ export function SankeyDiagram({
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ingreso</p>
           <p className="text-sm font-black mt-1 text-[#a3e635] tabular-nums">{fmtAmt(flow.income)}</p>
+          {monthsInWindow > 1 && (
+            <p className="text-[8px] text-zinc-600 mt-0.5 tabular-nums">~{fmtAmt(flow.income / monthsInWindow)}/mes</p>
+          )}
         </div>
         {UI_ORDER
           .filter(b => amountFor(b) > 0)
@@ -448,6 +459,7 @@ export function SankeyDiagram({
               <p className="text-sm font-black mt-1 tabular-nums" style={{ color: UI_BUCKET_COLOR[b] }}>{fmtAmt(amountFor(b))}</p>
               <p className="text-[8px] text-zinc-600 mt-0.5">
                 {flow.income > 0 ? `${((amountFor(b) / flow.income) * 100).toFixed(0)}%` : '—'} del ingreso
+                {monthsInWindow > 1 && <> · ~{fmtAmt(amountFor(b) / monthsInWindow)}/mes</>}
               </p>
             </div>
           ))}
