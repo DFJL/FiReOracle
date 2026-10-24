@@ -1161,7 +1161,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const [selSub, setSelSub]         = useState<string | null>(null)
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
-  const [showSankey, setShowSankey] = useState(false)
+  const [showSankey, setShowSankey] = useState(true)
   const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
@@ -1472,43 +1472,6 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
           ))}
         </div>
 
-        {/* ── Expense breakdown bar ─────────────────────────────────────────── */}
-        {(kpis.survivalExp > 0 || kpis.discrecionalExp > 0 || kpis.loanPayments > 0 || kpis.invested > 0) && (() => {
-          const total = kpis.lifestyleExp + kpis.loanPayments + kpis.invested
-          const pct = (v: number) => total > 0 ? `${((v / total) * 100).toFixed(0)}%` : '0%'
-          const segments = [
-            { key: 'survival',     value: kpis.survivalExp,    label: 'Necesario',       color: 'bg-blue-400/80' },
-            { key: 'discrecional', value: kpis.discrecionalExp, label: 'Discrecional',    color: 'bg-amber-400/70' },
-            { key: 'loans',        value: kpis.loanPayments,   label: 'Cuotas',           color: 'bg-zinc-500' },
-            { key: 'savings',      value: kpis.invested,       label: 'Ahorro/Inversión', color: 'bg-[#a3e635]/75' },
-          ].filter(s => s.value > 0)
-          return (
-            <div className="mt-3 px-4 py-3 bg-white/[0.02] rounded-xl border border-white/[0.05]">
-              <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-2.5">
-                Composición del dinero saliente
-              </p>
-              {/* Stacked bar */}
-              <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
-                {segments.map(s => (
-                  <div key={s.key} className={`${s.color} transition-all`} style={{ flex: s.value }} />
-                ))}
-              </div>
-              {/* Legend grid */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                {segments.map(s => (
-                  <div key={s.key} className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-sm shrink-0 ${s.color}`} />
-                    <div className="min-w-0">
-                      <p className="text-[9px] text-zinc-500 uppercase tracking-wider leading-none">{s.label} · {pct(s.value)}</p>
-                      <p className="text-[11px] font-semibold text-zinc-300 tabular-nums mt-0.5 truncate">{fmtAmt(s.value)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
-
       </div>
 
       {/* ── Period tabs — underline style ─────────────────────────────────── */}
@@ -1546,10 +1509,14 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         )}
       </div>
 
-      {/* ── Sankey — income flow, merged with the Ahorro e inversión split
-          (previously a separate card): left = income sources, mid = Gasto/
-          Ahorro/Inversión/Abono extra deuda/Margen (the canonical split from
-          computeFlowWindow), tap a mid node for its own detail column. */}
+      {/* ── Sankey — the one breakdown of where money went (left = income
+          sources, mid = Necesario/Discrecional/Cuotas/Ahorro/Inversión/Abono
+          extra deuda/Margen, all from computeFlowWindow), with its own
+          summary cards and tap-to-drill-down. Open by default: this used to
+          duplicate a separate static "Composición del dinero saliente" bar
+          above it (same categories, no interactivity) — that bar is gone,
+          so this is now the only glance-level view of the split, not an
+          optional expansion of it. */}
       <div className="mb-4">
         {showSankey
           ? <SankeyDiagram transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
