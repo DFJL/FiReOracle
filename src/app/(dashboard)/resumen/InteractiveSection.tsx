@@ -2,13 +2,13 @@
 
 import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
-import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
+import { inferCategory, displayCategory, getGroupLabel, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
-import { isDepositTx, isActiveIncome } from '@/lib/incomeAllocation'
-import { computeFlowWindow } from '@/lib/ahorroInversionFlow'
+import { isRealizedPassiveIncome, isValuationConcept } from '@/lib/incomeAllocation'
+import { computeFlowWindow, classifyFlowTx } from '@/lib/ahorroInversionFlow'
 import {
   deleteTransaction, type UpdateTransactionInput,
   getEnvelopeEditData, updateTransactionEnvelopeLink,
@@ -174,48 +174,45 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
 
 // ── classifiers ───────────────────────────────────────────────────────────────
 
-// Pérdidas contables patrimoniales — espejo de rendimientos pasivos, no afectan liquidez
-function isPatrimonialLoss(tx: TxClient) {
-  if (tx.movement_type !== 'expense') return false
-  // expense_group='na' con category_code null = ajuste de valoración (crypto, fondos)
-  return tx.expense_group === 'na' && !tx.category_code
-}
-
+// gasto/cuotas/ahorro/inversión/deuda all go through classifyFlowTx now
+// (@/lib/ahorroInversionFlow, shared with the Sankey above and /progreso) —
+// this page used to classify the same transactions a second, independently-
+// drifted way: isOutflow didn't separate regular loan installments (cuotas,
+// ₡67M / 216 txs in this account) from lifestyle spending, isSavings/
+// isInvestment used a different SAVINGS_* code set than the canonical one,
+// and an "Ajuste de cuadre" reconciliation adjustment (₡3.7M / 20 txs) was
+// silently excluded here under a name ("pérdidas contables") that assumed
+// what it was without checking — see ahorroInversionFlow.ts for why that
+// stays included now.
 function isOutflow(tx: TxClient) {
-  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (isPatrimonialLoss(tx)) return false  // pérdidas contables no son gastos reales
-  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return true
-  return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
+  const bucket = classifyFlowTx(tx)
+  return bucket === 'gasto' || bucket === 'cuotas' || bucket === 'deuda'
+}
+function isSavingsTx(tx: TxClient) {
+  return classifyFlowTx(tx) === 'ahorro'
+}
+function isInvestmentTx(tx: TxClient) {
+  return classifyFlowTx(tx) === 'inversion'
 }
 
 // movement_type es el árbitro de liquidez — si tiene 'income' tocó una cuenta real.
 // Los registros con movement_type=NULL (Mov=#N/A en el sheet) son solo valorización
 // contable (rendimientos reinvertidos, mark-to-market) y nunca tocan cuentas.
 // is_passive_income solo describe naturaleza económica (activo vs pasivo), no liquidez.
+// (Still used for "is this a real income transaction" transaction-list
+// filtering — a different question from isActiveIncome, which is the rate
+// denominator used for Tasa de ahorro/Margen everywhere on this page now.)
 function isLiquidIncome(tx: TxClient) {
   return tx.movement_type === 'income' && !tx.is_settlement
 }
 
-// Valorización pura: registros sin movement_type — ganancia/pérdida no realizada
+// Valorización pura: registros sin movement_type — ganancia/pérdida no
+// realizada. Excludes a mark-to-market entry by concept text (isValuationConcept,
+// @/lib/incomeAllocation) — SankeyDiagram's left side already did this;
+// this didn't, so an "aumento de valor" entry could count as real
+// patrimonial income here but not there.
 function isPatrimonialIncome(tx: TxClient) {
-  return !tx.movement_type && tx.amount != null && Number(tx.amount) > 0
-}
-
-// Mantener isInflow como alias de isLiquidIncome para compatibilidad interna
-const isInflow = isLiquidIncome
-
-// Shared with /progreso and /flujo (@/lib/incomeAllocation) — this used to
-// check only `.startsWith('SAVINGS_')`, silently missing the bare 'SAVINGS'
-// code ("Ahorro", ₡7.37M / 99 transactions in this account).
-const isSavings = isDepositTx
-
-const INVEST_CODES = new Set(['SAVINGS_FUND', 'SAVINGS_CRYPTO', 'SAVINGS_PENSION', 'INVESTMENT', 'REAL_ESTATE', 'SAVINGS_INVESTMENT'])
-const isInvestment = (tx: TxClient) => {
-  // Use same GENERIC_CODES logic as resolveCategory to avoid inconsistency
-  const code = (tx.category_code && !GENERIC_CODES.has(tx.category_code))
-    ? tx.category_code
-    : inferCategory(tx.vendor, tx.concept, null)
-  return INVEST_CODES.has(code)
+  return !tx.movement_type && tx.amount != null && Number(tx.amount) > 0 && !isValuationConcept(tx.concept)
 }
 
 const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
@@ -1244,24 +1241,38 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     () => txList.reduce<string | null>((min, tx) => (tx.date && (!min || tx.date < min) ? tx.date : min), null),
     [txList]
   )
+  // Same "exclude the current partial month unless you're specifically
+  // looking at it" rule the KPI tiles already used on their own — a
+  // trailing incomplete month skews a rate/total in a way that reads as
+  // a real drop. Now the single window both the Sankey and the KPIs/tabs
+  // below derive from, instead of two independent passes over periodTxs
+  // that happened to use slightly different cutoffs.
   const flowWindow = useMemo(() => {
     const now = new Date()
     const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
-    const fromStr = cutoff ?? earliestTxDate ?? tomorrowStr
+    const thisMonthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const toStr = period === 'mtd' ? tomorrowStr : thisMonthStartStr
+    const fromStr = cutoff ?? earliestTxDate ?? toStr
     return computeFlowWindow(
       txList as Parameters<typeof computeFlowWindow>[0],
       (envelopeMovements ?? []) as Parameters<typeof computeFlowWindow>[1],
-      savingsEnvelopeIds, envelopeNameMap, catNameMap, fromStr, tomorrowStr,
+      savingsEnvelopeIds, envelopeNameMap, catNameMap, fromStr, toStr,
     )
-  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate])
+  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate, period])
+
+  // Same [from, to) flowWindow used, for the small passiveIncome/rendimientos
+  // loop in kpis below that isn't part of computeFlowWindow's own scope.
+  const flowWindowTxs = useMemo(
+    () => txList.filter(tx => tx.date && tx.date >= flowWindow.from && tx.date < flowWindow.to),
+    [txList, flowWindow.from, flowWindow.to]
+  )
 
   // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
   const tabTxs = useMemo(() => {
     if (tab === 'gastos') {
-      if (egresosSubtab === 'gastos')     return periodTxs.filter(isOutflow)
-      const savTxs = periodTxs.filter(isSavings)
-      if (egresosSubtab === 'inversiones') return savTxs.filter(isInvestment)
-      return savTxs.filter(tx => !isInvestment(tx))  // ahorros
+      if (egresosSubtab === 'gastos')      return periodTxs.filter(isOutflow)
+      if (egresosSubtab === 'inversiones') return periodTxs.filter(isInvestmentTx)
+      return periodTxs.filter(isSavingsTx)
     }
     const base = periodTxs.filter(TAB_FILTER['ingresos'])
     return incomeSubtab === 'activo'
@@ -1364,42 +1375,35 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   // For multi-month periods, exclude the current partial month to match progreso's
   // "last 12 complete months" logic (avoids denominator inflation from partial-month income).
   const kpis = useMemo(() => {
-    const kpiEnd = period !== 'mtd'
-      ? (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` })()
-      : null
-    const kpiTxs = kpiEnd ? periodTxs.filter(tx => tx.date && tx.date < kpiEnd) : periodTxs
-
-    let income = 0, passiveIncome = 0, rendimientos = 0
-    let lifestyleExp = 0, survivalExp = 0, loanPayments = 0, invested = 0
-    let activeIncomeForSavings = 0
-    for (const tx of kpiTxs) {
+    // gasto/survival/discrecional/cuotas/ahorro/inversión/income all come
+    // straight from flowWindow (computeFlowWindow, @/lib/ahorroInversionFlow)
+    // — the same window the Sankey above renders, with the same kpiEnd-style
+    // cutoff already baked in — instead of a second independent pass over
+    // periodTxs that classified the same transactions its own way. Only
+    // passiveIncome and rendimientos (patrimonial/valuation gains) are a
+    // different question — income *sources*, not outflow classification —
+    // so they still get their own small loop here.
+    let passiveIncome = 0, rendimientos = 0
+    for (const tx of flowWindowTxs) {
       const amt = Number(tx.amount ?? 0)
-      if (isLiquidIncome(tx)) {
-        income += amt
-        if (tx.is_passive_income) passiveIncome += amt
-      } else if (isPatrimonialIncome(tx)) {
-        rendimientos += amt
-      } else if (isOutflow(tx)) {
-        if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) {
-          loanPayments += amt
-        } else {
-          lifestyleExp += amt
-          if (tx.is_survival_expense) survivalExp += amt
-        }
-      } else if (isSavings(tx)) {
-        invested += amt
-      }
-      if (isActiveIncome(tx)) activeIncomeForSavings += amt
+      if (isRealizedPassiveIncome(tx)) passiveIncome += amt
+      else if (isPatrimonialIncome(tx)) rendimientos += amt
     }
-    const discrecionalExp = lifestyleExp - survivalExp
+
+    const income         = flowWindow.income
+    const lifestyleExp   = flowWindow.gasto
+    const survivalExp    = flowWindow.gastoSurvival
+    const discrecionalExp = flowWindow.gastoDiscrecional
+    const loanPayments   = flowWindow.cuotas + flowWindow.deuda
+    const invested       = flowWindow.ahorro + flowWindow.inversion
     const expenses  = lifestyleExp + loanPayments
     const net       = income - expenses
-    const savingsRate  = activeIncomeForSavings > 0 ? (invested / activeIncomeForSavings) * 100 : 0
+    const savingsRate  = income > 0 ? (invested / income) * 100 : 0
     // Margen neto: ingreso no consumido por gasto de vida (préstamos construyen patrimonio)
     const netMargin      = income > 0 ? ((income - lifestyleExp) / income) * 100 : 0
     const coverage       = lifestyleExp > 0 ? (passiveIncome / lifestyleExp) * 100 : 0
     return { income, passiveIncome, rendimientos, lifestyleExp, survivalExp, discrecionalExp, loanPayments, expenses, invested, net, savingsRate, netMargin, coverage }
-  }, [periodTxs, period])
+  }, [flowWindow, flowWindowTxs])
 
   const now = new Date()
   const monthLabel = now.toLocaleDateString('es-CR', { month: 'long', year: 'numeric' }).toUpperCase()

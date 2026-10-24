@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react'
 import { ChevronUp } from 'lucide-react'
 import { isLoanPayment } from './categoryUtils'
 import { isValuationConcept } from '@/lib/incomeAllocation'
-import { type FlowWindow, classifyFlowTx, type FlowBucket } from '@/lib/ahorroInversionFlow'
+import { type FlowWindow, classifyFlowTx } from '@/lib/ahorroInversionFlow'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -143,18 +143,35 @@ interface SankeyFlow {
 const COLOR_ACTIVE_INCOME  = '#a3e635'
 const COLOR_PASSIVE_INCOME = '#34d399'
 const COLOR_PATRIMONIAL    = '#a78bfa'
-const COLOR_GASTO          = '#71717a'
+// A 4th fully-distinct categorical hue alongside Ahorro/Inversión/Deuda
+// doesn't clear CVD separation in this app's dark mode (the dataviz
+// skill's own palette caps all-pairs-safe categoricals at 3) — so Gasto,
+// Cuotas and Margen stay a neutral zinc ladder by lightness instead of a
+// 4th competing hue: lighter = Cuotas (a known recurring bill), mid =
+// Gasto (the default "left"), darkest/most recessive = Margen
+// (unclassified leftover).
+const COLOR_NECESARIO      = '#52525b'
+const COLOR_DISCRECIONAL   = '#a1a1aa'
+const COLOR_CUOTAS         = '#71717a'
 const COLOR_AHORRO         = '#199e70'
 const COLOR_INVERSION      = '#9085e9'
 const COLOR_DEUDA          = '#d95926'
-const COLOR_MARGIN         = '#78716c'
+const COLOR_MARGIN         = '#3f3f46'
 const EXPENSE_COLORS       = ['#f87171', '#fb923c', '#fbbf24', '#e879f9', '#94a3b8', '#64748b']
 
-const BUCKET_LABEL: Record<FlowBucket, string> = {
-  gasto: 'Gasto', ahorro: 'Ahorro', inversion: 'Inversión', deuda: 'Abono extra deuda',
+// UI-level buckets — Gasto itself splits into Necesario/Discrecional here
+// (via tx.is_survival_expense) so "cuánto gasto en sobrevivencia vs.
+// discrecional" is a direct answer, not buried inside a Gasto drill-down.
+// cuotas/ahorro/inversion/deuda map 1:1 to FlowWindow's own fields.
+type UiBucket = 'necesario' | 'discrecional' | 'cuotas' | 'ahorro' | 'inversion' | 'deuda'
+
+const UI_BUCKET_LABEL: Record<UiBucket, string> = {
+  necesario: 'Necesario', discrecional: 'Discrecional', cuotas: 'Cuotas préstamos',
+  ahorro: 'Ahorro', inversion: 'Inversión', deuda: 'Abono extra deuda',
 }
-const BUCKET_COLOR: Record<FlowBucket, string> = {
-  gasto: COLOR_GASTO, ahorro: COLOR_AHORRO, inversion: COLOR_INVERSION, deuda: COLOR_DEUDA,
+const UI_BUCKET_COLOR: Record<UiBucket, string> = {
+  necesario: COLOR_NECESARIO, discrecional: COLOR_DISCRECIONAL, cuotas: COLOR_CUOTAS,
+  ahorro: COLOR_AHORRO, inversion: COLOR_INVERSION, deuda: COLOR_DEUDA,
 }
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -304,15 +321,17 @@ export function SankeyDiagram({
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverFlow, setHoverFlow] = useState<{ fromKey: string; toKey: string } | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [expandedBucket, setExpandedBucket] = useState<FlowBucket | null>(null)
+  const [expandedBucket, setExpandedBucket] = useState<UiBucket | null>(null)
 
   // ── Left side: income sources (unrelated to the gasto/ahorro/inversión
   // split — a different question, "where income came from" vs. "where it
   // went") ──────────────────────────────────────────────────────────────
   let activeIncome = 0, passiveIncome = 0, patrimonial = 0
-  // Gasto category breakdown — gated by classifyFlowTx so this always sums
-  // to exactly flow.gasto, the same number the Gasto node shows.
-  const expenseMap: Record<string, number> = {}
+  // Gasto category breakdown, split necesario/discrecional — gated by
+  // classifyFlowTx so the two sum to exactly flow.gasto, same as the
+  // Necesario+Discrecional node amounts below.
+  const expenseMapNecesario: Record<string, number> = {}
+  const expenseMapDiscrecional: Record<string, number> = {}
 
   for (const tx of transactions) {
     const amt = Number(tx.amount ?? 0)
@@ -322,16 +341,24 @@ export function SankeyDiagram({
     if (isPatrimonialIncome(tx) && amt > 0) { patrimonial += amt; continue }
     if (classifyFlowTx(tx) === 'gasto') {
       const label = getExpenseLabel(tx)
-      expenseMap[label] = (expenseMap[label] ?? 0) + amt
+      const map = tx.is_survival_expense ? expenseMapNecesario : expenseMapDiscrecional
+      map[label] = (map[label] ?? 0) + amt
     }
   }
 
   const totalIncome = activeIncome + passiveIncome + patrimonial
   if (totalIncome === 0) return null
 
-  // Canonical gasto/ahorro/inversión/deuda — same figures the summary cards
-  // above and /progreso's AhorroInversionSection report, not re-derived here.
-  const margin = totalIncome - flow.gasto - flow.ahorro - flow.inversion - flow.deuda
+  // Canonical gasto/cuotas/ahorro/inversión/deuda — same figures the
+  // summary cards above and /progreso's AhorroInversionSection report,
+  // not re-derived here.
+  const margin = totalIncome - flow.gasto - flow.cuotas - flow.ahorro - flow.inversion - flow.deuda
+
+  const amountFor = (b: UiBucket): number => {
+    if (b === 'necesario') return flow.gastoSurvival
+    if (b === 'discrecional') return flow.gastoDiscrecional
+    return flow[b]
+  }
 
   // ── Left nodes ────────────────────────────────────────────────────────────
   const leftRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
@@ -339,32 +366,37 @@ export function SankeyDiagram({
   if (passiveIncome > 0) leftRaw.push({ key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME })
   if (patrimonial   > 0) leftRaw.push({ key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL })
 
-  // ── Mid nodes: Gasto / Ahorro / Inversión / Abono extra deuda / Margen ──
+  // ── Mid nodes: Necesario / Discrecional / Cuotas / Ahorro / Inversión /
+  // Abono extra deuda / Margen ──────────────────────────────────────────
   const midRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
-  if (flow.gasto > 0)     midRaw.push({ key: 'gasto',     label: BUCKET_LABEL.gasto,     amount: flow.gasto,     color: BUCKET_COLOR.gasto })
-  if (flow.ahorro > 0)    midRaw.push({ key: 'ahorro',    label: BUCKET_LABEL.ahorro,    amount: flow.ahorro,    color: BUCKET_COLOR.ahorro })
-  if (flow.inversion > 0) midRaw.push({ key: 'inversion', label: BUCKET_LABEL.inversion, amount: flow.inversion, color: BUCKET_COLOR.inversion })
-  if (flow.deuda > 0)     midRaw.push({ key: 'deuda',     label: BUCKET_LABEL.deuda,     amount: flow.deuda,     color: BUCKET_COLOR.deuda })
-  if (margin > 0)         midRaw.push({ key: 'margin',    label: 'Margen neto',          amount: margin,         color: COLOR_MARGIN })
+  const UI_ORDER: UiBucket[] = ['necesario', 'discrecional', 'cuotas', 'ahorro', 'inversion', 'deuda']
+  for (const b of UI_ORDER) {
+    const amount = amountFor(b)
+    if (amount > 0) midRaw.push({ key: b, label: UI_BUCKET_LABEL[b], amount, color: UI_BUCKET_COLOR[b] })
+  }
+  if (margin > 0) midRaw.push({ key: 'margin', label: 'Margen neto', amount: margin, color: COLOR_MARGIN })
 
   if (leftRaw.length === 0 || midRaw.length === 0) return null
 
   // ── Drill-down source lists — same data every other consumer of `flow`
-  // uses (flow.ahorroSources etc.), except Gasto, which has no per-tx
-  // source list on FlowWindow and is grouped by expense category here
-  // instead (reusing getExpenseLabel's nicer display names), gated by
-  // classifyFlowTx so it always sums to exactly flow.gasto. Rendered as a
-  // bar list below the diagram, not a 3rd Sankey column — a 3rd column
-  // forced the diagram wider than the viewport on phones (scroll-to-see
-  // was the actual bug report), and a bar list needs no extra width at all.
-  function detailEntriesFor(b: FlowBucket): [string, number][] {
-    if (b === 'gasto') return Object.entries(expenseMap)
+  // uses (flow.ahorroSources etc.), except Necesario/Discrecional, which
+  // have no per-tx source list on FlowWindow and are grouped by expense
+  // category here instead (reusing getExpenseLabel's nicer display names),
+  // gated by classifyFlowTx + is_survival_expense so the two always sum to
+  // exactly flow.gasto between them. Rendered as a bar list below the
+  // diagram, not a 3rd Sankey column — a 3rd column forced the diagram
+  // wider than the viewport on phones (scroll-to-see was the actual bug
+  // report), and a bar list needs no extra width at all.
+  function detailEntriesFor(b: UiBucket): [string, number][] {
+    if (b === 'necesario') return Object.entries(expenseMapNecesario)
+    if (b === 'discrecional') return Object.entries(expenseMapDiscrecional)
+    if (b === 'cuotas') return flow.cuotasSources.map(s => [s.name, s.amount] as [string, number])
     if (b === 'ahorro') return flow.ahorroSources.map(s => [s.name, s.amount] as [string, number])
     if (b === 'inversion') return flow.inversionSources.map(s => [s.name, s.amount] as [string, number])
     return flow.deudaSources.map(s => [s.name, s.amount] as [string, number])
   }
-  const canExpand = (b: FlowBucket) => detailEntriesFor(b).length > 0
-  const expandedEntries = expandedBucket ? foldTopN(detailEntriesFor(expandedBucket), flow[expandedBucket]) : []
+  const canExpand = (b: UiBucket) => detailEntriesFor(b).length > 0
+  const expandedEntries = expandedBucket ? foldTopN(detailEntriesFor(expandedBucket), amountFor(expandedBucket)) : []
 
   // ── Layout — always 2 columns, always the full container width; no
   // horizontal scroll regardless of what's expanded. ──────────────────────
@@ -403,19 +435,19 @@ export function SankeyDiagram({
       </p>
 
       {/* ── Summary — the direct answer, no diagram-reading required ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         <div className="bg-black/20 rounded-xl p-3">
           <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ingreso</p>
           <p className="text-sm font-black mt-1 text-[#a3e635] tabular-nums">{fmtAmt(flow.income)}</p>
         </div>
-        {(['gasto', 'ahorro', 'inversion', 'deuda'] as FlowBucket[])
-          .filter(b => flow[b] > 0)
+        {UI_ORDER
+          .filter(b => amountFor(b) > 0)
           .map(b => (
             <div key={b} className="bg-black/20 rounded-xl p-3">
-              <p className="text-[8px] text-zinc-500 uppercase tracking-wider truncate">{BUCKET_LABEL[b]}</p>
-              <p className="text-sm font-black mt-1 tabular-nums" style={{ color: BUCKET_COLOR[b] }}>{fmtAmt(flow[b])}</p>
+              <p className="text-[8px] text-zinc-500 uppercase tracking-wider truncate">{UI_BUCKET_LABEL[b]}</p>
+              <p className="text-sm font-black mt-1 tabular-nums" style={{ color: UI_BUCKET_COLOR[b] }}>{fmtAmt(amountFor(b))}</p>
               <p className="text-[8px] text-zinc-600 mt-0.5">
-                {flow.income > 0 ? `${((flow[b] / flow.income) * 100).toFixed(0)}%` : '—'} del ingreso
+                {flow.income > 0 ? `${((amountFor(b) / flow.income) * 100).toFixed(0)}%` : '—'} del ingreso
               </p>
             </div>
           ))}
@@ -473,7 +505,7 @@ export function SankeyDiagram({
 
           {midNodes.map((node) => {
             if (node.key === 'margin') return <NodeGroup key={node.key} node={node} fmtAmt={fmtAmt} />
-            const bucket = node.key as FlowBucket
+            const bucket = node.key as UiBucket
             const clickable = canExpand(bucket)
             return (
               <NodeGroup
@@ -491,12 +523,14 @@ export function SankeyDiagram({
           the whole diagram wider than the screen on phones). ── */}
       {expandedBucket && (
         <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
-          <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: BUCKET_COLOR[expandedBucket] }}>
-            Fuentes de {BUCKET_LABEL[expandedBucket]}
+          <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: UI_BUCKET_COLOR[expandedBucket] }}>
+            Fuentes de {UI_BUCKET_LABEL[expandedBucket]}
           </p>
           {expandedEntries.map(([name, amt], i) => {
-            const pct = flow[expandedBucket] > 0 ? (amt / flow[expandedBucket]) * 100 : 0
-            const color = expandedBucket === 'gasto' ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : BUCKET_COLOR[expandedBucket]
+            const expandedAmount = amountFor(expandedBucket)
+            const pct = expandedAmount > 0 ? (amt / expandedAmount) * 100 : 0
+            const isGastoCategory = expandedBucket === 'necesario' || expandedBucket === 'discrecional'
+            const color = isGastoCategory ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : UI_BUCKET_COLOR[expandedBucket]
             return (
               <div key={name}>
                 <div className="flex items-center justify-between gap-2 mb-1">
