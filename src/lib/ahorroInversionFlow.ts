@@ -71,6 +71,28 @@ function toSourceList(map: SourceMap): SourceAmount[] {
   return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount }))
 }
 
+export type FlowBucket = 'gasto' | 'ahorro' | 'inversion' | 'deuda'
+
+/**
+ * Which bucket a single outflow transaction belongs to, or null if it's not
+ * one at all (income, settlement, valuation). Exported so any renderer that
+ * needs its own grouping of the same transactions — e.g. SankeyDiagram
+ * grouping Gasto by expense category rather than by vendor — still agrees
+ * tx-by-tx with the totals computeFlowWindow reports, instead of growing a
+ * second copy of this decision.
+ */
+export function classifyFlowTx(tx: FlowTx): FlowBucket | null {
+  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return null
+  if (tx.is_settlement) return null
+  if (isValuationConcept(tx.concept)) return null
+
+  if (isExtraLoanPrincipalPayment(tx.concept ?? null, tx.category_code ?? null)) return 'deuda'
+  if (tx.expense_group === 'objetivos_financieros' && isSavingsCategoryCode(tx.category_code)) {
+    return INVERSION_CATEGORY_CODES.has(tx.category_code ?? '') ? 'inversion' : 'ahorro'
+  }
+  return 'gasto'
+}
+
 export function computeFlowWindow(
   txs: FlowTx[],
   movements: FlowMovement[],
@@ -99,27 +121,24 @@ export function computeFlowWindow(
   let ahorro = 0, inversion = 0, deuda = 0, gasto = 0
 
   for (const tx of windowTxs) {
-    if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') continue
-    if (tx.is_settlement) continue
-    if (isValuationConcept(tx.concept)) continue
+    const bucket = classifyFlowTx(tx)
+    if (!bucket) continue
 
     const amt = Number(tx.amount ?? 0)
     const dest = depositDestination(tx)
 
-    if (isExtraLoanPrincipalPayment(tx.concept ?? null, tx.category_code ?? null)) {
+    if (bucket === 'deuda') {
       deuda += amt
       const name = tx.concept || tx.vendor || 'Abono extra'
       addSource(deudaSourceMap, name, null, amt)
-    } else if (tx.expense_group === 'objetivos_financieros' && isSavingsCategoryCode(tx.category_code)) {
-      if (INVERSION_CATEGORY_CODES.has(tx.category_code ?? '')) {
-        inversion += amt
-        const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Inversión'
-        addSource(inversionSourceMap, baseName, dest, amt)
-      } else {
-        ahorro += amt
-        const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Ahorro'
-        addSource(ahorroSourceMap, baseName, dest, amt)
-      }
+    } else if (bucket === 'inversion') {
+      inversion += amt
+      const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Inversión'
+      addSource(inversionSourceMap, baseName, dest, amt)
+    } else if (bucket === 'ahorro') {
+      ahorro += amt
+      const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Ahorro'
+      addSource(ahorroSourceMap, baseName, dest, amt)
     } else {
       gasto += amt
       const baseName = (tx.category_code && catNameMap.get(tx.category_code)) || tx.category_code || 'Gasto'

@@ -2,8 +2,9 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { ChevronUp } from 'lucide-react'
-import { isLoanPayment, SAVINGS_EXPENSE_GROUP } from './categoryUtils'
-import { isValuationConcept, isInversionCategoryCode } from '@/lib/incomeAllocation'
+import { isLoanPayment } from './categoryUtils'
+import { isValuationConcept } from '@/lib/incomeAllocation'
+import { type FlowWindow, classifyFlowTx, type FlowBucket } from '@/lib/ahorroInversionFlow'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,9 @@ const CATEGORY_DISPLAY: Record<string, string> = {
 }
 
 function getExpenseLabel(tx: TxClient): string {
-  // Loan payments always go to "Préstamos"
+  // Loan payments always go to "Préstamos" (the regular-installment ones —
+  // isExtraLoanPrincipalPayment-tagged extra paydowns are already pulled
+  // into the Abono extra deuda bucket upstream, by classifyFlowTx).
   if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
 
   // Known category codes
@@ -60,9 +63,32 @@ function getExpenseLabel(tx: TxClient): string {
   return trimmed.split(/\s+/)[0] ?? 'Otro'
 }
 
-// ── Transaction classifiers ────────────────────────────────────────────────────
+// Groups a set of (label, amount) entries into top-N + "Otros" below a %
+// threshold — same rule applied to Gasto categories and to each bucket's
+// sources, so every drill-down folds the same way.
+function foldTopN(
+  entries: [string, number][], total: number, topN = 6, thresholdPct = 0.03,
+): [string, number][] {
+  const sorted = [...entries].sort((a, b) => b[1] - a[1])
+  const top = sorted.slice(0, topN)
+  const rest = sorted.slice(topN)
+  const threshold = total * thresholdPct
+  const main: [string, number][] = []
+  let othersAccum = rest.reduce((s, [, v]) => s + v, 0)
+  for (const [label, amt] of top) {
+    if (amt < threshold) othersAccum += amt
+    else main.push([label, amt])
+  }
+  main.sort((a, b) => b[1] - a[1])
+  if (othersAccum > threshold || (othersAccum > 0 && main.length === 0)) {
+    main.push(['Otros', othersAccum])
+  }
+  return main
+}
 
-// Valuation entries (no movement_type): mark-to-market / unrealized, no cash impact
+// ── Income-side classifiers (left column only — which income source, not
+// touched by the gasto/ahorro/inversión/deuda split below) ────────────────
+
 function isValuationEntry(tx: TxClient): boolean {
   if (tx.movement_type) return false
   return isValuationConcept(tx.concept)
@@ -80,30 +106,6 @@ function isPassiveIncome(tx: TxClient): boolean {
   return tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement
 }
 
-// Savings = expense_group === 'objetivos_financieros' AND NOT a loan payment
-function isSavingsTx(tx: TxClient): boolean {
-  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (tx.expense_group !== SAVINGS_EXPENSE_GROUP) return false
-  return !isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-}
-
-// Patrimonial loss: expense_group='na', no category_code — valuation adjustment
-function isPatrimonialLoss(tx: TxClient): boolean {
-  if (tx.movement_type !== 'expense') return false
-  return tx.expense_group === 'na' && !tx.category_code
-}
-
-function isExpenseTx(tx: TxClient): boolean {
-  if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
-  if (tx.is_settlement) return false
-  if (isPatrimonialLoss(tx)) return false
-  if (tx.expense_group === SAVINGS_EXPENSE_GROUP) {
-    // Only loan payments within objetivos_financieros count as expenses
-    return isLoanPayment(tx.vendor, tx.concept, tx.category_code)
-  }
-  return true
-}
-
 // ── Node and flow data structures ─────────────────────────────────────────────
 
 interface SankeyNode {
@@ -111,8 +113,6 @@ interface SankeyNode {
   label: string
   amount: number
   color: string
-  side: 'left' | 'right'
-  // Layout (computed)
   x1: number
   x2: number
   y1: number
@@ -122,31 +122,44 @@ interface SankeyNode {
 interface SankeyFlow {
   fromKey: string
   toKey: string
-  // Fraction of from-node height this flow occupies (stacked from top)
-  fromYStart: number // absolute y in SVG
+  fromYStart: number
   fromYEnd: number
   toYStart: number
   toYEnd: number
-  color: string      // from-node color
+  color: string
   amount: number
 }
 
 // ── Colors ────────────────────────────────────────────────────────────────────
+// Ahorro/Inversión/Abono extra deuda reuse the exact hues the Ahorro e
+// inversión card (IncomeFlowSankey, now retired in favor of this merged
+// view) validated for this app's dark surface — one color language for the
+// same four buckets everywhere, not two diagrams disagreeing on what
+// "Ahorro" looks like. Gasto and Margen are neutral (not a competing
+// identity), and deliberately different shades of neutral from each other
+// and from Margen's old violet, which sat too close to Inversión's violet
+// to tell apart — this also incidentally fixes that.
 
 const COLOR_ACTIVE_INCOME  = '#a3e635'
 const COLOR_PASSIVE_INCOME = '#34d399'
-const COLOR_SAVINGS        = '#60a5fa'
-// Teal, not another blue/violet — COLOR_SAVINGS and COLOR_MARGIN already sit
-// close enough on the wheel to be a known weak pair here; a 3rd blue-family
-// hue for Inversión would only add to that instead of reading as distinct.
-const COLOR_INVESTMENT     = '#2dd4bf'
-const COLOR_MARGIN         = '#a78bfa'
+const COLOR_PATRIMONIAL    = '#a78bfa'
+const COLOR_GASTO          = '#71717a'
+const COLOR_AHORRO         = '#199e70'
+const COLOR_INVERSION      = '#9085e9'
+const COLOR_DEUDA          = '#d95926'
+const COLOR_MARGIN         = '#78716c'
 const EXPENSE_COLORS       = ['#f87171', '#fb923c', '#fbbf24', '#e879f9', '#94a3b8', '#64748b']
+
+const BUCKET_LABEL: Record<FlowBucket, string> = {
+  gasto: 'Gasto', ahorro: 'Ahorro', inversion: 'Inversión', deuda: 'Abono extra deuda',
+}
+const BUCKET_COLOR: Record<FlowBucket, string> = {
+  gasto: COLOR_GASTO, ahorro: COLOR_AHORRO, inversion: COLOR_INVERSION, deuda: COLOR_DEUDA,
+}
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
-const W     = 900
-const H     = 400
+const H           = 400
 const NODE_W      = 140
 const NODE_GAP    = 4
 const PAD_TOP     = 8
@@ -154,23 +167,27 @@ const PAD_BOTTOM  = 8
 const USABLE_H    = H - PAD_TOP - PAD_BOTTOM
 const LEFT_X1     = 0
 const LEFT_X2     = NODE_W
-const RIGHT_X1    = W - NODE_W
-const RIGHT_X2    = W
-const CP_X        = W / 2  // bezier control-point x
+
+// Collapsed: 2 columns, mid sits where "right" used to. Expanded: 3 columns,
+// mid moves to the middle and a 3rd (detail) column takes the old right slot.
+const W_COLLAPSED   = 900
+const W_EXPANDED     = 1220
+const MID_X1_COLLAPSED = W_COLLAPSED - NODE_W
+const MID_X2_COLLAPSED = W_COLLAPSED
+const MID_X1_EXPANDED  = 540
+const MID_X2_EXPANDED  = 540 + NODE_W
+const DETAIL_X1         = W_EXPANDED - NODE_W
+const DETAIL_X2         = W_EXPANDED
 
 // ── Layout computation ────────────────────────────────────────────────────────
 
 function layoutNodes(
   nodes: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[],
-  side: 'left' | 'right',
+  x1: number, x2: number,
   totalAmount: number,
 ): SankeyNode[] {
-  const x1 = side === 'left' ? LEFT_X1 : RIGHT_X1
-  const x2 = side === 'left' ? LEFT_X2 : RIGHT_X2
   const total = totalAmount || 1
-
-  // Total gap space
-  const gapSpace = NODE_GAP * (nodes.length - 1)
+  const gapSpace = NODE_GAP * Math.max(0, nodes.length - 1)
   const heightSpace = USABLE_H - gapSpace
 
   let currentY = PAD_TOP
@@ -183,112 +200,134 @@ function layoutNodes(
   })
 }
 
-// Build flows: each left node contributes proportionally to all right nodes
-function buildFlows(leftNodes: SankeyNode[], rightNodes: SankeyNode[]): SankeyFlow[] {
+// Each "from" node contributes proportionally to every "to" node (used both
+// for income-sources → buckets, where that's a real assumption since we
+// don't track per-source attribution, and for one bucket → its own sources,
+// where there's a single "from" node so this reduces to a plain 1-to-many).
+function buildFlows(fromNodes: SankeyNode[], toNodes: SankeyNode[]): SankeyFlow[] {
   const flows: SankeyFlow[] = []
+  const totalFrom = fromNodes.reduce((s, n) => s + n.amount, 0) || 1
 
-  const totalIncome = leftNodes.reduce((s, n) => s + n.amount, 0) || 1
+  const toFilled: Record<string, number> = {}
+  toNodes.forEach((n) => { toFilled[n.key] = n.y1 })
+  const fromFilled: Record<string, number> = {}
+  fromNodes.forEach((n) => { fromFilled[n.key] = n.y1 })
 
-  // Track how much of each right node's height has been filled from the top
-  const rightFilled: Record<string, number> = {}
-  rightNodes.forEach((n) => { rightFilled[n.key] = n.y1 })
+  for (const to of toNodes) {
+    const toH = to.y2 - to.y1
+    for (const from of fromNodes) {
+      const fromShare = from.amount / totalFrom
+      const flowH = Math.max(0, fromShare * toH)
+      if (flowH < 0.5) continue
 
-  // Track how much of each left node's height has been filled from the top
-  const leftFilled: Record<string, number> = {}
-  leftNodes.forEach((n) => { leftFilled[n.key] = n.y1 })
+      const fromNodeH = from.y2 - from.y1
+      const toShare = to.amount / totalFrom
+      const fromH = Math.max(0, toShare * fromNodeH)
 
-  for (const right of rightNodes) {
-    const rightH = right.y2 - right.y1
-    for (const left of leftNodes) {
-      const leftShare = left.amount / totalIncome
-      const flowH = Math.max(0, leftShare * rightH)
-      if (flowH < 0.5) continue  // skip sub-pixel flows
-
-      const leftNodeH = left.y2 - left.y1
-      const rightShare = right.amount / totalIncome
-      const fromH = Math.max(0, rightShare * leftNodeH)
-
-      const fromYStart = leftFilled[left.key]
+      const fromYStart = fromFilled[from.key]
       const fromYEnd   = fromYStart + fromH
-      leftFilled[left.key] = fromYEnd
+      fromFilled[from.key] = fromYEnd
 
-      const toYStart = rightFilled[right.key]
+      const toYStart = toFilled[to.key]
       const toYEnd   = toYStart + flowH
-      rightFilled[right.key] = toYEnd
+      toFilled[to.key] = toYEnd
 
       flows.push({
-        fromKey: left.key,
-        toKey:   right.key,
-        fromYStart,
-        fromYEnd,
-        toYStart,
-        toYEnd,
-        color:  left.color,
-        amount: (left.amount / totalIncome) * right.amount,
+        fromKey: from.key, toKey: to.key,
+        fromYStart, fromYEnd, toYStart, toYEnd,
+        color: from.color,
+        amount: (from.amount / totalFrom) * to.amount,
       })
     }
   }
-
   return flows
 }
 
-// ── Bezier flow path ──────────────────────────────────────────────────────────
-
-function flowPath(flow: SankeyFlow, leftX2: number, rightX1: number): string {
+function flowPath(flow: SankeyFlow, fromX: number, toX: number): string {
   const { fromYStart, fromYEnd, toYStart, toYEnd } = flow
-  const fx = leftX2
-  const tx = rightX1
-
-  // Top cubic bezier
-  const topD  = `M${fx},${fromYStart.toFixed(2)} C${CP_X},${fromYStart.toFixed(2)} ${CP_X},${toYStart.toFixed(2)} ${tx},${toYStart.toFixed(2)}`
-  // Bottom cubic bezier (reversed)
-  const botD  = `L${tx},${toYEnd.toFixed(2)} C${CP_X},${toYEnd.toFixed(2)} ${CP_X},${fromYEnd.toFixed(2)} ${fx},${fromYEnd.toFixed(2)}`
-
+  const cpX = (fromX + toX) / 2
+  const topD = `M${fromX},${fromYStart.toFixed(2)} C${cpX},${fromYStart.toFixed(2)} ${cpX},${toYStart.toFixed(2)} ${toX},${toYStart.toFixed(2)}`
+  const botD = `L${toX},${toYEnd.toFixed(2)} C${cpX},${toYEnd.toFixed(2)} ${cpX},${fromYEnd.toFixed(2)} ${fromX},${fromYEnd.toFixed(2)}`
   return `${topD} ${botD} Z`
+}
+
+// ── Node + label rendering (shared by every column) ────────────────────────
+
+function NodeGroup({
+  node, fmtAmt, clickable, expanded, onClick,
+}: {
+  node: SankeyNode
+  fmtAmt: (n: number) => string
+  clickable?: boolean
+  expanded?: boolean
+  onClick?: () => void
+}) {
+  const tall = (node.y2 - node.y1) >= 22
+  return (
+    <g onClick={onClick} style={{ cursor: clickable ? 'pointer' : 'default' }}>
+      <rect
+        x={node.x1} y={node.y1} width={node.x2 - node.x1} height={node.y2 - node.y1}
+        fill={node.color} fillOpacity={0.85} rx={3}
+        stroke={expanded ? '#fff' : 'none'} strokeWidth={expanded ? 1.5 : 0}
+      />
+      {tall ? (
+        <>
+          <text x={node.x1 + (node.x2 - node.x1) / 2} y={node.y1 + (node.y2 - node.y1) / 2 - 6}
+            textAnchor="middle" fontSize="10" fontWeight="700" fill="#0d120d" style={{ pointerEvents: 'none' }}>
+            {node.label}{clickable ? ' ›' : ''}
+          </text>
+          <text x={node.x1 + (node.x2 - node.x1) / 2} y={node.y1 + (node.y2 - node.y1) / 2 + 8}
+            textAnchor="middle" fontSize="9" fontWeight="600" fill="#0d120d" fillOpacity={0.7} style={{ pointerEvents: 'none' }}>
+            {fmtAmt(node.amount)}
+          </text>
+        </>
+      ) : (
+        <text
+          x={node.x1 < 400 ? node.x1 - 4 : node.x2 + 4}
+          y={node.y1 + (node.y2 - node.y1) / 2 + 4}
+          textAnchor={node.x1 < 400 ? 'end' : 'start'}
+          fontSize="9" fontWeight="600" fill={node.color} style={{ pointerEvents: 'none' }}
+        >
+          {node.label}{clickable ? ' ›' : ''}
+        </text>
+      )}
+    </g>
+  )
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function SankeyDiagram({
   transactions,
+  flow,
   fmtAmt,
   onCollapse,
 }: {
   transactions: TxClient[]
+  flow: FlowWindow
   fmtAmt: (n: number) => string
   onCollapse?: () => void
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverFlow, setHoverFlow] = useState<{ fromKey: string; toKey: string } | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const [expandedBucket, setExpandedBucket] = useState<FlowBucket | null>(null)
 
-  // ── Aggregate ──────────────────────────────────────────────────────────────
-
-  let activeIncome  = 0
-  let passiveIncome = 0
-  let patrimonial   = 0
-
+  // ── Left side: income sources (unrelated to the gasto/ahorro/inversión
+  // split — a different question, "where income came from" vs. "where it
+  // went") ──────────────────────────────────────────────────────────────
+  let activeIncome = 0, passiveIncome = 0, patrimonial = 0
+  // Gasto category breakdown — gated by classifyFlowTx so this always sums
+  // to exactly flow.gasto, the same number the Gasto node shows.
   const expenseMap: Record<string, number> = {}
-  // Ahorro puro vs. inversión con retorno esperado — previously one lumped
-  // "Ahorros / Inv." node; split via isInversionCategoryCode (@/lib/
-  // incomeAllocation), the same test the Ahorro e inversión card above uses,
-  // so the two never disagree on which SAVINGS_* codes count as which.
-  let totalAhorro    = 0
-  let totalInversion = 0
 
   for (const tx of transactions) {
     const amt = Number(tx.amount ?? 0)
     if (amt <= 0 && tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') continue
-
     if (isActivIncome(tx))    { activeIncome  += amt; continue }
     if (isPassiveIncome(tx))  { passiveIncome += amt; continue }
     if (isPatrimonialIncome(tx) && amt > 0) { patrimonial += amt; continue }
-    if (isSavingsTx(tx)) {
-      if (isInversionCategoryCode(tx.category_code)) totalInversion += amt
-      else totalAhorro += amt
-      continue
-    }
-    if (isExpenseTx(tx)) {
+    if (classifyFlowTx(tx) === 'gasto') {
       const label = getExpenseLabel(tx)
       expenseMap[label] = (expenseMap[label] ?? 0) + amt
     }
@@ -297,129 +336,86 @@ export function SankeyDiagram({
   const totalIncome = activeIncome + passiveIncome + patrimonial
   if (totalIncome === 0) return null
 
-  const totalExpenses = Object.values(expenseMap).reduce((s, v) => s + v, 0)
-  const margin = totalIncome - totalExpenses - totalAhorro - totalInversion
+  // Canonical gasto/ahorro/inversión/deuda — same figures the summary cards
+  // above and /progreso's AhorroInversionSection report, not re-derived here.
+  const margin = totalIncome - flow.gasto - flow.ahorro - flow.inversion - flow.deuda
 
   // ── Left nodes ────────────────────────────────────────────────────────────
-
   const leftRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
-  if (activeIncome  > 0) leftRaw.push({ key: 'active',     label: 'Ingreso activo',  amount: activeIncome,  color: COLOR_ACTIVE_INCOME,  side: 'left' })
-  if (passiveIncome > 0) leftRaw.push({ key: 'passive',    label: 'Ingreso pasivo',  amount: passiveIncome, color: COLOR_PASSIVE_INCOME, side: 'left' })
-  if (patrimonial   > 0) leftRaw.push({ key: 'patrimonial',label: 'Val. patrimonial',amount: patrimonial,   color: '#a78bfa',            side: 'left' })
+  if (activeIncome  > 0) leftRaw.push({ key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME })
+  if (passiveIncome > 0) leftRaw.push({ key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME })
+  if (patrimonial   > 0) leftRaw.push({ key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL })
 
-  // ── Right nodes: expenses (top 6 + Otros), then savings, then margin ────
+  // ── Mid nodes: Gasto / Ahorro / Inversión / Abono extra deuda / Margen ──
+  const midRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
+  if (flow.gasto > 0)     midRaw.push({ key: 'gasto',     label: BUCKET_LABEL.gasto,     amount: flow.gasto,     color: BUCKET_COLOR.gasto })
+  if (flow.ahorro > 0)    midRaw.push({ key: 'ahorro',    label: BUCKET_LABEL.ahorro,    amount: flow.ahorro,    color: BUCKET_COLOR.ahorro })
+  if (flow.inversion > 0) midRaw.push({ key: 'inversion', label: BUCKET_LABEL.inversion, amount: flow.inversion, color: BUCKET_COLOR.inversion })
+  if (flow.deuda > 0)     midRaw.push({ key: 'deuda',     label: BUCKET_LABEL.deuda,     amount: flow.deuda,     color: BUCKET_COLOR.deuda })
+  if (margin > 0)         midRaw.push({ key: 'margin',    label: 'Margen neto',          amount: margin,         color: COLOR_MARGIN })
 
-  // Sort and group expenses
-  const expenseEntries = Object.entries(expenseMap).sort((a, b) => b[1] - a[1])
-  const TOP_N = 6
-  const topExpenses = expenseEntries.slice(0, TOP_N)
-  const smallExpenses = expenseEntries.slice(TOP_N)
-  const othersFromSmall = smallExpenses.reduce((s, [, v]) => s + v, 0)
+  if (leftRaw.length === 0 || midRaw.length === 0) return null
 
-  // Also group categories < 3% of total expenses into "Otros"
-  const THRESHOLD_PCT = 0.03
-  const threshold = totalExpenses * THRESHOLD_PCT
-  const main: [string, number][]  = []
-  let   othersAccum = othersFromSmall
+  // ── Detail (3rd column) for whichever bucket is expanded — same source
+  // list every other consumer of `flow` uses (flow.ahorroSources etc.),
+  // except Gasto, which has no per-tx source list on FlowWindow and is
+  // grouped by expense category here instead (reusing getExpenseLabel's
+  // nicer display names), gated by classifyFlowTx so it always sums to
+  // exactly flow.gasto. ────────────────────────────────────────────────
+  function detailEntriesFor(b: FlowBucket): [string, number][] {
+    if (b === 'gasto') return Object.entries(expenseMap)
+    if (b === 'ahorro') return flow.ahorroSources.map(s => [s.name, s.amount] as [string, number])
+    if (b === 'inversion') return flow.inversionSources.map(s => [s.name, s.amount] as [string, number])
+    return flow.deudaSources.map(s => [s.name, s.amount] as [string, number])
+  }
+  const canExpand = (b: FlowBucket) => detailEntriesFor(b).length > 0
 
-  for (const [label, amt] of topExpenses) {
-    if (amt < threshold) {
-      othersAccum += amt
-    } else {
-      main.push([label, amt])
+  // ── Layout ────────────────────────────────────────────────────────────────
+  const isExpanded = expandedBucket !== null
+  const W = isExpanded ? W_EXPANDED : W_COLLAPSED
+  const midX1 = isExpanded ? MID_X1_EXPANDED : MID_X1_COLLAPSED
+  const midX2 = isExpanded ? MID_X2_EXPANDED : MID_X2_COLLAPSED
+
+  const leftNodes = layoutNodes(leftRaw, LEFT_X1, LEFT_X2, totalIncome)
+  const midNodes  = layoutNodes(midRaw, midX1, midX2, totalIncome)
+  const flows     = buildFlows(leftNodes, midNodes)
+
+  let detailNodes: SankeyNode[] = []
+  let detailFlows: SankeyFlow[] = []
+  if (isExpanded && expandedBucket) {
+    const midNode = midNodes.find(n => n.key === expandedBucket)
+    const expandedAmount = flow[expandedBucket]
+    if (midNode && expandedAmount > 0) {
+      const folded = foldTopN(detailEntriesFor(expandedBucket), expandedAmount)
+      const detailRaw = folded.map(([label, amt], i) => ({
+        key: `d_${label}`,
+        label,
+        amount: amt,
+        color: expandedBucket === 'gasto' ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : BUCKET_COLOR[expandedBucket],
+      }))
+      detailNodes = layoutNodes(detailRaw, DETAIL_X1, DETAIL_X2, expandedAmount)
+      detailFlows = buildFlows([midNode], detailNodes)
     }
   }
 
-  // Re-sort after threshold filtering
-  main.sort((a, b) => b[1] - a[1])
-
-  const rightRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
-
-  main.forEach(([label, amt], i) => {
-    rightRaw.push({
-      key:    `exp_${label}`,
-      label,
-      amount: amt,
-      color:  EXPENSE_COLORS[i % EXPENSE_COLORS.length],
-      side:   'right',
-    })
-  })
-
-  if (othersAccum > threshold || (othersAccum > 0 && main.length === 0)) {
-    rightRaw.push({
-      key:   'exp_otros',
-      label: 'Otros gastos',
-      amount: othersAccum,
-      color: '#64748b',
-      side:  'right',
-    })
-  }
-
-  if (totalAhorro > 0) {
-    rightRaw.push({
-      key:   'ahorro',
-      label: 'Ahorro',
-      amount: totalAhorro,
-      color: COLOR_SAVINGS,
-      side:  'right',
-    })
-  }
-
-  if (totalInversion > 0) {
-    rightRaw.push({
-      key:   'inversion',
-      label: 'Inversión',
-      amount: totalInversion,
-      color: COLOR_INVESTMENT,
-      side:  'right',
-    })
-  }
-
-  if (margin > 0) {
-    rightRaw.push({
-      key:   'margin',
-      label: 'Margen neto',
-      amount: margin,
-      color: COLOR_MARGIN,
-      side:  'right',
-    })
-  }
-
-  if (leftRaw.length === 0 || rightRaw.length === 0) return null
-
-  // ── Layout ────────────────────────────────────────────────────────────────
-
-  const leftNodes  = layoutNodes(leftRaw,  'left',  totalIncome)
-  const rightNodes = layoutNodes(rightRaw, 'right', totalIncome)
-  const flows      = buildFlows(leftNodes, rightNodes)
+  const allFlows = [...flows, ...detailFlows]
 
   // ── Tooltip data ──────────────────────────────────────────────────────────
-
+  const allNodes = [...leftNodes, ...midNodes, ...detailNodes]
   const hoveredFlow = hoverFlow
-    ? flows.find((f) => f.fromKey === hoverFlow.fromKey && f.toKey === hoverFlow.toKey)
+    ? allFlows.find((f) => f.fromKey === hoverFlow.fromKey && f.toKey === hoverFlow.toKey)
     : null
-
-  const hoveredFromNode = hoveredFlow
-    ? leftNodes.find((n) => n.key === hoveredFlow.fromKey)
-    : null
-
-  const hoveredToNode = hoveredFlow
-    ? rightNodes.find((n) => n.key === hoveredFlow.toKey)
-    : null
+  const hoveredFromNode = hoveredFlow ? allNodes.find((n) => n.key === hoveredFlow.fromKey) : null
+  const hoveredToNode   = hoveredFlow ? allNodes.find((n) => n.key === hoveredFlow.toKey)   : null
 
   // ── Mouse tracking ────────────────────────────────────────────────────────
-
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
-    setTooltipPos({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    })
+    setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
   }, [])
 
   // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
       <div className="flex items-start justify-between mb-1">
@@ -431,37 +427,24 @@ export function SankeyDiagram({
         )}
       </div>
       <p className="text-xs text-zinc-500 mb-4">
-        Cómo se distribuyen tus ingresos en el período
+        De dónde viene, y cuánto es gasto, ahorro, inversión o abono extra a deuda — tocá un destino para ver el detalle
       </p>
 
-      <div className="relative">
-        {/* Tooltip */}
+      <div className="relative overflow-x-auto">
         {hoveredFlow && hoveredFromNode && hoveredToNode && (
           <div
             className="absolute z-20 pointer-events-none"
-            style={{
-              left: tooltipPos.x,
-              top:  tooltipPos.y,
-              transform: 'translate(12px, -50%)',
-            }}
+            style={{ left: tooltipPos.x, top: tooltipPos.y, transform: 'translate(12px, -50%)' }}
           >
             <div className="bg-[#111811] border border-[#a3e635]/20 rounded-xl px-3 py-2.5 shadow-xl whitespace-nowrap text-[11px]">
               <div className="flex items-center gap-1.5 mb-1.5">
-                <span
-                  className="inline-block w-2 h-2 rounded-sm flex-shrink-0"
-                  style={{ background: hoveredFromNode.color }}
-                />
+                <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ background: hoveredFromNode.color }} />
                 <span className="text-zinc-300 font-semibold">{hoveredFromNode.label}</span>
                 <span className="text-zinc-600 mx-1">→</span>
-                <span
-                  className="inline-block w-2 h-2 rounded-sm flex-shrink-0"
-                  style={{ background: hoveredToNode.color }}
-                />
+                <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ background: hoveredToNode.color }} />
                 <span className="text-zinc-300 font-semibold">{hoveredToNode.label}</span>
               </div>
-              <p className="text-center font-black tabular-nums text-white">
-                {fmtAmt(hoveredFlow.amount)}
-              </p>
+              <p className="text-center font-black tabular-nums text-white">{fmtAmt(hoveredFlow.amount)}</p>
             </div>
           </div>
         )}
@@ -469,150 +452,54 @@ export function SankeyDiagram({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          width="100%"
+          width={W}
+          style={{ maxWidth: isExpanded ? 'none' : '100%', minWidth: isExpanded ? W : undefined, overflow: 'visible' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverFlow(null)}
           className="cursor-crosshair"
-          style={{ overflow: 'visible' }}
         >
-          {/* ── Flows ── */}
-          {flows.map((flow) => {
-            const isHovered = hoverFlow?.fromKey === flow.fromKey && hoverFlow?.toKey === flow.toKey
+          {allFlows.map((f, i) => {
+            const isHovered = hoverFlow?.fromKey === f.fromKey && hoverFlow?.toKey === f.toKey
             const isAnyHovered = hoverFlow !== null
             const opacity = isHovered ? 0.6 : isAnyHovered ? 0.1 : 0.25
-
+            const fromX = allNodes.find(n => n.key === f.fromKey)?.x2 ?? 0
+            const toX   = allNodes.find(n => n.key === f.toKey)?.x1 ?? 0
             return (
               <path
-                key={`${flow.fromKey}-${flow.toKey}`}
-                d={flowPath(flow, LEFT_X2, RIGHT_X1)}
-                fill={flow.color}
-                fillOpacity={opacity}
-                stroke="none"
+                key={`${f.fromKey}-${f.toKey}-${i}`}
+                d={flowPath(f, fromX, toX)}
+                fill={f.color} fillOpacity={opacity} stroke="none"
                 style={{ transition: 'fill-opacity 0.15s ease', cursor: 'pointer' }}
-                onMouseEnter={() => setHoverFlow({ fromKey: flow.fromKey, toKey: flow.toKey })}
+                onMouseEnter={() => setHoverFlow({ fromKey: f.fromKey, toKey: f.toKey })}
               />
             )
           })}
 
-          {/* ── Left nodes ── */}
-          {leftNodes.map((node) => (
-            <g key={node.key}>
-              <rect
-                x={node.x1}
-                y={node.y1}
-                width={node.x2 - node.x1}
-                height={node.y2 - node.y1}
-                fill={node.color}
-                fillOpacity={0.85}
-                rx={3}
-              />
-              {/* Label — inside if tall enough, outside otherwise */}
-              {(node.y2 - node.y1) >= 22 ? (
-                <>
-                  <text
-                    x={node.x1 + (node.x2 - node.x1) / 2}
-                    y={node.y1 + (node.y2 - node.y1) / 2 - 6}
-                    textAnchor="middle"
-                    fontSize="10"
-                    fontWeight="700"
-                    fill="#0d120d"
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {node.label}
-                  </text>
-                  <text
-                    x={node.x1 + (node.x2 - node.x1) / 2}
-                    y={node.y1 + (node.y2 - node.y1) / 2 + 8}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fontWeight="600"
-                    fill="#0d120d"
-                    fillOpacity={0.7}
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {fmtAmt(node.amount)}
-                  </text>
-                </>
-              ) : (
-                <text
-                  x={node.x1 - 4}
-                  y={node.y1 + (node.y2 - node.y1) / 2 + 4}
-                  textAnchor="end"
-                  fontSize="9"
-                  fontWeight="600"
-                  fill={node.color}
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {node.label}
-                </text>
-              )}
-            </g>
-          ))}
+          {leftNodes.map((node) => <NodeGroup key={node.key} node={node} fmtAmt={fmtAmt} />)}
 
-          {/* ── Right nodes ── */}
-          {rightNodes.map((node) => (
-            <g key={node.key}>
-              <rect
-                x={node.x1}
-                y={node.y1}
-                width={node.x2 - node.x1}
-                height={node.y2 - node.y1}
-                fill={node.color}
-                fillOpacity={0.85}
-                rx={3}
+          {midNodes.map((node) => {
+            if (node.key === 'margin') return <NodeGroup key={node.key} node={node} fmtAmt={fmtAmt} />
+            const bucket = node.key as FlowBucket
+            const clickable = canExpand(bucket)
+            return (
+              <NodeGroup
+                key={node.key} node={node} fmtAmt={fmtAmt}
+                clickable={clickable}
+                expanded={expandedBucket === bucket}
+                onClick={() => clickable && setExpandedBucket(expandedBucket === bucket ? null : bucket)}
               />
-              {(node.y2 - node.y1) >= 22 ? (
-                <>
-                  <text
-                    x={node.x1 + (node.x2 - node.x1) / 2}
-                    y={node.y1 + (node.y2 - node.y1) / 2 - 6}
-                    textAnchor="middle"
-                    fontSize="10"
-                    fontWeight="700"
-                    fill="#0d120d"
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {node.label}
-                  </text>
-                  <text
-                    x={node.x1 + (node.x2 - node.x1) / 2}
-                    y={node.y1 + (node.y2 - node.y1) / 2 + 8}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fontWeight="600"
-                    fill="#0d120d"
-                    fillOpacity={0.7}
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {fmtAmt(node.amount)}
-                  </text>
-                </>
-              ) : (
-                <text
-                  x={node.x2 + 4}
-                  y={node.y1 + (node.y2 - node.y1) / 2 + 4}
-                  textAnchor="start"
-                  fontSize="9"
-                  fontWeight="600"
-                  fill={node.color}
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {node.label}
-                </text>
-              )}
-            </g>
-          ))}
+            )
+          })}
+
+          {detailNodes.map((node) => <NodeGroup key={node.key} node={node} fmtAmt={fmtAmt} />)}
         </svg>
       </div>
 
       {/* ── Legend ── */}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 px-1">
-        {[...leftNodes, ...rightNodes].map((node) => (
+        {[...leftNodes, ...midNodes, ...detailNodes].map((node) => (
           <div key={node.key} className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2 h-2 rounded-sm flex-shrink-0"
-              style={{ background: node.color }}
-            />
+            <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ background: node.color }} />
             <span className="text-[9px] text-zinc-500">{node.label}</span>
             <span className="text-[9px] text-zinc-600 tabular-nums">{fmtAmt(node.amount)}</span>
           </div>

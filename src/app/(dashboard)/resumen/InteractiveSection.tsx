@@ -5,7 +5,6 @@ import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, SAVINGS_EXPENSE_GROUP, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
 import { SankeyDiagram } from './SankeyDiagram'
-import { IncomeFlowSankey } from './IncomeFlowSankey'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
 import { isDepositTx, isActiveIncome } from '@/lib/incomeAllocation'
@@ -1166,7 +1165,6 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
   const [showSankey, setShowSankey] = useState(false)
-  const [showIncomeFlow, setShowIncomeFlow] = useState(false)
   const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
@@ -1544,37 +1542,19 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         )}
       </div>
 
-      {/* ── Sankey — income flow ─────────────────────────────────────────── */}
+      {/* ── Sankey — income flow, merged with the Ahorro e inversión split
+          (previously a separate card): left = income sources, mid = Gasto/
+          Ahorro/Inversión/Abono extra deuda/Margen (the canonical split from
+          computeFlowWindow), tap a mid node for its own detail column. */}
       <div className="mb-4">
         {showSankey
-          ? <SankeyDiagram transactions={periodTxs} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
+          ? <SankeyDiagram transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
           : (
             <button onClick={() => setShowSankey(true)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
               <div>
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Flujo de ingresos</p>
-                <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Cómo se distribuyen tus ingresos en el período</p>
-              </div>
-              <ChevronDown size={14} className="text-zinc-600" />
-            </button>
-          )
-        }
-      </div>
-
-      {/* ── Ahorro e inversión — monto y % del ingreso para el período de
-          arriba, distinto del Sankey de arriba (ese reparte por categoría
-          de gasto; este separa ahorro puro de inversión con retorno
-          esperado y deuda). Same periodCutoff as the rest of the page —
-          no separate window selector. */}
-      <div className="mb-4">
-        {showIncomeFlow
-          ? <IncomeFlowSankey flow={flowWindow} fmt={(n) => fmtAmt(n)} onCollapse={() => setShowIncomeFlow(false)} />
-          : (
-            <button onClick={() => setShowIncomeFlow(true)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
-              <div>
-                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Ahorro e inversión</p>
-                <p className="text-[9px] text-zinc-600 mt-0.5 text-left">Monto y % del ingreso · ahorro vs. inversión vs. deuda</p>
+                <p className="text-[9px] text-zinc-600 mt-0.5 text-left">De dónde viene y cuánto es gasto, ahorro, inversión o abono extra a deuda</p>
               </div>
               <ChevronDown size={14} className="text-zinc-600" />
             </button>
