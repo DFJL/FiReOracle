@@ -4,7 +4,7 @@ import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
-import { SankeyDiagram } from './SankeyDiagram'
+import { IncomeFunnel } from './IncomeFunnel'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
 import { isRealizedPassiveIncome, isValuationConcept } from '@/lib/incomeAllocation'
@@ -175,7 +175,7 @@ function resolveCategory(tx: TxClient, vMap: CatMap, cMap: CatMap): string {
 // ── classifiers ───────────────────────────────────────────────────────────────
 
 // gasto/cuotas/ahorro/inversión/deuda all go through classifyFlowTx now
-// (@/lib/ahorroInversionFlow, shared with the Sankey above and /progreso) —
+// (@/lib/ahorroInversionFlow, shared with the income funnel above and /progreso) —
 // this page used to classify the same transactions a second, independently-
 // drifted way: isOutflow didn't separate regular loan installments (cuotas,
 // ₡67M / 216 txs in this account) from lifestyle spending, isSavings/
@@ -208,8 +208,8 @@ function isLiquidIncome(tx: TxClient) {
 
 // Valorización pura: registros sin movement_type — ganancia/pérdida no
 // realizada. Excludes a mark-to-market entry by concept text (isValuationConcept,
-// @/lib/incomeAllocation) — SankeyDiagram's left side already did this;
-// this didn't, so an "aumento de valor" entry could count as real
+// @/lib/incomeAllocation) — IncomeFunnel's income-source side already did
+// this; this didn't, so an "aumento de valor" entry could count as real
 // patrimonial income here but not there.
 function isPatrimonialIncome(tx: TxClient) {
   return !tx.movement_type && tx.amount != null && Number(tx.amount) > 0 && !isValuationConcept(tx.concept)
@@ -1161,7 +1161,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const [selSub, setSelSub]         = useState<string | null>(null)
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
-  const [showSankey, setShowSankey] = useState(true)
+  const [showFunnel, setShowFunnel] = useState(true)
   const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
@@ -1244,7 +1244,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   // Same "exclude the current partial month unless you're specifically
   // looking at it" rule the KPI tiles already used on their own — a
   // trailing incomplete month skews a rate/total in a way that reads as
-  // a real drop. Now the single window both the Sankey and the KPIs/tabs
+  // a real drop. Now the single window both the income funnel and the KPIs/tabs
   // below derive from, instead of two independent passes over periodTxs
   // that happened to use slightly different cutoffs.
   const flowWindow = useMemo(() => {
@@ -1377,7 +1377,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const kpis = useMemo(() => {
     // gasto/survival/discrecional/cuotas/ahorro/inversión/income all come
     // straight from flowWindow (computeFlowWindow, @/lib/ahorroInversionFlow)
-    // — the same window the Sankey above renders, with the same kpiEnd-style
+    // — the same window the income funnel above renders, with the same kpiEnd-style
     // cutoff already baked in — instead of a second independent pass over
     // periodTxs that classified the same transactions its own way. Only
     // passiveIncome and rendimientos (patrimonial/valuation gains) are a
@@ -1509,19 +1509,19 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         )}
       </div>
 
-      {/* ── Sankey — the one breakdown of where money went (left = income
-          sources, mid = Necesario/Discrecional/Cuotas/Ahorro/Inversión/Abono
-          extra deuda/Margen, all from computeFlowWindow), with its own
-          summary cards and tap-to-drill-down. Open by default: this used to
-          duplicate a separate static "Composición del dinero saliente" bar
-          above it (same categories, no interactivity) — that bar is gone,
-          so this is now the only glance-level view of the split, not an
-          optional expansion of it. */}
+      {/* ── Income funnel — Ingreso narrows to Egresos, which is made of
+          Gasto/Ahorro e inversión/Deuda (all from computeFlowWindow), each
+          a card you tap to drill into its own types. Replaced the old
+          ribbon-diagram Sankey: same questions, answered as a funnel +
+          cards instead of flow paths, hover tooltips and a column that
+          forced horizontal scroll on phones. Open by default — this is
+          the one glance-level view of the split, not an optional
+          expansion of it. */}
       <div className="mb-4">
-        {showSankey
-          ? <SankeyDiagram transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowSankey(false)} />
+        {showFunnel
+          ? <IncomeFunnel transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowFunnel(false)} />
           : (
-            <button onClick={() => setShowSankey(true)}
+            <button onClick={() => setShowFunnel(true)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
               <div>
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Flujo de ingresos</p>

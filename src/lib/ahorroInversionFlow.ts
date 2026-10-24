@@ -90,7 +90,7 @@ export type FlowBucket = 'gasto' | 'cuotas' | 'ahorro' | 'inversion' | 'deuda'
 /**
  * Which bucket a single outflow transaction belongs to, or null if it's not
  * one at all (income, settlement, valuation). Exported so any renderer that
- * needs its own grouping of the same transactions — e.g. SankeyDiagram
+ * needs its own grouping of the same transactions — e.g. IncomeFunnel
  * grouping Gasto by expense category rather than by vendor — still agrees
  * tx-by-tx with the totals computeFlowWindow reports, instead of growing a
  * second copy of this decision.
