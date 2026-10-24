@@ -305,6 +305,82 @@ function NodeGroup({
   )
 }
 
+// ── Summary card groups — each of the four questions this page exists to
+// answer (tipos de ingreso / gasto / ahorro+inversión / deuda) as one card,
+// with a proportional mini-bar + legend so the relative size of its own
+// items is readable at a glance, not just each item's size vs. total
+// income. Clicking a clickable item reuses the exact same expandedBucket
+// drill-down as clicking its Sankey node — one state, two entry points. ──
+
+type GroupItem = { key: string; label: string; amount: number; color: string; clickable: boolean }
+
+function BucketGroupCard({
+  label, items, fmtAmt, monthsInWindow, totalIncome, showPctOfIncome = true, onToggle,
+}: {
+  label: string
+  items: GroupItem[]
+  fmtAmt: (n: number) => string
+  monthsInWindow: number
+  totalIncome: number
+  showPctOfIncome?: boolean
+  onToggle: (key: string) => void
+}) {
+  const visible = items.filter(i => i.amount > 0)
+  const total = visible.reduce((s, i) => s + i.amount, 0)
+  if (total <= 0) return null
+
+  return (
+    <div className="bg-black/20 rounded-xl p-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <p className="text-[8px] text-zinc-500 uppercase tracking-wider">{label}</p>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-black tabular-nums text-zinc-200 leading-none">{fmtAmt(total)}</p>
+          <p className="text-[8px] text-zinc-600 mt-0.5 tabular-nums">
+            {showPctOfIncome && totalIncome > 0 && `${((total / totalIncome) * 100).toFixed(0)}% del ingreso`}
+            {showPctOfIncome && totalIncome > 0 && monthsInWindow > 1 && ' · '}
+            {monthsInWindow > 1 && `~${fmtAmt(total / monthsInWindow)}/mes`}
+          </p>
+        </div>
+      </div>
+
+      {/* Proportional mini-bar — this item's size relative to the rest of the group */}
+      {visible.length > 1 && (
+        <div className="flex rounded-full overflow-hidden h-1.5 mb-2 gap-[1px]">
+          {visible.map(i => (
+            <div key={i.key} style={{ flex: i.amount, background: i.color }} />
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {visible.map(i => {
+          const pct = total > 0 ? (i.amount / total) * 100 : 0
+          const row = (
+            <div className="flex items-center justify-between gap-2 w-full">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: i.color }} />
+                <span className="text-[9px] text-zinc-400 truncate">{i.label}{i.clickable ? ' ›' : ''}</span>
+              </span>
+              <span className="text-[9px] tabular-nums shrink-0">
+                <span className="text-zinc-300 font-semibold">{fmtAmt(i.amount)}</span>
+                {visible.length > 1 && <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>}
+              </span>
+            </div>
+          )
+          return i.clickable ? (
+            <button key={i.key} onClick={() => onToggle(i.key)}
+              className="w-full text-left hover:bg-white/[0.04] rounded-md px-1 -mx-1 py-0.5 transition-colors">
+              {row}
+            </button>
+          ) : (
+            <div key={i.key} className="px-1 py-0.5">{row}</div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function SankeyDiagram({
@@ -442,27 +518,39 @@ export function SankeyDiagram({
         De dónde viene, y cuánto es gasto, ahorro, inversión o abono extra a deuda
       </p>
 
-      {/* ── Summary — the direct answer, no diagram-reading required ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        <div className="bg-black/20 rounded-xl p-3">
-          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ingreso</p>
-          <p className="text-sm font-black mt-1 text-[#a3e635] tabular-nums">{fmtAmt(flow.income)}</p>
-          {monthsInWindow > 1 && (
-            <p className="text-[8px] text-zinc-600 mt-0.5 tabular-nums">~{fmtAmt(flow.income / monthsInWindow)}/mes</p>
-          )}
-        </div>
-        {UI_ORDER
-          .filter(b => amountFor(b) > 0)
-          .map(b => (
-            <div key={b} className="bg-black/20 rounded-xl p-3">
-              <p className="text-[8px] text-zinc-500 uppercase tracking-wider truncate">{UI_BUCKET_LABEL[b]}</p>
-              <p className="text-sm font-black mt-1 tabular-nums" style={{ color: UI_BUCKET_COLOR[b] }}>{fmtAmt(amountFor(b))}</p>
-              <p className="text-[8px] text-zinc-600 mt-0.5">
-                {flow.income > 0 ? `${((amountFor(b) / flow.income) * 100).toFixed(0)}%` : '—'} del ingreso
-                {monthsInWindow > 1 && <> · ~{fmtAmt(amountFor(b) / monthsInWindow)}/mes</>}
-              </p>
-            </div>
+      {/* ── Summary — one card per question (ingreso / gasto / ahorro e
+          inversión / deuda), each sectioned so its own items' relative
+          size reads at a glance instead of only their size vs. total
+          income. ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+        <BucketGroupCard
+          label="Ingreso" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+          showPctOfIncome={false} onToggle={() => {}}
+          items={[
+            { key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME,  clickable: false },
+            { key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME, clickable: false },
+            { key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL,    clickable: false },
+          ]}
+        />
+        <BucketGroupCard
+          label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+          onToggle={(key) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)}
+          items={(['necesario', 'discrecional', 'cuotas'] as UiBucket[]).map(b => (
+            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
           ))}
+        />
+        <BucketGroupCard
+          label="Ahorro e inversión" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+          onToggle={(key) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)}
+          items={(['ahorro', 'inversion'] as UiBucket[]).map(b => (
+            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
+          ))}
+        />
+        <BucketGroupCard
+          label="Deuda" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+          onToggle={(key) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)}
+          items={[{ key: 'deuda', label: UI_BUCKET_LABEL.deuda, amount: amountFor('deuda'), color: UI_BUCKET_COLOR.deuda, clickable: canExpand('deuda') }]}
+        />
       </div>
 
       <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-1">
