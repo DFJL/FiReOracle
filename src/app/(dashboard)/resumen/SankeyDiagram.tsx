@@ -168,16 +168,9 @@ const USABLE_H    = H - PAD_TOP - PAD_BOTTOM
 const LEFT_X1     = 0
 const LEFT_X2     = NODE_W
 
-// Collapsed: 2 columns, mid sits where "right" used to. Expanded: 3 columns,
-// mid moves to the middle and a 3rd (detail) column takes the old right slot.
-const W_COLLAPSED   = 900
-const W_EXPANDED     = 1220
-const MID_X1_COLLAPSED = W_COLLAPSED - NODE_W
-const MID_X2_COLLAPSED = W_COLLAPSED
-const MID_X1_EXPANDED  = 540
-const MID_X2_EXPANDED  = 540 + NODE_W
-const DETAIL_X1         = W_EXPANDED - NODE_W
-const DETAIL_X2         = W_EXPANDED
+const W      = 900
+const MID_X1 = W - NODE_W
+const MID_X2 = W
 
 // ── Layout computation ────────────────────────────────────────────────────────
 
@@ -356,12 +349,14 @@ export function SankeyDiagram({
 
   if (leftRaw.length === 0 || midRaw.length === 0) return null
 
-  // ── Detail (3rd column) for whichever bucket is expanded — same source
-  // list every other consumer of `flow` uses (flow.ahorroSources etc.),
-  // except Gasto, which has no per-tx source list on FlowWindow and is
-  // grouped by expense category here instead (reusing getExpenseLabel's
-  // nicer display names), gated by classifyFlowTx so it always sums to
-  // exactly flow.gasto. ────────────────────────────────────────────────
+  // ── Drill-down source lists — same data every other consumer of `flow`
+  // uses (flow.ahorroSources etc.), except Gasto, which has no per-tx
+  // source list on FlowWindow and is grouped by expense category here
+  // instead (reusing getExpenseLabel's nicer display names), gated by
+  // classifyFlowTx so it always sums to exactly flow.gasto. Rendered as a
+  // bar list below the diagram, not a 3rd Sankey column — a 3rd column
+  // forced the diagram wider than the viewport on phones (scroll-to-see
+  // was the actual bug report), and a bar list needs no extra width at all.
   function detailEntriesFor(b: FlowBucket): [string, number][] {
     if (b === 'gasto') return Object.entries(expenseMap)
     if (b === 'ahorro') return flow.ahorroSources.map(s => [s.name, s.amount] as [string, number])
@@ -369,41 +364,18 @@ export function SankeyDiagram({
     return flow.deudaSources.map(s => [s.name, s.amount] as [string, number])
   }
   const canExpand = (b: FlowBucket) => detailEntriesFor(b).length > 0
+  const expandedEntries = expandedBucket ? foldTopN(detailEntriesFor(expandedBucket), flow[expandedBucket]) : []
 
-  // ── Layout ────────────────────────────────────────────────────────────────
-  const isExpanded = expandedBucket !== null
-  const W = isExpanded ? W_EXPANDED : W_COLLAPSED
-  const midX1 = isExpanded ? MID_X1_EXPANDED : MID_X1_COLLAPSED
-  const midX2 = isExpanded ? MID_X2_EXPANDED : MID_X2_COLLAPSED
-
+  // ── Layout — always 2 columns, always the full container width; no
+  // horizontal scroll regardless of what's expanded. ──────────────────────
   const leftNodes = layoutNodes(leftRaw, LEFT_X1, LEFT_X2, totalIncome)
-  const midNodes  = layoutNodes(midRaw, midX1, midX2, totalIncome)
+  const midNodes  = layoutNodes(midRaw, MID_X1, MID_X2, totalIncome)
   const flows     = buildFlows(leftNodes, midNodes)
 
-  let detailNodes: SankeyNode[] = []
-  let detailFlows: SankeyFlow[] = []
-  if (isExpanded && expandedBucket) {
-    const midNode = midNodes.find(n => n.key === expandedBucket)
-    const expandedAmount = flow[expandedBucket]
-    if (midNode && expandedAmount > 0) {
-      const folded = foldTopN(detailEntriesFor(expandedBucket), expandedAmount)
-      const detailRaw = folded.map(([label, amt], i) => ({
-        key: `d_${label}`,
-        label,
-        amount: amt,
-        color: expandedBucket === 'gasto' ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : BUCKET_COLOR[expandedBucket],
-      }))
-      detailNodes = layoutNodes(detailRaw, DETAIL_X1, DETAIL_X2, expandedAmount)
-      detailFlows = buildFlows([midNode], detailNodes)
-    }
-  }
-
-  const allFlows = [...flows, ...detailFlows]
-
   // ── Tooltip data ──────────────────────────────────────────────────────────
-  const allNodes = [...leftNodes, ...midNodes, ...detailNodes]
+  const allNodes = [...leftNodes, ...midNodes]
   const hoveredFlow = hoverFlow
-    ? allFlows.find((f) => f.fromKey === hoverFlow.fromKey && f.toKey === hoverFlow.toKey)
+    ? flows.find((f) => f.fromKey === hoverFlow.fromKey && f.toKey === hoverFlow.toKey)
     : null
   const hoveredFromNode = hoveredFlow ? allNodes.find((n) => n.key === hoveredFlow.fromKey) : null
   const hoveredToNode   = hoveredFlow ? allNodes.find((n) => n.key === hoveredFlow.toKey)   : null
@@ -427,10 +399,32 @@ export function SankeyDiagram({
         )}
       </div>
       <p className="text-xs text-zinc-500 mb-4">
-        De dónde viene, y cuánto es gasto, ahorro, inversión o abono extra a deuda — tocá un destino para ver el detalle
+        De dónde viene, y cuánto es gasto, ahorro, inversión o abono extra a deuda
       </p>
 
-      <div className="relative overflow-x-auto">
+      {/* ── Summary — the direct answer, no diagram-reading required ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+        <div className="bg-black/20 rounded-xl p-3">
+          <p className="text-[8px] text-zinc-500 uppercase tracking-wider">Ingreso</p>
+          <p className="text-sm font-black mt-1 text-[#a3e635] tabular-nums">{fmtAmt(flow.income)}</p>
+        </div>
+        {(['gasto', 'ahorro', 'inversion', 'deuda'] as FlowBucket[])
+          .filter(b => flow[b] > 0)
+          .map(b => (
+            <div key={b} className="bg-black/20 rounded-xl p-3">
+              <p className="text-[8px] text-zinc-500 uppercase tracking-wider truncate">{BUCKET_LABEL[b]}</p>
+              <p className="text-sm font-black mt-1 tabular-nums" style={{ color: BUCKET_COLOR[b] }}>{fmtAmt(flow[b])}</p>
+              <p className="text-[8px] text-zinc-600 mt-0.5">
+                {flow.income > 0 ? `${((flow[b] / flow.income) * 100).toFixed(0)}%` : '—'} del ingreso
+              </p>
+            </div>
+          ))}
+      </div>
+
+      <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-1">
+        Detalle · tocá un destino para ver sus fuentes
+      </p>
+      <div className="relative">
         {hoveredFlow && hoveredFromNode && hoveredToNode && (
           <div
             className="absolute z-20 pointer-events-none"
@@ -452,13 +446,13 @@ export function SankeyDiagram({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          width={W}
-          style={{ maxWidth: isExpanded ? 'none' : '100%', minWidth: isExpanded ? W : undefined, overflow: 'visible' }}
+          width="100%"
+          style={{ overflow: 'visible' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverFlow(null)}
           className="cursor-crosshair"
         >
-          {allFlows.map((f, i) => {
+          {flows.map((f, i) => {
             const isHovered = hoverFlow?.fromKey === f.fromKey && hoverFlow?.toKey === f.toKey
             const isAnyHovered = hoverFlow !== null
             const opacity = isHovered ? 0.6 : isAnyHovered ? 0.1 : 0.25
@@ -490,14 +484,40 @@ export function SankeyDiagram({
               />
             )
           })}
-
-          {detailNodes.map((node) => <NodeGroup key={node.key} node={node} fmtAmt={fmtAmt} />)}
         </svg>
       </div>
 
+      {/* ── Drill-down — a bar list, not another Sankey column (that forced
+          the whole diagram wider than the screen on phones). ── */}
+      {expandedBucket && (
+        <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
+          <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: BUCKET_COLOR[expandedBucket] }}>
+            Fuentes de {BUCKET_LABEL[expandedBucket]}
+          </p>
+          {expandedEntries.map(([name, amt], i) => {
+            const pct = flow[expandedBucket] > 0 ? (amt / flow[expandedBucket]) * 100 : 0
+            const color = expandedBucket === 'gasto' ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : BUCKET_COLOR[expandedBucket]
+            return (
+              <div key={name}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[10px] text-zinc-400 truncate">{name}</span>
+                  <span className="text-[10px] tabular-nums shrink-0">
+                    <span className="text-zinc-300 font-bold">{fmtAmt(amt)}</span>
+                    <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>
+                  </span>
+                </div>
+                <div className="h-2.5 rounded-full bg-black/25 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(pct, pct > 0 ? 1.5 : 0)}%`, background: color }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* ── Legend ── */}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 px-1">
-        {[...leftNodes, ...midNodes, ...detailNodes].map((node) => (
+        {allNodes.map((node) => (
           <div key={node.key} className="flex items-center gap-1.5">
             <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ background: node.color }} />
             <span className="text-[9px] text-zinc-500">{node.label}</span>
