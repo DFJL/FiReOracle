@@ -453,7 +453,11 @@ export function SankeyDiagram({
   // ── Mid nodes: Necesario / Discrecional / Cuotas / Ahorro / Inversión /
   // Abono extra deuda / Margen ──────────────────────────────────────────
   const midRaw: Omit<SankeyNode, 'x1' | 'x2' | 'y1' | 'y2'>[] = []
-  const UI_ORDER: UiBucket[] = ['necesario', 'discrecional', 'cuotas', 'ahorro', 'inversion', 'deuda']
+  // Cuotas sits next to Deuda, not next to Discrecional: a loan
+  // installment is loan-servicing (same family as an extra paydown), not
+  // lifestyle consumption — the summary cards below group them the same
+  // way, for the same reason.
+  const UI_ORDER: UiBucket[] = ['necesario', 'discrecional', 'ahorro', 'inversion', 'cuotas', 'deuda']
   for (const b of UI_ORDER) {
     const amount = amountFor(b)
     if (amount > 0) midRaw.push({ key: b, label: UI_BUCKET_LABEL[b], amount, color: UI_BUCKET_COLOR[b] })
@@ -535,7 +539,7 @@ export function SankeyDiagram({
         <BucketGroupCard
           label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
           onToggle={(key) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)}
-          items={(['necesario', 'discrecional', 'cuotas'] as UiBucket[]).map(b => (
+          items={(['necesario', 'discrecional'] as UiBucket[]).map(b => (
             { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
           ))}
         />
@@ -546,10 +550,15 @@ export function SankeyDiagram({
             { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
           ))}
         />
+        {/* Cuotas (scheduled installments) + Deuda (extra paydowns) — both
+            loan-servicing, not lifestyle consumption, so they share a card
+            instead of Cuotas sitting under Gasto. */}
         <BucketGroupCard
           label="Deuda" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
           onToggle={(key) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)}
-          items={[{ key: 'deuda', label: UI_BUCKET_LABEL.deuda, amount: amountFor('deuda'), color: UI_BUCKET_COLOR.deuda, clickable: canExpand('deuda') }]}
+          items={(['cuotas', 'deuda'] as UiBucket[]).map(b => (
+            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
+          ))}
         />
       </div>
 
