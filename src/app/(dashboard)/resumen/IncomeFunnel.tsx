@@ -125,14 +125,15 @@ function FunnelStep({
 // Egresos narrows from Ingreso, and what it narrows to is visibly made of
 // these pieces, not a single flat color.
 function SegmentedFunnelStep({
-  label, amount, widthPct, segments, fmtAmt, sub,
+  label, amount, widthPct, segments, fmtAmt, sub, monthsInWindow,
 }: {
   label: string
   amount: number
   widthPct: number
-  segments: { key: string; amount: number; color: string }[]
+  segments: { key: string; label: string; amount: number; color: string }[]
   fmtAmt: (n: number) => string
   sub?: string
+  monthsInWindow: number
 }) {
   const visible = segments.filter(s => s.amount > 0)
   return (
@@ -145,7 +146,14 @@ function SegmentedFunnelStep({
       </div>
       <div className="h-2.5 rounded-full bg-black/25 overflow-hidden">
         <div className="h-full rounded-full flex gap-[1px] transition-all" style={{ width: `${Math.max(widthPct, 1)}%` }}>
-          {visible.map(s => <div key={s.key} style={{ flex: s.amount, background: s.color }} />)}
+          {visible.map(s => {
+            const pct = amount > 0 ? (s.amount / amount) * 100 : 0
+            const avg = monthsInWindow > 1 ? ` · ~${fmtAmt(s.amount / monthsInWindow)}/mes` : ''
+            return (
+              <div key={s.key} style={{ flex: s.amount, background: s.color }}
+                title={`${s.label}: ${fmtAmt(s.amount)} (${pct.toFixed(1)}%)${avg}`} />
+            )
+          })}
         </div>
       </div>
     </div>
@@ -193,12 +201,19 @@ function BucketGroupCard({
         </div>
       </div>
 
-      {/* Proportional mini-bar — this item's size relative to the rest of the group */}
+      {/* Proportional mini-bar — this item's size relative to the rest of the
+          group. Each segment carries a native tooltip (name/value/%/avg) since
+          the bar itself has no room to print that. */}
       {visible.length > 1 && (
-        <div className="flex rounded-full overflow-hidden h-1.5 mb-2 gap-[1px]">
-          {visible.map(i => (
-            <div key={i.key} style={{ flex: i.amount, background: i.color }} />
-          ))}
+        <div className="flex rounded-full overflow-hidden h-2 mb-2 gap-[1px]">
+          {visible.map(i => {
+            const pct = total > 0 ? (i.amount / total) * 100 : 0
+            const avg = monthsInWindow > 1 ? ` · ~${fmtAmt(i.amount / monthsInWindow)}/mes` : ''
+            return (
+              <div key={i.key} style={{ flex: i.amount, background: i.color }}
+                title={`${i.label}: ${fmtAmt(i.amount)} (${pct.toFixed(1)}%)${avg}`} />
+            )
+          })}
         </div>
       )}
 
@@ -206,17 +221,21 @@ function BucketGroupCard({
         {visible.map(i => {
           const pct = total > 0 ? (i.amount / total) * 100 : 0
           const active = selected === i.key
+          const avgText = monthsInWindow > 1 ? `~${fmtAmt(i.amount / monthsInWindow)}/mes` : ''
           return (
             <button key={i.key} onClick={() => onSelect(i.key)}
-              className={`w-full text-left rounded-md px-1 -mx-1 py-0.5 transition-colors ${active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'}`}>
+              title={`${i.label}: ${fmtAmt(i.amount)} (${pct.toFixed(1)}%)${avgText ? ` · ${avgText}` : ''}`}
+              className={`w-full text-left rounded-md px-1.5 -mx-1 py-1 transition-colors ${active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'}`}>
               <div className="flex items-center justify-between gap-2 w-full">
                 <span className="flex items-center gap-1.5 min-w-0">
                   <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: i.color }} />
-                  <span className={`text-[9px] truncate ${active ? 'text-zinc-100 font-semibold' : 'text-zinc-400'}`}>{i.label} ›</span>
+                  <span className={`text-[10px] truncate ${active ? 'text-zinc-100 font-semibold' : 'text-zinc-400'}`}>{i.label} ›</span>
                 </span>
-                <span className="text-[9px] tabular-nums shrink-0">
-                  <span className="text-zinc-300 font-semibold">{fmtAmt(i.amount)}</span>
-                  {visible.length > 1 && <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>}
+                <span className="text-right tabular-nums shrink-0">
+                  <span className="block text-[12px] font-bold text-zinc-200">
+                    {fmtAmt(i.amount)}{visible.length > 1 && <span className="text-zinc-500"> · {pct.toFixed(0)}%</span>}
+                  </span>
+                  {avgText && <span className="block text-[9px] text-zinc-600">{avgText}</span>}
                 </span>
               </div>
             </button>
@@ -313,9 +332,9 @@ export function IncomeFunnel({
         />
         <div className="flex justify-center"><ChevronDown size={11} className="text-zinc-700" /></div>
         <SegmentedFunnelStep
-          label="Egresos" amount={egresos} widthPct={egresosPct} fmtAmt={fmtAmt}
+          label="Egresos" amount={egresos} widthPct={egresosPct} fmtAmt={fmtAmt} monthsInWindow={monthsInWindow}
           sub={`${egresosPct.toFixed(0)}% del ingreso${monthsInWindow > 1 ? ` · ~${fmtAmt(egresos / monthsInWindow)}/mes` : ''}`}
-          segments={BUCKET_ORDER.map(b => ({ key: b, amount: amountFor(b), color: UI_BUCKET_COLOR[b] }))}
+          segments={BUCKET_ORDER.map(b => ({ key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }))}
         />
       </div>
       {margin !== 0 && (

@@ -390,11 +390,12 @@ function MultiTrendChart({ points }: { points: SeriesPoint[] }) {
 
 // ── subcategory panel (L2) ────────────────────────────────────────────────────
 
-function SubcategoryPanel({ rows, catName, total, selected, onSelect, fmt }: {
+function SubcategoryPanel({ rows, catName, total, selected, onSelect, fmt, monthsInWindow }: {
   rows: { name: string; amount: number; count: number }[]
   catName: string; total: number
   selected: string | null; onSelect: (s: string | null) => void
   fmt: (crc: number) => string
+  monthsInWindow: number
 }) {
   const max = rows[0]?.amount ?? 1
   return (
@@ -408,20 +409,25 @@ function SubcategoryPanel({ rows, catName, total, selected, onSelect, fmt }: {
           const pct = Math.round((amount / max) * 100)
           const sharePct = total > 0 ? Math.round((amount / total) * 100) : 0
           const active = selected === name
+          const avgLine = monthsInWindow > 1 ? ` · ~${fmt(amount / monthsInWindow)}/mes` : ''
           return (
             <button key={name} onClick={() => onSelect(active ? null : name)}
+              title={`${name}: ${fmt(amount)} (${sharePct}%)${avgLine}`}
               className={`w-full text-left px-3 py-2.5 rounded-lg mb-0.5 transition-colors ${active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'}`}>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className={`truncate max-w-[55%] ${active ? 'text-zinc-100' : 'text-zinc-300'}`}>{name}</span>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600">{count} tx</span>
-                  <span className="text-zinc-400 tabular-nums">{fmt(amount)}</span>
-                  <span className={`w-8 text-right tabular-nums ${active ? 'text-blue-400' : 'text-zinc-500'}`}>{sharePct}%</span>
+                  <span className={`font-semibold text-sm tabular-nums ${active ? 'text-zinc-200' : 'text-zinc-400'}`}>{fmt(amount)}</span>
+                  <span className={`w-10 text-right font-semibold tabular-nums ${active ? 'text-blue-400' : 'text-zinc-500'}`}>{sharePct}%</span>
                 </div>
               </div>
-              <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+              <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden mb-1">
                 <div className={`h-full rounded-full ${active ? 'bg-blue-400/80' : 'bg-zinc-500/40'}`} style={{ width: `${pct}%` }} />
               </div>
+              {monthsInWindow > 1 && (
+                <p className="text-right text-[10px] text-zinc-600 tabular-nums">~{fmt(amount / monthsInWindow)}/mes</p>
+              )}
             </button>
           )
         })}
@@ -437,10 +443,11 @@ const TAB_COLORS = {
   ingresos: { bar: 'bg-[#a3e635]/40', active: 'bg-[#a3e635]', bg: 'bg-[#a3e635]/10', border: 'border-[#a3e635]/30', text: 'text-[#a3e635]' },
 }
 
-function CategoryBar({ cats, variant, selected, onSelect, fmt }: {
+function CategoryBar({ cats, variant, selected, onSelect, fmt, monthsInWindow }: {
   cats: { category: string; amount: number; count: number }[]
   variant: 'gastos' | 'ingresos'; selected: string | null; onSelect: (c: string | null) => void
   fmt: (crc: number) => string
+  monthsInWindow: number
 }) {
   const [expanded, setExpanded] = useState(false)
   const max = cats[0]?.amount ?? 1
@@ -467,20 +474,25 @@ function CategoryBar({ cats, variant, selected, onSelect, fmt }: {
           const pct = Math.round((amount / max) * 100)
           const sharePct = total > 0 ? Math.round((amount / total) * 100) : 0
           const active = selected === category
+          const avgLine = monthsInWindow > 1 ? ` · ~${fmt(amount / monthsInWindow)}/mes` : ''
           return (
             <button key={category} onClick={() => onSelect(active ? null : category)}
+              title={`${category}: ${fmt(amount)} (${sharePct}%)${avgLine}`}
               className={`w-full text-left px-3 py-2.5 rounded-lg mb-0.5 border transition-all ${active ? `${col.bg} ${col.border}` : 'border-transparent hover:bg-white/[0.03]'}`}>
               <div className="flex items-center justify-between text-xs mb-1.5">
                 <span className={`font-medium truncate max-w-[55%] ${active ? 'text-white' : 'text-zinc-300'}`}>{category}</span>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-600 tabular-nums">{count} tx</span>
-                  <span className={`font-medium tabular-nums ${active ? col.text : 'text-zinc-400'}`}>{fmt(amount)}</span>
-                  <span className={`w-8 text-right tabular-nums ${active ? col.text : 'text-zinc-600'}`}>{sharePct}%</span>
+                  <span className={`font-semibold text-sm tabular-nums ${active ? col.text : 'text-zinc-300'}`}>{fmt(amount)}</span>
+                  <span className={`w-10 text-right font-semibold tabular-nums ${active ? col.text : 'text-zinc-500'}`}>{sharePct}%</span>
                 </div>
               </div>
-              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
+              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden mb-1">
                 <div className={`h-full rounded-full ${active ? col.active : col.bar}`} style={{ width: `${pct}%` }} />
               </div>
+              {monthsInWindow > 1 && (
+                <p className="text-right text-[10px] text-zinc-600 tabular-nums">~{fmt(amount / monthsInWindow)}/mes</p>
+              )}
             </button>
           )
         })}
@@ -1260,6 +1272,14 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     )
   }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate])
 
+  // Same days/30.44 estimate IncomeFunnel uses for its own "~X/mes" —
+  // reused here so the category/subcategory browser's per-row averages
+  // agree with the funnel's, not a second slightly-different formula.
+  const monthsInWindow = useMemo(() => {
+    const days = (new Date(flowWindow.to).getTime() - new Date(flowWindow.from).getTime()) / 86_400_000
+    return Math.max(1, Math.round(days / 30.44))
+  }, [flowWindow.from, flowWindow.to])
+
   // Same [from, to) flowWindow used, for the small passiveIncome/rendimientos
   // loop in kpis below that isn't part of computeFlowWindow's own scope.
   const flowWindowTxs = useMemo(
@@ -1311,6 +1331,19 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     if ((tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') && INCOME_GROUPS.has(group)) {
       return getGroupLabel(inferCategory(tx.vendor, tx.concept, null))
     }
+    // "Ingreso pasivo" and "Valorización" are category-code NATURE labels
+    // (this code describes passive-income-type activity / appreciation-type
+    // activity) — orthogonal to LIQUIDITY (movement_type: realized vs.
+    // unrealized/reinvested). A crypto farming reward can be either: most
+    // are reinvested/compounded without ever touching an account
+    // (movement_type NULL — same bucket as mark-to-market valuation) but
+    // still carry a PASSIVE_* category_code, so they'd otherwise show up
+    // as an "Ingreso pasivo" category inside the Val. patrimonial bucket —
+    // same name as the sibling realized-income bucket, which reads as a
+    // bug. Disambiguate by what the transaction's own movement_type says,
+    // not by which bucket happened to be selected.
+    if (group === 'Ingreso pasivo' && !tx.movement_type) return 'Rendimientos no realizados'
+    if (group === 'Valorización' && tx.movement_type === 'income') return 'Apreciación realizada'
     return group
   }
 
@@ -1551,11 +1584,11 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         {/* L1 + L2 side by side on desktop */}
         <div className="flex gap-4 items-start">
           <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
-            <CategoryBar cats={cats} variant={isIncomeSourceBucket(selectedBucket) ? 'ingresos' : 'gastos'} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
+            <CategoryBar cats={cats} variant={isIncomeSourceBucket(selectedBucket) ? 'ingresos' : 'gastos'} selected={selCat} onSelect={selectCat} fmt={fmtAmt} monthsInWindow={monthsInWindow} />
           </div>
           {selCat && (
             <div className="hidden md:block flex-1 min-w-0">
-              <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
+              <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} monthsInWindow={monthsInWindow} />
             </div>
           )}
         </div>
@@ -1563,7 +1596,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         {/* L2 mobile — below L1 */}
         {selCat && (
           <div className="md:hidden">
-            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} />
+            <SubcategoryPanel rows={subcats} catName={selCat} total={catTotal} selected={selSub} onSelect={setSelSub} fmt={fmtAmt} monthsInWindow={monthsInWindow} />
           </div>
         )}
 
