@@ -1,10 +1,8 @@
 'use client'
 
-import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { isLoanPayment } from './categoryUtils'
 import { isValuationConcept } from '@/lib/incomeAllocation'
-import { type FlowWindow, classifyFlowTx } from '@/lib/ahorroInversionFlow'
+import { type FlowWindow } from '@/lib/ahorroInversionFlow'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,71 +17,6 @@ interface TxClient {
   is_settlement: boolean
   is_passive_income?: boolean
   is_survival_expense?: boolean
-}
-
-// ── Category code → display name mapping (per spec) ───────────────────────────
-
-const CATEGORY_DISPLAY: Record<string, string> = {
-  FOOD_SUPER:         'Supermercado',
-  FOOD_OUT:           'Comida fuera',
-  TRANSPORT_FUEL:     'Gasolina',
-  TRANSPORT:          'Transporte',
-  RENT_SERVICE:       'Servicios hogar',
-  SERVICES_INTERNET:  'Internet/Cable',
-  HEALTH_MEDS:        'Farmacia',
-  HEALTH_CONSULT:     'Médico',
-  EDUCATION:          'Educación',
-  ENTERTAINMENT:      'Entretenimiento',
-  ENTERTAINMENT_SUBS: 'Streaming',
-  CLOTHING:           'Ropa',
-  PERSONAL_CARE:      'Cuidado personal',
-  LOAN_PAYMENT:       'Préstamos',
-  INSURANCE:          'Seguros',
-  CAR_EXPENSES:       'Carro',
-  MISC_EXPENSE:       'Varios',
-  CASH_WITHDRAWAL:    'Efectivo',
-  TAXES:              'Impuestos',
-}
-
-function getExpenseLabel(tx: TxClient): string {
-  // Loan payments always go to "Préstamos" (the regular-installment ones —
-  // isExtraLoanPrincipalPayment-tagged extra paydowns are already pulled
-  // into the Abono extra deuda bucket upstream, by classifyFlowTx).
-  if (isLoanPayment(tx.vendor, tx.concept, tx.category_code)) return 'Préstamos'
-
-  // Known category codes
-  if (tx.category_code && CATEGORY_DISPLAY[tx.category_code]) {
-    return CATEGORY_DISPLAY[tx.category_code]
-  }
-
-  // Fallback: first word of vendor || concept || 'Otro'
-  const raw = tx.vendor ?? tx.concept ?? ''
-  const trimmed = raw.trim()
-  if (!trimmed) return 'Otro'
-  return trimmed.split(/\s+/)[0] ?? 'Otro'
-}
-
-// Groups a set of (label, amount) entries into top-N + "Otros" below a %
-// threshold — same rule applied to Gasto categories and to each bucket's
-// sources, so every drill-down folds the same way.
-function foldTopN(
-  entries: [string, number][], total: number, topN = 6, thresholdPct = 0.03,
-): [string, number][] {
-  const sorted = [...entries].sort((a, b) => b[1] - a[1])
-  const top = sorted.slice(0, topN)
-  const rest = sorted.slice(topN)
-  const threshold = total * thresholdPct
-  const main: [string, number][] = []
-  let othersAccum = rest.reduce((s, [, v]) => s + v, 0)
-  for (const [label, amt] of top) {
-    if (amt < threshold) othersAccum += amt
-    else main.push([label, amt])
-  }
-  main.sort((a, b) => b[1] - a[1])
-  if (othersAccum > threshold || (othersAccum > 0 && main.length === 0)) {
-    main.push(['Otros', othersAccum])
-  }
-  return main
 }
 
 // ── Income-side classifiers (which income source, not touched by the
@@ -123,7 +56,6 @@ const COLOR_CUOTAS         = '#71717a'
 const COLOR_AHORRO         = '#199e70'
 const COLOR_INVERSION      = '#9085e9'
 const COLOR_DEUDA          = '#d95926'
-const EXPENSE_COLORS       = ['#f87171', '#fb923c', '#fbbf24', '#e879f9', '#94a3b8', '#64748b']
 
 // UI-level buckets — Gasto itself splits into Necesario/Discrecional here
 // (via tx.is_survival_expense) so "cuánto gasto en sobrevivencia vs.
@@ -132,17 +64,31 @@ const EXPENSE_COLORS       = ['#f87171', '#fb923c', '#fbbf24', '#e879f9', '#94a3
 // cuotas/ahorro/inversion/deuda map 1:1 to FlowWindow's own fields.
 type UiBucket = 'necesario' | 'discrecional' | 'cuotas' | 'ahorro' | 'inversion' | 'deuda'
 
-const UI_BUCKET_LABEL: Record<UiBucket, string> = {
+// The full set of things a card item can be — UiBucket plus the three
+// income-source rows. Exported so InteractiveSection can drive the same
+// selection into its category/subcategory/transaction browser below
+// instead of growing a second, incompatible tab/subtab selector — that
+// second selector (Egresos/Ingresos → Gastos/Ahorros/Inversiones pills)
+// is exactly the duplicate this type exists to remove: it filtered by a
+// cruder rule (isOutflow lumped Gasto+Cuotas+Deuda together) that
+// disagreed with these cards' own numbers.
+export type DrillBucket = UiBucket | 'active' | 'passive' | 'patrimonial'
+
+export const DRILL_BUCKET_LABEL: Record<DrillBucket, string> = {
+  active: 'Ingreso activo', passive: 'Ingreso pasivo', patrimonial: 'Val. patrimonial',
   necesario: 'Necesario', discrecional: 'Discrecional', cuotas: 'Cuotas préstamos',
   ahorro: 'Ahorro', inversion: 'Inversión', deuda: 'Abono extra deuda',
 }
+export function isIncomeSourceBucket(b: DrillBucket): boolean {
+  return b === 'active' || b === 'passive' || b === 'patrimonial'
+}
+
 const UI_BUCKET_COLOR: Record<UiBucket, string> = {
   necesario: COLOR_NECESARIO, discrecional: COLOR_DISCRECIONAL, cuotas: COLOR_CUOTAS,
   ahorro: COLOR_AHORRO, inversion: COLOR_INVERSION, deuda: COLOR_DEUDA,
 }
-// Order the funnel's Egresos bar and the cards' internal bars segment by —
-// Gasto-family together, then the two wealth-building families, matching
-// how the cards below group them.
+// Order the funnel's Egresos bar segments by — Gasto-family together, then
+// the two wealth-building families, matching how the cards below group them.
 const BUCKET_ORDER: UiBucket[] = ['necesario', 'discrecional', 'ahorro', 'inversion', 'cuotas', 'deuda']
 
 // ── Funnel step — one bar, full width at the top (Ingreso) or narrower
@@ -206,17 +152,19 @@ function SegmentedFunnelStep({
   )
 }
 
-// ── Summary card groups — each of the three questions this page exists to
-// answer (gasto y sus tipos / ahorro e inversión y sus tipos / deuda y sus
-// tipos) as one card, with a proportional mini-bar + legend so the
-// relative size of its own items is readable at a glance, not just each
-// item's size vs. total income. Clicking a clickable item is the
-// drill-down — tap a bucket to see what makes it up. ──────────────────────
+// ── Summary card groups — each of the four questions this page exists to
+// answer (tipos de ingreso / gasto / ahorro e inversión / deuda) as one
+// card, with a proportional mini-bar + legend so the relative size of its
+// own items is readable at a glance, not just each item's size vs. total
+// income. Every item is clickable — it's the ONE selector into the
+// category → subcategory → transaction browser InteractiveSection renders
+// below (selectedBucket/onSelect, lifted up instead of kept as local
+// state), so there's no second, disagreeing nav for the same split. ──────
 
-type GroupItem = { key: string; label: string; amount: number; color: string; clickable: boolean }
+type GroupItem = { key: DrillBucket; label: string; amount: number; color: string }
 
 function BucketGroupCard({
-  label, items, fmtAmt, monthsInWindow, totalIncome, showPctOfIncome = true, onToggle,
+  label, items, fmtAmt, monthsInWindow, totalIncome, showPctOfIncome = true, selected, onSelect,
 }: {
   label: string
   items: GroupItem[]
@@ -224,7 +172,8 @@ function BucketGroupCard({
   monthsInWindow: number
   totalIncome: number
   showPctOfIncome?: boolean
-  onToggle: (key: string) => void
+  selected: DrillBucket | null
+  onSelect: (key: DrillBucket) => void
 }) {
   const visible = items.filter(i => i.amount > 0)
   const total = visible.reduce((s, i) => s + i.amount, 0)
@@ -256,25 +205,21 @@ function BucketGroupCard({
       <div className="space-y-1">
         {visible.map(i => {
           const pct = total > 0 ? (i.amount / total) * 100 : 0
-          const row = (
-            <div className="flex items-center justify-between gap-2 w-full">
-              <span className="flex items-center gap-1.5 min-w-0">
-                <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: i.color }} />
-                <span className="text-[9px] text-zinc-400 truncate">{i.label}{i.clickable ? ' ›' : ''}</span>
-              </span>
-              <span className="text-[9px] tabular-nums shrink-0">
-                <span className="text-zinc-300 font-semibold">{fmtAmt(i.amount)}</span>
-                {visible.length > 1 && <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>}
-              </span>
-            </div>
-          )
-          return i.clickable ? (
-            <button key={i.key} onClick={() => onToggle(i.key)}
-              className="w-full text-left hover:bg-white/[0.04] rounded-md px-1 -mx-1 py-0.5 transition-colors">
-              {row}
+          const active = selected === i.key
+          return (
+            <button key={i.key} onClick={() => onSelect(i.key)}
+              className={`w-full text-left rounded-md px-1 -mx-1 py-0.5 transition-colors ${active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'}`}>
+              <div className="flex items-center justify-between gap-2 w-full">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: i.color }} />
+                  <span className={`text-[9px] truncate ${active ? 'text-zinc-100 font-semibold' : 'text-zinc-400'}`}>{i.label} ›</span>
+                </span>
+                <span className="text-[9px] tabular-nums shrink-0">
+                  <span className="text-zinc-300 font-semibold">{fmtAmt(i.amount)}</span>
+                  {visible.length > 1 && <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>}
+                </span>
+              </div>
             </button>
-          ) : (
-            <div key={i.key} className="px-1 py-0.5">{row}</div>
           )
         })}
       </div>
@@ -285,42 +230,38 @@ function BucketGroupCard({
 // ── Main component ─────────────────────────────────────────────────────────────
 // A funnel, not a Sankey: Ingreso (full width) narrows to Egresos (width =
 // % of income that actually left), which is itself made of Gasto/Ahorro e
-// inversión/Deuda — then each of those is a card you tap to drill into its
-// own types. The old flow-ribbon diagram answered the same question with
-// more visual mechanism (hover tooltips, curved paths, a 3rd scrolling
-// column on phones) than the question needed.
+// inversión/Deuda — then each of those is a card you tap to select. The
+// selection is controlled from InteractiveSection, which renders the real
+// category → subcategory → transaction drill-down for whatever's selected
+// right below this component — this component used to also render its own
+// shallow "top sources" bar-list drill-down, which was a second, shorter
+// version of that same browser; removed in favor of the one that goes all
+// the way to actual transactions.
 
 export function IncomeFunnel({
   transactions,
   flow,
   fmtAmt,
   onCollapse,
+  selectedBucket,
+  onSelectBucket,
 }: {
   transactions: TxClient[]
   flow: FlowWindow
   fmtAmt: (n: number) => string
   onCollapse?: () => void
+  selectedBucket: DrillBucket | null
+  onSelectBucket: (key: DrillBucket) => void
 }) {
-  const [expandedBucket, setExpandedBucket] = useState<UiBucket | null>(null)
-
   // ── Income sources (a different question from gasto/ahorro/inversión —
   // "where income came from", not "where it went") ──────────────────────
   let activeIncome = 0, passiveIncome = 0, patrimonial = 0
-  // Gasto category breakdown, split necesario/discrecional — gated by
-  // classifyFlowTx so the two sum to exactly flow.gasto.
-  const expenseMapNecesario: Record<string, number> = {}
-  const expenseMapDiscrecional: Record<string, number> = {}
-
   for (const tx of transactions) {
-    const amt = Number(tx.amount ?? 0)
-    if (amt <= 0 && tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') continue
-    if (isActivIncome(tx))    { activeIncome  += amt; continue }
-    if (isPassiveIncome(tx))  { passiveIncome += amt; continue }
-    if (isPatrimonialIncome(tx) && amt > 0) { patrimonial += amt; continue }
-    if (classifyFlowTx(tx) === 'gasto') {
-      const label = getExpenseLabel(tx)
-      const map = tx.is_survival_expense ? expenseMapNecesario : expenseMapDiscrecional
-      map[label] = (map[label] ?? 0) + amt
+    if (isActivIncome(tx))   { activeIncome  += Number(tx.amount ?? 0); continue }
+    if (isPassiveIncome(tx)) { passiveIncome += Number(tx.amount ?? 0); continue }
+    if (isPatrimonialIncome(tx)) {
+      const amt = Number(tx.amount ?? 0)
+      if (amt > 0) patrimonial += amt
     }
   }
 
@@ -346,23 +287,6 @@ export function IncomeFunnel({
     if (b === 'discrecional') return flow.gastoDiscrecional
     return flow[b]
   }
-
-  // ── Drill-down source lists — same data every other consumer of `flow`
-  // uses (flow.ahorroSources etc.), except Necesario/Discrecional, which
-  // have no per-tx source list on FlowWindow and are grouped by expense
-  // category here instead (reusing getExpenseLabel's nicer display names).
-  function detailEntriesFor(b: UiBucket): [string, number][] {
-    if (b === 'necesario') return Object.entries(expenseMapNecesario)
-    if (b === 'discrecional') return Object.entries(expenseMapDiscrecional)
-    if (b === 'cuotas') return flow.cuotasSources.map(s => [s.name, s.amount] as [string, number])
-    if (b === 'ahorro') return flow.ahorroSources.map(s => [s.name, s.amount] as [string, number])
-    if (b === 'inversion') return flow.inversionSources.map(s => [s.name, s.amount] as [string, number])
-    return flow.deudaSources.map(s => [s.name, s.amount] as [string, number])
-  }
-  const canExpand = (b: UiBucket) => detailEntriesFor(b).length > 0
-  const expandedEntries = expandedBucket ? foldTopN(detailEntriesFor(expandedBucket), amountFor(expandedBucket)) : []
-
-  const toggle = (key: string) => setExpandedBucket(prev => prev === key ? null : key as UiBucket)
 
   return (
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] p-5">
@@ -403,75 +327,46 @@ export function IncomeFunnel({
       )}
       {margin === 0 && <div className="mb-4" />}
 
-      {/* ── De qué están hechos los egresos — un card por pregunta, cada
-          uno con sus propios tipos en drill-down. ── */}
+      {/* ── De qué están hechos los egresos y el ingreso — un card por
+          pregunta; tocá un item para ver sus categorías y transacciones
+          abajo. ── */}
       <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-2">
-        Egresos, por tipo · tocá uno para ver de qué está hecho
+        Por tipo · tocá uno para ver el detalle
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <BucketGroupCard
           label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          onToggle={toggle}
+          selected={selectedBucket} onSelect={onSelectBucket}
           items={(['necesario', 'discrecional'] as UiBucket[]).map(b => (
-            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
+            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
           ))}
         />
         <BucketGroupCard
           label="Ahorro e inversión" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          onToggle={toggle}
+          selected={selectedBucket} onSelect={onSelectBucket}
           items={(['ahorro', 'inversion'] as UiBucket[]).map(b => (
-            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
+            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
           ))}
         />
         {/* Cuotas (scheduled installments) + Deuda (extra paydowns) — both
             loan-servicing, not lifestyle consumption. */}
         <BucketGroupCard
           label="Deuda" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          onToggle={toggle}
+          selected={selectedBucket} onSelect={onSelectBucket}
           items={(['cuotas', 'deuda'] as UiBucket[]).map(b => (
-            { key: b, label: UI_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b], clickable: canExpand(b) }
+            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
           ))}
         />
         <BucketGroupCard
           label="Ingreso, por fuente" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          showPctOfIncome={false} onToggle={() => {}}
+          showPctOfIncome={false} selected={selectedBucket} onSelect={onSelectBucket}
           items={[
-            { key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME,  clickable: false },
-            { key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME, clickable: false },
-            { key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL,    clickable: false },
+            { key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME },
+            { key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME },
+            { key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL },
           ]}
         />
       </div>
-
-      {/* ── Drill-down — a bar list: tap a card item above to see what
-          makes it up. ── */}
-      {expandedBucket && (
-        <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
-          <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: UI_BUCKET_COLOR[expandedBucket] }}>
-            De qué está hecho: {UI_BUCKET_LABEL[expandedBucket]}
-          </p>
-          {expandedEntries.map(([name, amt], i) => {
-            const expandedAmount = amountFor(expandedBucket)
-            const pct = expandedAmount > 0 ? (amt / expandedAmount) * 100 : 0
-            const isGastoCategory = expandedBucket === 'necesario' || expandedBucket === 'discrecional'
-            const color = isGastoCategory ? EXPENSE_COLORS[i % EXPENSE_COLORS.length] : UI_BUCKET_COLOR[expandedBucket]
-            return (
-              <div key={name}>
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-[10px] text-zinc-400 truncate">{name}</span>
-                  <span className="text-[10px] tabular-nums shrink-0">
-                    <span className="text-zinc-300 font-bold">{fmtAmt(amt)}</span>
-                    <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>
-                  </span>
-                </div>
-                <div className="h-2.5 rounded-full bg-black/25 overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${Math.max(pct, pct > 0 ? 1.5 : 0)}%`, background: color }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }

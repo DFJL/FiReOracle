@@ -4,7 +4,7 @@ import { useState, useMemo, useTransition, useEffect, useRef } from 'react'
 import { ChevronDown, Pencil, Trash2, X, Loader2 } from 'lucide-react'
 import { inferCategory, displayCategory, getGroupLabel, isLoanPayment } from './categoryUtils'
 import { classifyTransactions } from '@/app/actions/classify'
-import { IncomeFunnel } from './IncomeFunnel'
+import { IncomeFunnel, DRILL_BUCKET_LABEL, isIncomeSourceBucket, type DrillBucket } from './IncomeFunnel'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { useCurrency } from '@/lib/currency'
 import { isRealizedPassiveIncome, isValuationConcept } from '@/lib/incomeAllocation'
@@ -57,9 +57,6 @@ export interface AccountSummary {
   savingsBalance: number  // savings + investment accounts
 }
 
-type TabKey        = 'gastos' | 'ingresos'
-type IncomeSubtab  = 'activo' | 'pasivo'
-type EgresosSubtab = 'gastos' | 'ahorros' | 'inversiones'
 type PeriodKey     = 'all' | 'ytd' | 'mtd' | '1y' | '6m' | '3m' | '1m' | '2y' | '5y'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -188,12 +185,6 @@ function isOutflow(tx: TxClient) {
   const bucket = classifyFlowTx(tx)
   return bucket === 'gasto' || bucket === 'cuotas' || bucket === 'deuda'
 }
-function isSavingsTx(tx: TxClient) {
-  return classifyFlowTx(tx) === 'ahorro'
-}
-function isInvestmentTx(tx: TxClient) {
-  return classifyFlowTx(tx) === 'inversion'
-}
 
 // movement_type es el árbitro de liquidez — si tiene 'income' tocó una cuenta real.
 // Los registros con movement_type=NULL (Mov=#N/A en el sheet) son solo valorización
@@ -215,9 +206,18 @@ function isPatrimonialIncome(tx: TxClient) {
   return !tx.movement_type && tx.amount != null && Number(tx.amount) > 0 && !isValuationConcept(tx.concept)
 }
 
-const TAB_FILTER: Record<TabKey, (tx: TxClient) => boolean> = {
-  gastos:   isOutflow,
-  ingresos: (tx) => isLiquidIncome(tx) || isPatrimonialIncome(tx),
+// One filter per DrillBucket — the funnel's cards are the only selector
+// into this now, so this is the single place "which transactions does
+// 'Necesario' mean" is decided, instead of the funnel's cards, the old
+// egresosSubtab pills and this page's category grouping each answering it
+// slightly differently.
+function txsForBucket(txs: TxClient[], bucket: DrillBucket): TxClient[] {
+  if (bucket === 'active')      return txs.filter(tx => isLiquidIncome(tx) && !tx.is_passive_income)
+  if (bucket === 'passive')     return txs.filter(tx => tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement)
+  if (bucket === 'patrimonial') return txs.filter(isPatrimonialIncome)
+  if (bucket === 'necesario')   return txs.filter(tx => classifyFlowTx(tx) === 'gasto' && !!tx.is_survival_expense)
+  if (bucket === 'discrecional') return txs.filter(tx => classifyFlowTx(tx) === 'gasto' && !tx.is_survival_expense)
+  return txs.filter(tx => classifyFlowTx(tx) === bucket) // cuotas/ahorro/inversion/deuda
 }
 
 function getTxConcept(tx: TxClient): string {
@@ -437,15 +437,15 @@ const TAB_COLORS = {
   ingresos: { bar: 'bg-[#a3e635]/40', active: 'bg-[#a3e635]', bg: 'bg-[#a3e635]/10', border: 'border-[#a3e635]/30', text: 'text-[#a3e635]' },
 }
 
-function CategoryBar({ cats, tab, selected, onSelect, fmt }: {
+function CategoryBar({ cats, variant, selected, onSelect, fmt }: {
   cats: { category: string; amount: number; count: number }[]
-  tab: TabKey; selected: string | null; onSelect: (c: string | null) => void
+  variant: 'gastos' | 'ingresos'; selected: string | null; onSelect: (c: string | null) => void
   fmt: (crc: number) => string
 }) {
   const [expanded, setExpanded] = useState(false)
   const max = cats[0]?.amount ?? 1
   const total = cats.reduce((s, c) => s + c.amount, 0)
-  const col = TAB_COLORS[tab]
+  const col = TAB_COLORS[variant]
 
   // Show categories that are ≥2% of total; collapse the rest unless expanded
   const THRESHOLD = 2
@@ -1129,11 +1129,6 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'mtd', label: 'MTD' },
 ]
 
-const TABS: { key: TabKey; label: string; color: string }[] = [
-  { key: 'gastos',   label: 'Egresos',  color: 'rgb(251 113 133)' },
-  { key: 'ingresos', label: 'Ingresos', color: '#a3e635'           },
-]
-
 export function InteractiveSection({ transactions, categories, buckets, accounts, exchangeRate, envelopeMovements, envelopes }: {
   transactions: TxClient[]
   categories: Category[]
@@ -1154,15 +1149,14 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   }
 
   const [period, setPeriod]         = useState<PeriodKey>('all')
-  const [tab, setTab]               = useState<TabKey>('gastos')
-  const [incomeSubtab, setIncomeSub]     = useState<IncomeSubtab>('activo')
-  const [egresosSubtab, setEgresosSub]   = useState<EgresosSubtab>('gastos')
+  // The funnel's cards are the only way into this — no separate pill-tab
+  // nav duplicating the same question with a cruder filter.
+  const [selectedBucket, setSelectedBucket] = useState<DrillBucket | null>(null)
   const [selCat, setSelCat]         = useState<string | null>(null)
   const [selSub, setSelSub]         = useState<string | null>(null)
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
   const [showFunnel, setShowFunnel] = useState(true)
-  const [showDetail, setShowDetail] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
   const toUSD  = (crc: number) => crc / tcSell
@@ -1180,9 +1174,10 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     return `₡${Math.round(crc)}`
   }
 
-  function selectTab(t: TabKey)        { setTab(t); setSelCat(null); setSelSub(null) }
-  function selectIncomeSub(s: IncomeSubtab)    { setIncomeSub(s); setSelCat(null); setSelSub(null) }
-  function selectEgresosSub(s: EgresosSubtab)  { setEgresosSub(s); setSelCat(null); setSelSub(null) }
+  function selectBucket(b: DrillBucket) {
+    setSelectedBucket(prev => prev === b ? null : b)
+    setSelCat(null); setSelSub(null)
+  }
   function selectCat(c: string | null) { setSelCat(c); setSelSub(null) }
 
   // AI-classified overrides for MISC transactions (populated asynchronously)
@@ -1272,20 +1267,15 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     [txList, flowWindow.from, flowWindow.to]
   )
 
-  // Tab filter — egresos split into gastos/ahorros/inversiones; ingresos split activo/pasivo
-  const tabTxs = useMemo(() => {
-    if (tab === 'gastos') {
-      if (egresosSubtab === 'gastos')      return periodTxs.filter(isOutflow)
-      if (egresosSubtab === 'inversiones') return periodTxs.filter(isInvestmentTx)
-      return periodTxs.filter(isSavingsTx)
-    }
-    const base = periodTxs.filter(TAB_FILTER['ingresos'])
-    return incomeSubtab === 'activo'
-      ? base.filter(tx => isLiquidIncome(tx) && !tx.is_passive_income)
-      : base.filter(tx => (tx.movement_type === 'income' && !!tx.is_passive_income && !tx.is_settlement) || isPatrimonialIncome(tx))
-  }, [periodTxs, tab, egresosSubtab, incomeSubtab]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Whatever bucket is selected in the funnel's cards above — txsForBucket
+  // is the exact same classifyFlowTx split those cards' totals come from,
+  // so this is never a different number than what the card showed.
+  const tabTxs = useMemo(
+    () => selectedBucket ? txsForBucket(periodTxs, selectedBucket) : [],
+    [periodTxs, selectedBucket]
+  )
 
-  // Monthly trend — all series from periodTxs, independent of tab
+  // Monthly trend — all series from periodTxs, independent of the selected bucket
   const trendPoints = useMemo((): SeriesPoint[] => {
     const inc: Record<string, number> = {}
     const pas: Record<string, number> = {}
@@ -1373,8 +1363,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     ? (cats.find(c => c.category === selCat)?.amount ?? 0)
     : cats.reduce((s, c) => s + c.amount, 0)
 
-  const egresosSubtabLabel: Record<EgresosSubtab, string> = { gastos: 'Gastos', ahorros: 'Ahorros', inversiones: 'Inversiones' }
-  const tableTitle = selSub || selCat || (tab === 'gastos' ? egresosSubtabLabel[egresosSubtab] : 'Ingresos')
+  const tableTitle = selSub || selCat || (selectedBucket ? DRILL_BUCKET_LABEL[selectedBucket] : '')
 
   // KPIs for current period
   // For multi-month periods, exclude the current partial month to match progreso's
@@ -1516,15 +1505,23 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
 
       {/* ── Income funnel — Ingreso narrows to Egresos, which is made of
           Gasto/Ahorro e inversión/Deuda (all from computeFlowWindow), each
-          a card you tap to drill into its own types. Replaced the old
-          ribbon-diagram Sankey: same questions, answered as a funnel +
-          cards instead of flow paths, hover tooltips and a column that
-          forced horizontal scroll on phones. Open by default — this is
-          the one glance-level view of the split, not an optional
-          expansion of it. */}
+          a card you tap to select. Replaced the old ribbon-diagram Sankey
+          (same questions, less visual mechanism), and its cards are now
+          also the ONLY way into the category/subcategory/transaction
+          browser below — there used to be a second, separate Egresos/
+          Ingresos → Gastos/Ahorros/Inversiones pill-tab nav here that
+          filtered by a cruder rule (isOutflow lumped Gasto+Cuotas+Deuda
+          into one "Gastos" list, where the cards above kept Deuda
+          separate) — same split, two navs that could show different
+          numbers for "Préstamos". One selection now drives both. ── */}
       <div className="mb-4">
         {showFunnel
-          ? <IncomeFunnel transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowFunnel(false)} />
+          ? (
+            <IncomeFunnel
+              transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowFunnel(false)}
+              selectedBucket={selectedBucket} onSelectBucket={selectBucket}
+            />
+          )
           : (
             <button onClick={() => setShowFunnel(true)}
               className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.02] transition-colors">
@@ -1538,73 +1535,23 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
         }
       </div>
 
-      {/* ── Content tabs ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 mb-4">
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => { selectTab(t.key); setShowDetail(true) }}
-            className={`px-4 py-2 rounded-xl text-[10px] font-black tracking-[0.14em] uppercase transition-all border ${
-              tab === t.key
-                ? t.key === 'gastos'
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  : 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635]'
-                : 'border-transparent text-zinc-600 hover:text-zinc-400'
-            }`}>
-            {t.label}
+      {/* ── Detail — category → subcategory → transaction, for whichever
+          card item above is selected. ── */}
+      {selectedBucket && (<>
+        <div className="flex items-center justify-between mb-3 mt-5">
+          <p className="text-[9px] font-black uppercase tracking-[0.14em]" style={{ color: isIncomeSourceBucket(selectedBucket) ? '#a3e635' : '#fb7185' }}>
+            Detalle · {DRILL_BUCKET_LABEL[selectedBucket]}
+          </p>
+          <button onClick={() => setSelectedBucket(null)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors text-[9px] font-black uppercase tracking-wider">
+            ✕ Cerrar
           </button>
-        ))}
-        <button onClick={() => setShowDetail(v => !v)}
-          className="ml-auto flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-white/[0.03] transition-colors">
-          <span className="text-[9px] font-black uppercase tracking-wider">{showDetail ? 'Ocultar' : 'Ver detalle'}</span>
-          <ChevronDown size={12} className={`transition-transform ${showDetail ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
-
-      {showDetail && (<>
-        {/* ── Egresos subtabs ──────────────────────────────────────────────── */}
-        {tab === 'gastos' && (
-          <div className="flex gap-1 mb-4 ml-1">
-            {([
-              { key: 'gastos'     as EgresosSubtab, label: 'Gastos',     desc: 'Consumo · compras · servicios' },
-              { key: 'ahorros'    as EgresosSubtab, label: 'Ahorros',    desc: 'Pensión · fondo emergencia' },
-              { key: 'inversiones' as EgresosSubtab, label: 'Inversiones', desc: 'Fondos · acciones · crypto' },
-            ]).map(s => (
-              <button key={s.key} onClick={() => selectEgresosSub(s.key)}
-                className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
-                  egresosSubtab === s.key
-                    ? 'bg-rose-500/10 border-rose-500/30'
-                    : 'border-transparent hover:bg-white/[0.03]'
-                }`}>
-                <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${egresosSubtab === s.key ? 'text-rose-400' : 'text-zinc-500'}`}>{s.label}</span>
-                <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* ── Income subtabs — only visible when Ingresos is active ─────────── */}
-        {tab === 'ingresos' && (
-          <div className="flex gap-1 mb-4 ml-1">
-            {([
-              { key: 'activo' as IncomeSubtab, label: 'Activo', desc: 'Salario · freelance · trabajo' },
-              { key: 'pasivo' as IncomeSubtab, label: 'Pasivo',  desc: 'Alquiler · rendimientos · crypto' },
-            ]).map(s => (
-              <button key={s.key} onClick={() => selectIncomeSub(s.key)}
-                className={`flex flex-col px-4 py-2 rounded-xl text-left transition-all border ${
-                  incomeSubtab === s.key
-                    ? 'bg-[#a3e635]/10 border-[#a3e635]/30'
-                    : 'border-transparent hover:bg-white/[0.03]'
-                }`}>
-                <span className={`text-[10px] font-black tracking-[0.12em] uppercase ${incomeSubtab === s.key ? 'text-[#a3e635]' : 'text-zinc-500'}`}>{s.label}</span>
-                <span className="text-[9px] text-zinc-600 mt-0.5 hidden sm:block">{s.desc}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        </div>
 
         {/* L1 + L2 side by side on desktop */}
         <div className="flex gap-4 items-start">
           <div className={selCat ? 'w-full md:w-1/2 shrink-0' : 'w-full'}>
-            <CategoryBar cats={cats} tab={tab} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
+            <CategoryBar cats={cats} variant={isIncomeSourceBucket(selectedBucket) ? 'ingresos' : 'gastos'} selected={selCat} onSelect={selectCat} fmt={fmtAmt} />
           </div>
           {selCat && (
             <div className="hidden md:block flex-1 min-w-0">
