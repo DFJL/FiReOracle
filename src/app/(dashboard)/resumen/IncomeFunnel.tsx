@@ -378,13 +378,19 @@ export function IncomeFunnel({
         De los ingresos, cuánto se va en egresos — y de eso, cuánto es gasto, ahorro, inversión o abono extra a deuda
       </p>
 
-      {/* ── Funnel: Ingreso (100%) narrows to Egresos (% que realmente salió) ── */}
+      {/* ── Funnel: Ingreso (100%) narrows to Egresos (% que realmente salió) ──
+          Both steps also show the typical monthly average for the selected
+          window, not just the total — a "Todo"/"5A" total alone doesn't say
+          whether that's a lot. ── */}
       <div className="space-y-1.5 mb-1">
-        <FunnelStep label="Ingreso" amount={totalIncome} widthPct={100} color={COLOR_ACTIVE_INCOME} fmtAmt={fmtAmt} />
+        <FunnelStep
+          label="Ingreso" amount={totalIncome} widthPct={100} color={COLOR_ACTIVE_INCOME} fmtAmt={fmtAmt}
+          sub={monthsInWindow > 1 ? `~${fmtAmt(totalIncome / monthsInWindow)}/mes` : undefined}
+        />
         <div className="flex justify-center"><ChevronDown size={11} className="text-zinc-700" /></div>
         <SegmentedFunnelStep
           label="Egresos" amount={egresos} widthPct={egresosPct} fmtAmt={fmtAmt}
-          sub={`${egresosPct.toFixed(0)}% del ingreso`}
+          sub={`${egresosPct.toFixed(0)}% del ingreso${monthsInWindow > 1 ? ` · ~${fmtAmt(egresos / monthsInWindow)}/mes` : ''}`}
           segments={BUCKET_ORDER.map(b => ({ key: b, amount: amountFor(b), color: UI_BUCKET_COLOR[b] }))}
         />
       </div>

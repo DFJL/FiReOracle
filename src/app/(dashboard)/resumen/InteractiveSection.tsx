@@ -1241,24 +1241,29 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     () => txList.reduce<string | null>((min, tx) => (tx.date && (!min || tx.date < min) ? tx.date : min), null),
     [txList]
   )
-  // Same "exclude the current partial month unless you're specifically
-  // looking at it" rule the KPI tiles already used on their own — a
-  // trailing incomplete month skews a rate/total in a way that reads as
-  // a real drop. Now the single window both the income funnel and the KPIs/tabs
-  // below derive from, instead of two independent passes over periodTxs
-  // that happened to use slightly different cutoffs.
+  // Same upper bound periodTxs already uses (cutoff..now, no exclusion) —
+  // this used to stop at the start of the current calendar month unless
+  // period==='mtd', which read as a defensible "don't let a half-finished
+  // month skew a rate" rule, but it meant flowWindow (the funnel cards,
+  // kpis) silently dropped the entire current month while periodTxs (the
+  // egresos/ingresos ledger below, the trend chart) kept it — e.g. an
+  // October transaction would show in "Préstamos" in the ledger but not
+  // in the funnel's Deuda card, two real numbers disagreeing for a
+  // transaction that's genuinely in the selected window. monthsInWindow
+  // (IncomeFunnel's averages) is a continuous days/30.44 ratio, not a
+  // bucket-per-calendar-month average, so a trailing partial month barely
+  // moves it — there's no accuracy cost to including it, only the
+  // confusion of two sections counting different transactions.
   const flowWindow = useMemo(() => {
     const now = new Date()
-    const tomorrowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
-    const thisMonthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-    const toStr = period === 'mtd' ? tomorrowStr : thisMonthStartStr
+    const toStr = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString().slice(0, 10)
     const fromStr = cutoff ?? earliestTxDate ?? toStr
     return computeFlowWindow(
       txList as Parameters<typeof computeFlowWindow>[0],
       (envelopeMovements ?? []) as Parameters<typeof computeFlowWindow>[1],
       savingsEnvelopeIds, envelopeNameMap, catNameMap, fromStr, toStr,
     )
-  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate, period])
+  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate])
 
   // Same [from, to) flowWindow used, for the small passiveIncome/rendimientos
   // loop in kpis below that isn't part of computeFlowWindow's own scope.
