@@ -365,10 +365,15 @@ interface Props {
   envelopes:    Envelope[]
   txCategories: TxCategory[]
   accounts:     FinancialAccount[]
+  // Raw deposits into counts_as_ahorro sobres — NOT netted against later
+  // withdrawals (unlike /resumen's "Ahorro" card). See the card's own note.
+  ahorroGrossThisMonth: number
+  ahorroGrossHistAvg:   number
 }
 
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
+  ahorroGrossThisMonth, ahorroGrossHistAvg,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -1054,7 +1059,7 @@ export function PresupuestoClient({
       </div>
 
       {/* Income summary cards */}
-      <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
           <p className="text-[10px] text-zinc-500 mb-0.5">Ing. esperado</p>
           <p className="text-sm font-black text-white">{fmt(incomeExpected || 0)}</p>
@@ -1079,6 +1084,14 @@ export function PresupuestoClient({
               </p>
             </>
           ) : <p className="text-sm font-black text-zinc-600">—</p>}
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5"
+          title="Depósitos a sobres de ahorro este mes, sin restar lo que después se retire y gaste (vacaciones, marchamo, Emma, Mariam). El 'Ahorro' de Resumen sí resta eso, porque responde una pregunta distinta: cuánto quedó efectivamente sin gastar.">
+          <p className="text-[10px] text-zinc-500 mb-0.5">Ahorro real</p>
+          <p className="text-sm font-black text-[#199e70]">{fmt(ahorroGrossThisMonth)}</p>
+          <p className="text-[10px] text-zinc-600 mt-0.5 tabular-nums">
+            {ahorroGrossHistAvg > 0 ? `avg 3m: ${fmt(ahorroGrossHistAvg)}` : 'a sobres, bruto'}
+          </p>
         </div>
       </div>
 

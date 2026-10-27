@@ -58,6 +58,7 @@ export default async function PresupuestoPage({
     { data: aguinaldoPaidTxRows },
     { data: aguinaldoAllocRows },
     { data: aguinaldoGrossRows },
+    { data: envelopeDepositRows },
   ] = await Promise.all([
     admin.from('budgets')
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
@@ -102,7 +103,7 @@ export default async function PresupuestoPage({
       .order('name'),
 
     admin.from('savings_envelopes')
-      .select('id, name, parent_envelope_id, custodio')
+      .select('id, name, parent_envelope_id, custodio, counts_as_ahorro')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('name'),
@@ -157,6 +158,21 @@ export default async function PresupuestoPage({
       .select('id, pay_date, gross_amount, notes')
       .eq('user_id', user.id)
       .order('pay_date'),
+
+    // Gross ahorro — raw deposits into counts_as_ahorro envelopes, this
+    // month and the previous 3 (for the historical average below). NOT
+    // netted against later withdrawals (unlike /resumen's "Ahorro" card):
+    // a sobre you fund monthly and later spend down for its own purpose
+    // (vacaciones, marchamo, Emma, Mariam) nets toward zero over a wide
+    // window on /resumen, which is correct for "what's left unspent" but
+    // hides the actual month-to-month saving habit — the thing this card
+    // answers instead. See that chat thread for the full reasoning.
+    admin.from('envelope_movements')
+      .select('amount, envelope_id, date, notes')
+      .eq('user_id', user.id)
+      .eq('movement_type', 'deposito')
+      .gte('date', `${prevMonths[2][0]}-${String(prevMonths[2][1]).padStart(2, '0')}-01`)
+      .lte('date', lastDayOfMonth),
   ])
 
   // Dedup: keep only the most recent effective row per category
@@ -248,6 +264,29 @@ export default async function PresupuestoPage({
   // Actual income
   const incomeActual = (incomeTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
 
+  // Ahorro real (bruto) — same "balance-correction noise" exclusion
+  // ahorroInversionFlow.ts uses for the real deposit/withdrawal rule.
+  const ahorroEnvelopeIds = new Set(
+    (envelopeRows ?? []).filter(e => e.counts_as_ahorro === true).map(e => e.id)
+  )
+  const isRealDeposit = (m: { envelope_id: string; notes: string | null }) =>
+    ahorroEnvelopeIds.has(m.envelope_id) &&
+    !/restauraci[oó]n\s*(de\s*)?saldo|ajuste\s*de\s*saldo/i.test(m.notes ?? '')
+  const ahorroByMonth: Record<string, number> = {}
+  for (const m of envelopeDepositRows ?? []) {
+    if (!m.date || !isRealDeposit(m)) continue
+    const ym = m.date.slice(0, 7)
+    ahorroByMonth[ym] = (ahorroByMonth[ym] ?? 0) + Number(m.amount)
+  }
+  const thisMonthKey = `${year}-${String(month).padStart(2, '0')}`
+  const ahorroGrossThisMonth = ahorroByMonth[thisMonthKey] ?? 0
+  const ahorroHistVals = prevMonths
+    .map(([py, pm]) => ahorroByMonth[`${py}-${String(pm).padStart(2, '0')}`])
+    .filter((v): v is number => v !== undefined)
+  const ahorroGrossHistAvg = ahorroHistVals.length
+    ? ahorroHistVals.reduce((a, b) => a + b, 0) / ahorroHistVals.length
+    : 0
+
   // Suggestions for combobox (from DB — no hardcoding)
   const suggSet = new Set<string>()
   for (const cat of catRows ?? []) {
@@ -324,6 +363,8 @@ export default async function PresupuestoPage({
         envelopes={(envelopeRows ?? []) as Envelope[]}
         txCategories={(catRows ?? []) as TxCategory[]}
         accounts={(accountRows ?? []) as FinancialAccount[]}
+        ahorroGrossThisMonth={ahorroGrossThisMonth}
+        ahorroGrossHistAvg={ahorroGrossHistAvg}
       />
       <AguinaldoSection
         year={aguinaldoYear}
