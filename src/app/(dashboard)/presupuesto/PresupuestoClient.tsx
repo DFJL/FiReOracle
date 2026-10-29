@@ -480,12 +480,16 @@ interface Props {
   marginThisMonth: number
   // Same four figures, 12 months, oldest first.
   trendData: { month: string; income: number; gasto: number; ahorro: number; inversion: number; margin: number }[]
+  // Segundo nivel — de qué está hecho cada rubro, this month only.
+  gastoBreakdownThisMonth:     { name: string; amount: number }[]
+  ahorroBreakdownThisMonth:    { name: string; amount: number }[]
+  inversionBreakdownThisMonth: { name: string; amount: number }[]
 }
 
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
   ahorroGrossThisMonth, ahorroGrossHistAvg, gastoRealThisMonth, gastoRealHistAvg, inversionRealThisMonth, inversionRealHistAvg,
-  marginThisMonth, trendData,
+  marginThisMonth, trendData, gastoBreakdownThisMonth, ahorroBreakdownThisMonth, inversionBreakdownThisMonth,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -529,6 +533,8 @@ export function PresupuestoClient({
   const [addError, setAddError]           = useState<string | null>(null)
 
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
+  const [showComposicion, setShowComposicion] = useState(false)
+  const [expandedCompRow, setExpandedCompRow] = useState<'gasto' | 'ahorro' | 'inversion' | null>(null)
   const [sortKey, setSortKey]             = useState<SortKey | null>(null)
   const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
   const [showNoLimit, setShowNoLimit]     = useState(false)
@@ -1185,97 +1191,155 @@ export function PresupuestoClient({
           <p className="text-[10px] text-zinc-600 mt-0.5">de transacciones</p>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
-          <p className="text-[10px] text-zinc-500 mb-0.5">Balance plan</p>
+          <p className="text-[10px] text-zinc-500 mb-0.5">Balance del plan</p>
           {incomeExpected > 0 ? (
             <>
               <p className={`text-sm font-black ${incomeExpected >= totalPlan ? 'text-[#a3e635]' : 'text-rose-400'}`}>
                 {fmt(Math.abs(incomeExpected - totalPlan))}
               </p>
               <p className="text-[10px] text-zinc-600 mt-0.5">
-                {incomeExpected >= totalPlan ? 'sobrante' : 'déficit'}
+                {incomeExpected >= totalPlan ? 'sobrante presupuestado' : 'déficit presupuestado'}
               </p>
             </>
           ) : <p className="text-sm font-black text-zinc-600">—</p>}
         </div>
       </div>
 
-      {/* Composición real del mes — bruto, no neteado: cada rubro responde una
-          pregunta distinta de la que responde el "Ahorro" de Resumen (cuánto
-          quedó sin gastar). Gasto = consumo normal (expense_group !=
-          objetivos_financieros). Ahorro = depósitos a sobres (Vacaciones,
-          Marchamo, Emma, Mariam…), sin restar retiros posteriores. Inversión
-          = aportes directos a fondos/pensión (SAVINGS_INVESTMENT/PENSION) —
-          un dato disjunto del de Ahorro: ninguno de esos sobres carga un
-          category_code de inversión, y estos aportes nunca pasan por un
-          sobre (verificado contra los datos reales, no asumido). */}
-      {(() => {
-        const rows = [
-          { key: 'gasto',     label: 'Gasto',     color: '#a1a1aa', amount: gastoRealThisMonth,     avg: gastoRealHistAvg },
-          { key: 'ahorro',    label: 'Ahorro',     color: '#199e70', amount: ahorroGrossThisMonth,   avg: ahorroGrossHistAvg },
-          { key: 'inversion', label: 'Inversión',  color: '#9085e9', amount: inversionRealThisMonth, avg: inversionRealHistAvg },
-        ]
-        const visible = rows.filter(r => r.amount > 0)
-        if (visible.length === 0 && incomeActual === 0) return null
-        const totalOut = gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth
-        const outPct   = incomeActual > 0 ? (totalOut / incomeActual) * 100 : 0
-        return (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Composición real del mes</p>
-              <p className="text-[9px] text-zinc-600 tabular-nums">
-                {incomeActual > 0 ? `${outPct.toFixed(0)}% del ingreso` : 'bruto, sin netear'}
-              </p>
-            </div>
+      {/* Composición real — colapsable: no es lo primordial del módulo (eso
+          es la tabla de presupuesto abajo), es un complemento. Bruto, no
+          neteado: cada rubro responde una pregunta distinta de la que
+          responde el "Ahorro" de Resumen (cuánto quedó sin gastar). Gasto =
+          consumo normal (expense_group != objetivos_financieros). Ahorro =
+          depósitos a sobres (Vacaciones, Marchamo, Emma, Mariam…), sin
+          restar retiros posteriores. Inversión = aportes directos a fondos/
+          pensión (SAVINGS_INVESTMENT/PENSION) — un dato disjunto del de
+          Ahorro: ninguno de esos sobres carga un category_code de
+          inversión, y estos aportes nunca pasan por un sobre (verificado
+          contra los datos reales, no asumido).
 
-            {/* Ingreso — la base de 100% contra la que leen los % de abajo */}
-            <div className="flex items-baseline justify-between mb-1">
-              <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Ingreso real</span>
-              <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{fmt(incomeActual)}</span>
-            </div>
-
-            <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
-              {visible.map(r => (
-                <div key={r.key} style={{ flex: r.amount, background: r.color }}
-                  title={`${r.label}: ${fmt(r.amount)}`} />
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              {rows.map(r => {
-                const pct = incomeActual > 0 ? (r.amount / incomeActual) * 100 : 0
-                return (
-                  <div key={r.key}
-                    title={`${r.label}: ${fmt(r.amount)} (${pct.toFixed(0)}% del ingreso real)${r.avg > 0 ? ` · avg 3m: ${fmt(r.avg)}` : ''}`}>
-                    <p className="flex items-center justify-center gap-1.5 text-[9px] text-zinc-500 mb-0.5">
-                      <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: r.color }} />
-                      {r.label}
+          "Balance del plan" arriba (presupuestado vs. presupuestado) y el
+          "Margen" de acá abajo (real vs. real) pueden decir cosas opuestas
+          — sobrante planeado pero déficit real, por ejemplo, cuando hay
+          gasto real que no estaba presupuestado — sin que sea una
+          contradicción: cada uno compara un par distinto. Por eso los
+          nombres ahora son explícitos ("del plan" / "real") en vez de un
+          "sobrante"/"déficit" genérico que leía como si se contradijeran. */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+        <button onClick={() => setShowComposicion(v => !v)}
+          className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
+          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">
+            Composición real {marginThisMonth < 0 && incomeActual > 0 && <span className="text-rose-400 ml-1">· déficit este mes</span>}
+          </span>
+          <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showComposicion ? 'rotate-180' : ''}`} />
+        </button>
+        {showComposicion && (
+          <div className="px-3 pb-3 space-y-3">
+            {(() => {
+              const breakdowns = { gasto: gastoBreakdownThisMonth, ahorro: ahorroBreakdownThisMonth, inversion: inversionBreakdownThisMonth }
+              const rows: { key: 'gasto' | 'ahorro' | 'inversion'; label: string; color: string; amount: number; avg: number }[] = [
+                { key: 'gasto',     label: 'Gasto',     color: '#a1a1aa', amount: gastoRealThisMonth,     avg: gastoRealHistAvg },
+                { key: 'ahorro',    label: 'Ahorro',     color: '#199e70', amount: ahorroGrossThisMonth,   avg: ahorroGrossHistAvg },
+                { key: 'inversion', label: 'Inversión',  color: '#9085e9', amount: inversionRealThisMonth, avg: inversionRealHistAvg },
+              ]
+              const visible = rows.filter(r => r.amount > 0)
+              if (visible.length === 0 && incomeActual === 0) return null
+              const totalOut = gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth
+              const outPct   = incomeActual > 0 ? (totalOut / incomeActual) * 100 : 0
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[9px] text-zinc-600">este mes, bruto</p>
+                    <p className="text-[9px] text-zinc-600 tabular-nums">
+                      {incomeActual > 0 ? `${outPct.toFixed(0)}% del ingreso` : ''}
                     </p>
-                    <p className="text-sm font-black tabular-nums" style={{ color: r.color }}>{fmt(r.amount)}</p>
-                    <p className="text-[9px] text-zinc-600 mt-0.5 tabular-nums">
-                      {incomeActual > 0 ? `${pct.toFixed(0)}% del ingreso` : '—'}
-                    </p>
-                    {r.avg > 0 && <p className="text-[9px] text-zinc-700 tabular-nums">avg 3m: {fmt(r.avg)}</p>}
                   </div>
-                )
-              })}
-            </div>
 
-            {/* Margen — responde directamente "¿el egreso fue más que el
-                ingreso?" en vez de dejar tres porcentajes que no suman 100
-                visiblemente. Mismo lenguaje que el funnel de Resumen. */}
-            {incomeActual > 0 && marginThisMonth !== 0 && (
-              <p className={`text-[9px] mt-3 pt-2 border-t border-white/[0.06] ${marginThisMonth > 0 ? 'text-zinc-500' : 'text-rose-400'}`}>
-                {marginThisMonth > 0
-                  ? `${fmt(marginThisMonth)} no se movió de la cuenta (margen neto)`
-                  : `${fmt(Math.abs(marginThisMonth))} de déficit — el egreso fue mayor que el ingreso este mes, cubierto de ahorros/crédito previos`}
-              </p>
-            )}
+                  {/* Ingreso — la base de 100% contra la que leen los % de abajo */}
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Ingreso real</span>
+                    <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{fmt(incomeActual)}</span>
+                  </div>
+
+                  <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
+                    {visible.map(r => (
+                      <div key={r.key} style={{ flex: r.amount, background: r.color }}
+                        title={`${r.label}: ${fmt(r.amount)}`} />
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    {rows.map(r => {
+                      const pct = incomeActual > 0 ? (r.amount / incomeActual) * 100 : 0
+                      const hasBreakdown = breakdowns[r.key].length > 0
+                      const active = expandedCompRow === r.key
+                      return (
+                        <button key={r.key} disabled={!hasBreakdown}
+                          onClick={() => setExpandedCompRow(active ? null : r.key)}
+                          title={`${r.label}: ${fmt(r.amount)} (${pct.toFixed(0)}% del ingreso real)${r.avg > 0 ? ` · avg 3m: ${fmt(r.avg)}` : ''}`}
+                          className={`rounded-lg p-1 transition-colors ${hasBreakdown ? 'hover:bg-white/[0.04] cursor-pointer' : 'cursor-default'} ${active ? 'bg-white/[0.06]' : ''}`}>
+                          <p className="flex items-center justify-center gap-1.5 text-[9px] text-zinc-500 mb-0.5">
+                            <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: r.color }} />
+                            {r.label}{hasBreakdown ? ' ›' : ''}
+                          </p>
+                          <p className="text-sm font-black tabular-nums" style={{ color: r.color }}>{fmt(r.amount)}</p>
+                          <p className="text-[9px] text-zinc-600 mt-0.5 tabular-nums">
+                            {incomeActual > 0 ? `${pct.toFixed(0)}% del ingreso` : '—'}
+                          </p>
+                          {r.avg > 0 && <p className="text-[9px] text-zinc-700 tabular-nums">avg 3m: {fmt(r.avg)}</p>}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Segundo nivel — de qué está hecho el rubro seleccionado */}
+                  {expandedCompRow && breakdowns[expandedCompRow].length > 0 && (() => {
+                    const row = rows.find(r => r.key === expandedCompRow)!
+                    const entries = breakdowns[expandedCompRow]
+                    return (
+                      <div className="mt-3 pt-2 border-t border-white/[0.06] space-y-1.5">
+                        <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: row.color }}>
+                          De qué está hecho: {row.label}
+                        </p>
+                        {entries.map(e => {
+                          const pct = row.amount > 0 ? (e.amount / row.amount) * 100 : 0
+                          return (
+                            <div key={e.name}>
+                              <div className="flex items-center justify-between gap-2 mb-0.5">
+                                <span className="text-[10px] text-zinc-400 truncate">{e.name}</span>
+                                <span className="text-[10px] tabular-nums shrink-0">
+                                  <span className="text-zinc-300 font-semibold">{fmt(e.amount)}</span>
+                                  <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>
+                                </span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-black/25 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: row.color }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+
+                  {/* Margen — responde directamente "¿el egreso fue más que el
+                      ingreso?" en vez de dejar tres porcentajes que no suman 100
+                      visiblemente. Mismo lenguaje que el funnel de Resumen. */}
+                  {incomeActual > 0 && marginThisMonth !== 0 && (
+                    <p className={`text-[9px] mt-3 pt-2 border-t border-white/[0.06] ${marginThisMonth > 0 ? 'text-zinc-500' : 'text-rose-400'}`}>
+                      {marginThisMonth > 0
+                        ? `${fmt(marginThisMonth)} no se movió de la cuenta (margen real)`
+                        : `${fmt(Math.abs(marginThisMonth))} de déficit real — el egreso fue mayor que el ingreso este mes, cubierto de ahorros/crédito previos`}
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Tendencia histórica — mismo Gasto/Ahorro/Inversión, 12 meses,
+                para seguir la tendencia en vez de un snapshot de un solo mes. */}
+            <CompositionTrendChart data={trendData} />
           </div>
-        )
-      })()}
-
-      {/* Tendencia histórica — mismo Gasto/Ahorro/Inversión, 12 meses, para
-          seguir la tendencia en vez de un snapshot de un solo mes. */}
-      <CompositionTrendChart data={trendData} />
+        )}
+      </div>
 
       {/* Transfer summary */}
       <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} year={year} month={month} />

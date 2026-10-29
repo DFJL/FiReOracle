@@ -328,6 +328,38 @@ export default async function PresupuestoPage({
     .filter(tx => tx.expense_group === 'objetivos_financieros' && isInversionCategoryCode(tx.category_code))
     .reduce((s, tx) => s + toCRC(tx), 0)
 
+  // Segundo nivel — de qué está hecho cada rubro, this month only.
+  function toBreakdown(map: Record<string, number>) {
+    return Object.entries(map)
+      .map(([name, amount]) => ({ name, amount }))
+      .filter(r => r.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+  }
+  const gastoBreakdownMap: Record<string, number> = {}
+  for (const tx of txRows ?? []) {
+    if (tx.expense_group === 'objetivos_financieros') continue
+    const label = getGroupLabel(tx.category_code ?? 'MISC_EXPENSE')
+    gastoBreakdownMap[label] = (gastoBreakdownMap[label] ?? 0) + toCRC(tx)
+  }
+  const gastoBreakdownThisMonth = toBreakdown(gastoBreakdownMap)
+
+  const envelopeNameMap = new Map((envelopeRows ?? []).map(e => [e.id, e.name]))
+  const ahorroBreakdownMap: Record<string, number> = {}
+  for (const m of envelopeDepositRows ?? []) {
+    if (!m.date || !isRealDeposit(m) || m.date.slice(0, 7) !== thisMonthKey) continue
+    const label = envelopeNameMap.get(m.envelope_id) ?? 'Sobre'
+    ahorroBreakdownMap[label] = (ahorroBreakdownMap[label] ?? 0) + Number(m.amount)
+  }
+  const ahorroBreakdownThisMonth = toBreakdown(ahorroBreakdownMap)
+
+  const inversionBreakdownMap: Record<string, number> = {}
+  for (const tx of txRows ?? []) {
+    if (tx.expense_group !== 'objetivos_financieros' || !isInversionCategoryCode(tx.category_code)) continue
+    const label = displayCategory(tx.category_code ?? '')
+    inversionBreakdownMap[label] = (inversionBreakdownMap[label] ?? 0) + toCRC(tx)
+  }
+  const inversionBreakdownThisMonth = toBreakdown(inversionBreakdownMap)
+
   // Full 12-month spread (not just the 3-month prevMonths window — histRows
   // itself now covers the whole trend range) for Gasto/Inversión, same as
   // ahorroByMonth above.
@@ -448,6 +480,9 @@ export default async function PresupuestoPage({
         inversionRealHistAvg={inversionRealHistAvg}
         marginThisMonth={marginThisMonth}
         trendData={trendData}
+        gastoBreakdownThisMonth={gastoBreakdownThisMonth}
+        ahorroBreakdownThisMonth={ahorroBreakdownThisMonth}
+        inversionBreakdownThisMonth={inversionBreakdownThisMonth}
       />
       <AguinaldoSection
         year={aguinaldoYear}
