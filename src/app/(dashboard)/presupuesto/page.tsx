@@ -5,6 +5,7 @@ import { PresupuestoClient } from './PresupuestoClient'
 import type { Envelope, TxCategory, FinancialAccount } from './PresupuestoClient'
 import { AguinaldoSection } from './AguinaldoSection'
 import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
+import { isInversionCategoryCode } from '@/lib/incomeAllocation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 export default async function PresupuestoPage({
@@ -279,13 +280,47 @@ export default async function PresupuestoPage({
     ahorroByMonth[ym] = (ahorroByMonth[ym] ?? 0) + Number(m.amount)
   }
   const thisMonthKey = `${year}-${String(month).padStart(2, '0')}`
+  function histAvg(byMonth: Record<string, number>) {
+    const vals = prevMonths
+      .map(([py, pm]) => byMonth[`${py}-${String(pm).padStart(2, '0')}`])
+      .filter((v): v is number => v !== undefined)
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+  }
   const ahorroGrossThisMonth = ahorroByMonth[thisMonthKey] ?? 0
-  const ahorroHistVals = prevMonths
-    .map(([py, pm]) => ahorroByMonth[`${py}-${String(pm).padStart(2, '0')}`])
-    .filter((v): v is number => v !== undefined)
-  const ahorroGrossHistAvg = ahorroHistVals.length
-    ? ahorroHistVals.reduce((a, b) => a + b, 0) / ahorroHistVals.length
-    : 0
+  const ahorroGrossHistAvg   = histAvg(ahorroByMonth)
+
+  // Gasto real (bruto) — lifestyle spending, same objetivos_financieros
+  // exclusion actualQ1/actualQ2 already use (those can't be summed directly
+  // for a clean total — each tx is double-keyed by both group AND category
+  // code to match budget rows either way).
+  const gastoRealThisMonth = (txRows ?? [])
+    .filter(tx => tx.expense_group !== 'objetivos_financieros')
+    .reduce((s, tx) => s + toCRC(tx), 0)
+
+  // Inversión real (bruto) — objetivos_financieros rows whose category is an
+  // investment code (SAVINGS_INVESTMENT/SAVINGS_PENSION — direct fund/
+  // pension contributions). Disjoint from Ahorro real above: those sobres
+  // (Vacaciones, Marchamo, Emma…) never carry an investment category_code,
+  // and these fund/pension transactions never touch an envelope — verified
+  // against this account's actual data, not assumed.
+  const inversionRealThisMonth = (txRows ?? [])
+    .filter(tx => tx.expense_group === 'objetivos_financieros' && isInversionCategoryCode(tx.category_code))
+    .reduce((s, tx) => s + toCRC(tx), 0)
+
+  const gastoByMonth: Record<string, number> = {}
+  const inversionByMonth: Record<string, number> = {}
+  for (const tx of histRows ?? []) {
+    if (!prevMonths.some(([py, pm]) => py === tx.year && pm === tx.month)) continue
+    const ym = `${tx.year}-${String(tx.month).padStart(2, '0')}`
+    const crc = toCRC(tx)
+    if (tx.expense_group !== 'objetivos_financieros') {
+      gastoByMonth[ym] = (gastoByMonth[ym] ?? 0) + crc
+    } else if (isInversionCategoryCode(tx.category_code)) {
+      inversionByMonth[ym] = (inversionByMonth[ym] ?? 0) + crc
+    }
+  }
+  const gastoRealHistAvg     = histAvg(gastoByMonth)
+  const inversionRealHistAvg = histAvg(inversionByMonth)
 
   // Suggestions for combobox (from DB — no hardcoding)
   const suggSet = new Set<string>()
@@ -365,6 +400,10 @@ export default async function PresupuestoPage({
         accounts={(accountRows ?? []) as FinancialAccount[]}
         ahorroGrossThisMonth={ahorroGrossThisMonth}
         ahorroGrossHistAvg={ahorroGrossHistAvg}
+        gastoRealThisMonth={gastoRealThisMonth}
+        gastoRealHistAvg={gastoRealHistAvg}
+        inversionRealThisMonth={inversionRealThisMonth}
+        inversionRealHistAvg={inversionRealHistAvg}
       />
       <AguinaldoSection
         year={aguinaldoYear}

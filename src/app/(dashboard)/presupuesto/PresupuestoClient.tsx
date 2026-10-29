@@ -366,14 +366,21 @@ interface Props {
   txCategories: TxCategory[]
   accounts:     FinancialAccount[]
   // Raw deposits into counts_as_ahorro sobres — NOT netted against later
-  // withdrawals (unlike /resumen's "Ahorro" card). See the card's own note.
+  // withdrawals (unlike /resumen's "Ahorro" card). See the section's own note.
   ahorroGrossThisMonth: number
   ahorroGrossHistAvg:   number
+  // Lifestyle spending (expense_group !== objetivos_financieros).
+  gastoRealThisMonth: number
+  gastoRealHistAvg:   number
+  // Fund/pension contributions (objetivos_financieros, SAVINGS_INVESTMENT/
+  // SAVINGS_PENSION) — disjoint from Ahorro real, which is sobre deposits.
+  inversionRealThisMonth: number
+  inversionRealHistAvg:   number
 }
 
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
-  ahorroGrossThisMonth, ahorroGrossHistAvg,
+  ahorroGrossThisMonth, ahorroGrossHistAvg, gastoRealThisMonth, gastoRealHistAvg, inversionRealThisMonth, inversionRealHistAvg,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -1059,7 +1066,7 @@ export function PresupuestoClient({
       </div>
 
       {/* Income summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
           <p className="text-[10px] text-zinc-500 mb-0.5">Ing. esperado</p>
           <p className="text-sm font-black text-white">{fmt(incomeExpected || 0)}</p>
@@ -1085,15 +1092,59 @@ export function PresupuestoClient({
             </>
           ) : <p className="text-sm font-black text-zinc-600">—</p>}
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5"
-          title="Depósitos a sobres de ahorro este mes, sin restar lo que después se retire y gaste (vacaciones, marchamo, Emma, Mariam). El 'Ahorro' de Resumen sí resta eso, porque responde una pregunta distinta: cuánto quedó efectivamente sin gastar.">
-          <p className="text-[10px] text-zinc-500 mb-0.5">Ahorro real</p>
-          <p className="text-sm font-black text-[#199e70]">{fmt(ahorroGrossThisMonth)}</p>
-          <p className="text-[10px] text-zinc-600 mt-0.5 tabular-nums">
-            {ahorroGrossHistAvg > 0 ? `avg 3m: ${fmt(ahorroGrossHistAvg)}` : 'a sobres, bruto'}
-          </p>
-        </div>
       </div>
+
+      {/* Composición real del mes — bruto, no neteado: cada rubro responde una
+          pregunta distinta de la que responde el "Ahorro" de Resumen (cuánto
+          quedó sin gastar). Gasto = consumo normal (expense_group !=
+          objetivos_financieros). Ahorro = depósitos a sobres (Vacaciones,
+          Marchamo, Emma, Mariam…), sin restar retiros posteriores. Inversión
+          = aportes directos a fondos/pensión (SAVINGS_INVESTMENT/PENSION) —
+          un dato disjunto del de Ahorro: ninguno de esos sobres carga un
+          category_code de inversión, y estos aportes nunca pasan por un
+          sobre (verificado contra los datos reales, no asumido). */}
+      {(() => {
+        const rows = [
+          { key: 'gasto',     label: 'Gasto',     color: '#a1a1aa', amount: gastoRealThisMonth,     avg: gastoRealHistAvg },
+          { key: 'ahorro',    label: 'Ahorro',     color: '#199e70', amount: ahorroGrossThisMonth,   avg: ahorroGrossHistAvg },
+          { key: 'inversion', label: 'Inversión',  color: '#9085e9', amount: inversionRealThisMonth, avg: inversionRealHistAvg },
+        ]
+        const visible = rows.filter(r => r.amount > 0)
+        if (visible.length === 0) return null
+        return (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Composición real del mes</p>
+              <p className="text-[9px] text-zinc-600">bruto, sin netear</p>
+            </div>
+            <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
+              {visible.map(r => (
+                <div key={r.key} style={{ flex: r.amount, background: r.color }}
+                  title={`${r.label}: ${fmt(r.amount)}`} />
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {rows.map(r => {
+                const pct = incomeActual > 0 ? (r.amount / incomeActual) * 100 : 0
+                return (
+                  <div key={r.key}
+                    title={`${r.label}: ${fmt(r.amount)} (${pct.toFixed(0)}% del ingreso real)${r.avg > 0 ? ` · avg 3m: ${fmt(r.avg)}` : ''}`}>
+                    <p className="flex items-center justify-center gap-1.5 text-[9px] text-zinc-500 mb-0.5">
+                      <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: r.color }} />
+                      {r.label}
+                    </p>
+                    <p className="text-sm font-black tabular-nums" style={{ color: r.color }}>{fmt(r.amount)}</p>
+                    <p className="text-[9px] text-zinc-600 mt-0.5 tabular-nums">
+                      {incomeActual > 0 ? `${pct.toFixed(0)}% del ingreso` : '—'}
+                    </p>
+                    {r.avg > 0 && <p className="text-[9px] text-zinc-700 tabular-nums">avg 3m: {fmt(r.avg)}</p>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Transfer summary */}
       <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} year={year} month={month} />
