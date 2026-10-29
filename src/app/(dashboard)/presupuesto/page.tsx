@@ -32,8 +32,20 @@ export default async function PresupuestoPage({
     const d = new Date(year, month - 1 - i, 1)
     prevMonths.push([d.getFullYear(), d.getMonth() + 1])
   }
-  const prevYears  = [...new Set(prevMonths.map(([y]) => y))]
-  const prevMonthN = prevMonths.map(([, mn]) => mn)
+  // Last 12 months INCLUDING the viewed month — for the Gasto/Ahorro/
+  // Inversión/Ingreso trend chart (oldest first). A superset of prevMonths
+  // above, so the same histRows/envelope-deposit fetches below can serve
+  // both this and the existing 3-month budget average without a second
+  // round-trip.
+  const TREND_MONTHS_COUNT = 12
+  const trendMonths: [number, number][] = []
+  for (let i = TREND_MONTHS_COUNT - 1; i >= 0; i--) {
+    const d = new Date(year, (month - 1) - i, 1)
+    trendMonths.push([d.getFullYear(), d.getMonth() + 1])
+  }
+  const trendYears     = [...new Set(trendMonths.map(([y]) => y))]
+  const trendMonthN    = [...new Set(trendMonths.map(([, mn]) => mn))]
+  const trendStartDate = `${trendMonths[0][0]}-${String(trendMonths[0][1]).padStart(2, '0')}-01`
 
   // Last day of the viewed month (for temporal budget filtering)
   const lastDayOfMonth = new Date(year, month, 0).toISOString().slice(0, 10)
@@ -79,23 +91,25 @@ export default async function PresupuestoPage({
       .eq('month', month)
       .not('amount', 'is', null),
 
-    // Last 3 months for historical avg
+    // Last 12 months (trendMonths ⊇ the 3-month prevMonths window) —
+    // serves both the 3-month budget average below and the 12-month trend.
     admin.from('transactions')
       .select('category_code, amount, currency_code, amount_usd, expense_group, year, month, day')
       .eq('user_id', user.id)
       .in('movement_type', ['expense', 'cash_withdrawal'])
-      .in('year', prevYears)
-      .in('month', prevMonthN)
+      .in('year', trendYears)
+      .in('month', trendMonthN)
       .not('amount', 'is', null),
 
-    // Actual income for the month
+    // Income over the same 12-month trend window — incomeActual below
+    // filters this down to just the viewed month.
     admin.from('transactions')
-      .select('amount, currency_code, amount_usd')
+      .select('amount, currency_code, amount_usd, year, month')
       .eq('user_id', user.id)
       .eq('movement_type', 'income')
       .eq('is_settlement', false)
-      .eq('year', year)
-      .eq('month', month)
+      .in('year', trendYears)
+      .in('month', trendMonthN)
       .not('amount', 'is', null),
 
     admin.from('transaction_categories')
@@ -172,7 +186,7 @@ export default async function PresupuestoPage({
       .select('amount, envelope_id, date, notes')
       .eq('user_id', user.id)
       .eq('movement_type', 'deposito')
-      .gte('date', `${prevMonths[2][0]}-${String(prevMonths[2][1]).padStart(2, '0')}-01`)
+      .gte('date', trendStartDate)
       .lte('date', lastDayOfMonth),
   ])
 
@@ -262,8 +276,15 @@ export default async function PresupuestoPage({
     else                history[group] = histQ2[group]
   }
 
-  // Actual income
-  const incomeActual = (incomeTxRows ?? []).reduce((s, tx) => s + toCRC(tx), 0)
+  // Actual income — incomeTxRows now spans the 12-month trend window, so
+  // filter down to just the viewed month here; incomeByMonth below keeps
+  // the full spread for the trend chart.
+  const incomeByMonth: Record<string, number> = {}
+  for (const tx of incomeTxRows ?? []) {
+    const ym = `${tx.year}-${String(tx.month).padStart(2, '0')}`
+    incomeByMonth[ym] = (incomeByMonth[ym] ?? 0) + toCRC(tx)
+  }
+  const incomeActual = incomeByMonth[`${year}-${String(month).padStart(2, '0')}`] ?? 0
 
   // Ahorro real (bruto) — same "balance-correction noise" exclusion
   // ahorroInversionFlow.ts uses for the real deposit/withdrawal rule.
@@ -307,10 +328,13 @@ export default async function PresupuestoPage({
     .filter(tx => tx.expense_group === 'objetivos_financieros' && isInversionCategoryCode(tx.category_code))
     .reduce((s, tx) => s + toCRC(tx), 0)
 
+  // Full 12-month spread (not just the 3-month prevMonths window — histRows
+  // itself now covers the whole trend range) for Gasto/Inversión, same as
+  // ahorroByMonth above.
   const gastoByMonth: Record<string, number> = {}
   const inversionByMonth: Record<string, number> = {}
   for (const tx of histRows ?? []) {
-    if (!prevMonths.some(([py, pm]) => py === tx.year && pm === tx.month)) continue
+    if (!trendMonths.some(([py, pm]) => py === tx.year && pm === tx.month)) continue
     const ym = `${tx.year}-${String(tx.month).padStart(2, '0')}`
     const crc = toCRC(tx)
     if (tx.expense_group !== 'objetivos_financieros') {
@@ -321,6 +345,24 @@ export default async function PresupuestoPage({
   }
   const gastoRealHistAvg     = histAvg(gastoByMonth)
   const inversionRealHistAvg = histAvg(inversionByMonth)
+
+  // Ingreso explicit + Margen (surplus/deficit) for the viewed month — Gasto
+  // + Ahorro + Inversión can legitimately exceed Ingreso for a single month
+  // (spending down savings/credit from before), so this is the number that
+  // actually answers "¿fue más que el ingreso?" instead of leaving three
+  // percentages that don't visibly sum to 100%.
+  const marginThisMonth = incomeActual - (gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth)
+
+  // 12-month trend — same four figures, one row per month, oldest first —
+  // so the composition above isn't just a single-month snapshot.
+  const trendData = trendMonths.map(([ty, tm]) => {
+    const ym = `${ty}-${String(tm).padStart(2, '0')}`
+    const income    = incomeByMonth[ym] ?? 0
+    const gasto     = gastoByMonth[ym] ?? 0
+    const ahorro    = ahorroByMonth[ym] ?? 0
+    const inversion = inversionByMonth[ym] ?? 0
+    return { month: ym, income, gasto, ahorro, inversion, margin: income - (gasto + ahorro + inversion) }
+  })
 
   // Suggestions for combobox (from DB — no hardcoding)
   const suggSet = new Set<string>()
@@ -404,6 +446,8 @@ export default async function PresupuestoPage({
         gastoRealHistAvg={gastoRealHistAvg}
         inversionRealThisMonth={inversionRealThisMonth}
         inversionRealHistAvg={inversionRealHistAvg}
+        marginThisMonth={marginThisMonth}
+        trendData={trendData}
       />
       <AguinaldoSection
         year={aguinaldoYear}

@@ -353,6 +353,105 @@ function TransferSummary({
   )
 }
 
+// ── Composición real, tendencia de 12 meses ─────────────────────────────────
+// Same four figures (Gasto/Ahorro/Inversión/Ingreso) as the single-month
+// card above, as stacked bars — one per month, % of that month's own
+// ingreso, with a reference line at 100% so a deficit month (egreso >
+// ingreso) is visibly a bar that crosses the line, not just a number.
+
+const TREND_COLORS = { gasto: '#a1a1aa', ahorro: '#199e70', inversion: '#9085e9' }
+
+function CompositionTrendChart({
+  data,
+}: {
+  data: { month: string; income: number; gasto: number; ahorro: number; inversion: number; margin: number }[]
+}) {
+  const points = data.map(d => {
+    const pct = (v: number) => d.income > 0 ? (v / d.income) * 100 : 0
+    return { ...d, gastoPct: pct(d.gasto), ahorroPct: pct(d.ahorro), inversionPct: pct(d.inversion) }
+  })
+  const withIncome = points.filter(p => p.income > 0)
+  if (withIncome.length === 0) return null
+
+  const maxStack = Math.max(...points.map(p => p.gastoPct + p.ahorroPct + p.inversionPct), 100)
+  const ceiling  = maxStack * 1.1
+
+  const W = 760, H = 160
+  const padL = 4, padR = 4, padT = 8, padB = 18
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+  const N = points.length
+  const barGap = 3
+  const barW = (chartW - barGap * (N - 1)) / N
+
+  const xOf  = (i: number) => padL + i * (barW + barGap)
+  const yOf  = (pct: number) => padT + chartH - (pct / ceiling) * chartH
+  const hOf  = (pct: number) => (pct / ceiling) * chartH
+
+  function monthLabel(ym: string) {
+    const [y, m] = ym.split('-')
+    return `${MONTH_LABELS[Number(m) - 1]} ${y.slice(2)}`
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Tendencia · 12 meses</p>
+        <div className="flex items-center gap-3 text-[9px] text-zinc-600">
+          {Object.entries(TREND_COLORS).map(([k, c]) => (
+            <span key={k} className="flex items-center gap-1 capitalize">
+              <span className="inline-block w-1.5 h-1.5 rounded-sm" style={{ background: c }} />{k}
+            </span>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: '150px' }}>
+        {/* Línea de 100% del ingreso — cruzarla es gastar más de lo que entró */}
+        <line x1={padL} x2={W - padR} y1={yOf(100)} y2={yOf(100)}
+          stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="3,2" />
+        <text x={W - padR} y={yOf(100) - 3} textAnchor="end" fontSize="8" fill="#52525b">100% ingreso</text>
+
+        {points.map((p, i) => {
+          if (p.income <= 0) {
+            return (
+              <text key={p.month} x={xOf(i) + barW / 2} y={yOf(0) - 2} textAnchor="middle" fontSize="7" fill="#3f3f46">
+                sin datos
+              </text>
+            )
+          }
+          const segs: { key: keyof typeof TREND_COLORS; amount: number; pct: number }[] = [
+            { key: 'gasto',     amount: p.gasto,     pct: p.gastoPct },
+            { key: 'ahorro',    amount: p.ahorro,    pct: p.ahorroPct },
+            { key: 'inversion', amount: p.inversion, pct: p.inversionPct },
+          ]
+          let yCursor = yOf(0)
+          return (
+            <g key={p.month}>
+              {segs.map(({ key, amount, pct }) => {
+                if (pct <= 0) return null
+                const h = hOf(pct)
+                yCursor -= h
+                return (
+                  <rect key={key} x={xOf(i)} y={yCursor} width={barW} height={h} fill={TREND_COLORS[key]}
+                    opacity={0.9}>
+                    <title>{`${monthLabel(p.month)} · ${key}: ${fmt(amount)} (${pct.toFixed(0)}%)`}</title>
+                  </rect>
+                )
+              })}
+            </g>
+          )
+        })}
+
+        {points.map((p, i) => (
+          <text key={p.month} x={xOf(i) + barW / 2} y={H - 4} textAnchor="middle" fontSize="8" fill="#52525b">
+            {monthLabel(p.month).split(' ')[0]}
+          </text>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
 interface Props {
   budgets:      Budget[]
   actualQ1:     Record<string, number>
@@ -376,11 +475,17 @@ interface Props {
   // SAVINGS_PENSION) — disjoint from Ahorro real, which is sobre deposits.
   inversionRealThisMonth: number
   inversionRealHistAvg:   number
+  // incomeActual − (gasto + ahorro + inversión) for the viewed month — can
+  // be negative (egresos > ingreso ese mes, financed from savings/credit).
+  marginThisMonth: number
+  // Same four figures, 12 months, oldest first.
+  trendData: { month: string; income: number; gasto: number; ahorro: number; inversion: number; margin: number }[]
 }
 
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
   ahorroGrossThisMonth, ahorroGrossHistAvg, gastoRealThisMonth, gastoRealHistAvg, inversionRealThisMonth, inversionRealHistAvg,
+  marginThisMonth, trendData,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -1110,13 +1215,24 @@ export function PresupuestoClient({
           { key: 'inversion', label: 'Inversión',  color: '#9085e9', amount: inversionRealThisMonth, avg: inversionRealHistAvg },
         ]
         const visible = rows.filter(r => r.amount > 0)
-        if (visible.length === 0) return null
+        if (visible.length === 0 && incomeActual === 0) return null
+        const totalOut = gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth
+        const outPct   = incomeActual > 0 ? (totalOut / incomeActual) * 100 : 0
         return (
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Composición real del mes</p>
-              <p className="text-[9px] text-zinc-600">bruto, sin netear</p>
+              <p className="text-[9px] text-zinc-600 tabular-nums">
+                {incomeActual > 0 ? `${outPct.toFixed(0)}% del ingreso` : 'bruto, sin netear'}
+              </p>
             </div>
+
+            {/* Ingreso — la base de 100% contra la que leen los % de abajo */}
+            <div className="flex items-baseline justify-between mb-1">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Ingreso real</span>
+              <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{fmt(incomeActual)}</span>
+            </div>
+
             <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
               {visible.map(r => (
                 <div key={r.key} style={{ flex: r.amount, background: r.color }}
@@ -1142,9 +1258,24 @@ export function PresupuestoClient({
                 )
               })}
             </div>
+
+            {/* Margen — responde directamente "¿el egreso fue más que el
+                ingreso?" en vez de dejar tres porcentajes que no suman 100
+                visiblemente. Mismo lenguaje que el funnel de Resumen. */}
+            {incomeActual > 0 && marginThisMonth !== 0 && (
+              <p className={`text-[9px] mt-3 pt-2 border-t border-white/[0.06] ${marginThisMonth > 0 ? 'text-zinc-500' : 'text-rose-400'}`}>
+                {marginThisMonth > 0
+                  ? `${fmt(marginThisMonth)} no se movió de la cuenta (margen neto)`
+                  : `${fmt(Math.abs(marginThisMonth))} de déficit — el egreso fue mayor que el ingreso este mes, cubierto de ahorros/crédito previos`}
+              </p>
+            )}
           </div>
         )
       })()}
+
+      {/* Tendencia histórica — mismo Gasto/Ahorro/Inversión, 12 meses, para
+          seguir la tendencia en vez de un snapshot de un solo mes. */}
+      <CompositionTrendChart data={trendData} />
 
       {/* Transfer summary */}
       <TransferSummary budgets={optimisticBudgets} envelopes={envelopes} year={year} month={month} />
