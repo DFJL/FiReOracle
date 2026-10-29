@@ -77,6 +77,12 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
 
   const products = summaries.map(s => s.name)
 
+  // summaries is already sorted best→worst (line above), but that order
+  // alone doesn't answer "¿cuál es el mejor/peor?" at a glance in a grid —
+  // pull them out explicitly for their own strip.
+  const bestPerformer  = summaries[0] ?? null
+  const worstPerformer = summaries.length > 1 ? summaries[summaries.length - 1] : null
+
   // Blended portfolio-level return — money-weighted by what's invested in
   // each instrument, not a plain average across instruments (a tiny position
   // with a huge % shouldn't move this as much as the bulk of the capital).
@@ -170,7 +176,7 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
         <div className="flex items-center gap-2 flex-wrap">
           {/* Range selector */}
           <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
-            {([{ l: '12m', v: 12 }, { l: '24m', v: 24 }, { l: 'Todo', v: 0 }]).map(r => (
+            {([{ l: '3m', v: 3 }, { l: '6m', v: 6 }, { l: '12m', v: 12 }, { l: '24m', v: 24 }, { l: 'Todo', v: 0 }]).map(r => (
               <button key={r.l} onClick={() => setRangeMonths(r.v)}
                 className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
                   rangeMonths === r.v ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
@@ -216,6 +222,57 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
           </div>
         </div>
       )}
+
+      {/* Mejor / Peor performer — summaries below is already sorted best→worst,
+          but that alone doesn't read as a ranking in a grid; call it out
+          explicitly so it's not something you have to go hunting for. */}
+      {bestPerformer && worstPerformer && (
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { tag: 'Mejor', s: bestPerformer, color: '#a3e635' },
+            { tag: 'Peor', s: worstPerformer, color: worstPerformer.ann < 0 ? '#fb7185' : '#a1a1aa' },
+          ].map(({ tag, s, color }) => (
+            <div key={tag} className="rounded-xl border p-3" style={{ borderColor: `${color}33`, background: `${color}0f` }}>
+              <p className="text-[9px] font-black uppercase tracking-[0.14em]" style={{ color }}>{tag} performer</p>
+              <p className="text-lg font-black leading-tight mt-0.5 truncate" title={s.name} style={{ color }}>
+                {s.name.replace('Fondos de Inversión ', '').replace('Rendimientos ', '')}
+              </p>
+              <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color }}>
+                {s.ann >= 0 ? '+' : ''}{s.ann.toFixed(2)}% <span className="text-zinc-500 font-normal">anualizado</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ranking — mejor a peor, barras horizontales. Más legible para
+          comparar instrumentos entre sí que el chart de líneas de abajo,
+          que responde una pregunta distinta (tendencia en el tiempo). */}
+      {summaries.length > 1 && (() => {
+        const maxAbs = Math.max(...summaries.map(s => Math.abs(s.ann)), 1)
+        return (
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-2">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ranking · {rangeLabel}</p>
+            {summaries.map(s => {
+              const shortName = s.name.replace('Fondos de Inversión ', '').replace('Rendimientos ', '')
+              const color = s.ann < 0 ? '#fb7185' : instrumentColor(s.name)
+              const widthPct = (Math.abs(s.ann) / maxAbs) * 100
+              return (
+                <div key={s.name} className="flex items-center gap-2"
+                  title={`${shortName}: ${s.ann >= 0 ? '+' : ''}${s.ann.toFixed(2)}% anualizado (${rangeLabel})`}>
+                  <span className="text-[9px] text-zinc-400 w-24 truncate shrink-0">{shortName}</span>
+                  <div className="flex-1 h-3 bg-black/20 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(widthPct, 2)}%`, background: color }} />
+                  </div>
+                  <span className="text-[10px] font-bold tabular-nums w-16 text-right shrink-0" style={{ color }}>
+                    {s.ann >= 0 ? '+' : ''}{s.ann.toFixed(1)}%
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
