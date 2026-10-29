@@ -5,7 +5,6 @@ import { PresupuestoClient } from './PresupuestoClient'
 import type { Envelope, TxCategory, FinancialAccount } from './PresupuestoClient'
 import { AguinaldoSection } from './AguinaldoSection'
 import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
-import { isInversionCategoryCode } from '@/lib/incomeAllocation'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 
 export default async function PresupuestoPage({
@@ -276,9 +275,9 @@ export default async function PresupuestoPage({
     else                history[group] = histQ2[group]
   }
 
-  // Actual income — incomeTxRows now spans the 12-month trend window, so
-  // filter down to just the viewed month here; incomeByMonth below keeps
-  // the full spread for the trend chart.
+  // Actual income — incomeTxRows spans a 12-month window (left wide from
+  // when the trend chart used to include it), filtered down to just the
+  // viewed month for incomeActual.
   const incomeByMonth: Record<string, number> = {}
   for (const tx of incomeTxRows ?? []) {
     const ym = `${tx.year}-${String(tx.month).padStart(2, '0')}`
@@ -286,8 +285,20 @@ export default async function PresupuestoPage({
   }
   const incomeActual = incomeByMonth[`${year}-${String(month).padStart(2, '0')}`] ?? 0
 
-  // Ahorro real (bruto) — same "balance-correction noise" exclusion
-  // ahorroInversionFlow.ts uses for the real deposit/withdrawal rule.
+  // Ahorro real (bruto) — the one figure here that's genuinely
+  // presupuesto-specific, not a duplicate of /resumen. Gasto and Inversión
+  // used to live here too (same transactional data /resumen's funnel
+  // already classifies via classifyFlowTx), recomputed with a cruder rule
+  // that didn't even agree with it — e.g. loan payments counted as "Gasto"
+  // here but correctly split into Cuotas/Deuda there. Removed rather than
+  // kept in sync forever: /resumen (período "Este mes") is the one place
+  // for gasto/inversión/margen now. Ahorro stays because /resumen only
+  // shows the NET figure (deposits − withdrawals), which washes a sobre
+  // you fund monthly and later spend down for its own purpose (vacaciones,
+  // marchamo, Emma, Mariam) toward zero over a wide window — this is the
+  // gross monthly habit that number hides. Same "balance-correction noise"
+  // exclusion ahorroInversionFlow.ts uses for the real deposit/withdrawal
+  // rule.
   const ahorroEnvelopeIds = new Set(
     (envelopeRows ?? []).filter(e => e.counts_as_ahorro === true).map(e => e.id)
   )
@@ -310,39 +321,13 @@ export default async function PresupuestoPage({
   const ahorroGrossThisMonth = ahorroByMonth[thisMonthKey] ?? 0
   const ahorroGrossHistAvg   = histAvg(ahorroByMonth)
 
-  // Gasto real (bruto) — lifestyle spending, same objetivos_financieros
-  // exclusion actualQ1/actualQ2 already use (those can't be summed directly
-  // for a clean total — each tx is double-keyed by both group AND category
-  // code to match budget rows either way).
-  const gastoRealThisMonth = (txRows ?? [])
-    .filter(tx => tx.expense_group !== 'objetivos_financieros')
-    .reduce((s, tx) => s + toCRC(tx), 0)
-
-  // Inversión real (bruto) — objetivos_financieros rows whose category is an
-  // investment code (SAVINGS_INVESTMENT/SAVINGS_PENSION — direct fund/
-  // pension contributions). Disjoint from Ahorro real above: those sobres
-  // (Vacaciones, Marchamo, Emma…) never carry an investment category_code,
-  // and these fund/pension transactions never touch an envelope — verified
-  // against this account's actual data, not assumed.
-  const inversionRealThisMonth = (txRows ?? [])
-    .filter(tx => tx.expense_group === 'objetivos_financieros' && isInversionCategoryCode(tx.category_code))
-    .reduce((s, tx) => s + toCRC(tx), 0)
-
-  // Segundo nivel — de qué está hecho cada rubro, this month only.
+  // Segundo nivel — qué sobres componen el ahorro de este mes.
   function toBreakdown(map: Record<string, number>) {
     return Object.entries(map)
       .map(([name, amount]) => ({ name, amount }))
       .filter(r => r.amount > 0)
       .sort((a, b) => b.amount - a.amount)
   }
-  const gastoBreakdownMap: Record<string, number> = {}
-  for (const tx of txRows ?? []) {
-    if (tx.expense_group === 'objetivos_financieros') continue
-    const label = getGroupLabel(tx.category_code ?? 'MISC_EXPENSE')
-    gastoBreakdownMap[label] = (gastoBreakdownMap[label] ?? 0) + toCRC(tx)
-  }
-  const gastoBreakdownThisMonth = toBreakdown(gastoBreakdownMap)
-
   const envelopeNameMap = new Map((envelopeRows ?? []).map(e => [e.id, e.name]))
   const ahorroBreakdownMap: Record<string, number> = {}
   for (const m of envelopeDepositRows ?? []) {
@@ -352,48 +337,10 @@ export default async function PresupuestoPage({
   }
   const ahorroBreakdownThisMonth = toBreakdown(ahorroBreakdownMap)
 
-  const inversionBreakdownMap: Record<string, number> = {}
-  for (const tx of txRows ?? []) {
-    if (tx.expense_group !== 'objetivos_financieros' || !isInversionCategoryCode(tx.category_code)) continue
-    const label = displayCategory(tx.category_code ?? '')
-    inversionBreakdownMap[label] = (inversionBreakdownMap[label] ?? 0) + toCRC(tx)
-  }
-  const inversionBreakdownThisMonth = toBreakdown(inversionBreakdownMap)
-
-  // Full 12-month spread (not just the 3-month prevMonths window — histRows
-  // itself now covers the whole trend range) for Gasto/Inversión, same as
-  // ahorroByMonth above.
-  const gastoByMonth: Record<string, number> = {}
-  const inversionByMonth: Record<string, number> = {}
-  for (const tx of histRows ?? []) {
-    if (!trendMonths.some(([py, pm]) => py === tx.year && pm === tx.month)) continue
-    const ym = `${tx.year}-${String(tx.month).padStart(2, '0')}`
-    const crc = toCRC(tx)
-    if (tx.expense_group !== 'objetivos_financieros') {
-      gastoByMonth[ym] = (gastoByMonth[ym] ?? 0) + crc
-    } else if (isInversionCategoryCode(tx.category_code)) {
-      inversionByMonth[ym] = (inversionByMonth[ym] ?? 0) + crc
-    }
-  }
-  const gastoRealHistAvg     = histAvg(gastoByMonth)
-  const inversionRealHistAvg = histAvg(inversionByMonth)
-
-  // Ingreso explicit + Margen (surplus/deficit) for the viewed month — Gasto
-  // + Ahorro + Inversión can legitimately exceed Ingreso for a single month
-  // (spending down savings/credit from before), so this is the number that
-  // actually answers "¿fue más que el ingreso?" instead of leaving three
-  // percentages that don't visibly sum to 100%.
-  const marginThisMonth = incomeActual - (gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth)
-
-  // 12-month trend — same four figures, one row per month, oldest first —
-  // so the composition above isn't just a single-month snapshot.
+  // 12-month trend — ahorro bruto por mes, oldest first.
   const trendData = trendMonths.map(([ty, tm]) => {
     const ym = `${ty}-${String(tm).padStart(2, '0')}`
-    const income    = incomeByMonth[ym] ?? 0
-    const gasto     = gastoByMonth[ym] ?? 0
-    const ahorro    = ahorroByMonth[ym] ?? 0
-    const inversion = inversionByMonth[ym] ?? 0
-    return { month: ym, income, gasto, ahorro, inversion, margin: income - (gasto + ahorro + inversion) }
+    return { month: ym, ahorro: ahorroByMonth[ym] ?? 0 }
   })
 
   // Suggestions for combobox (from DB — no hardcoding)
@@ -474,15 +421,8 @@ export default async function PresupuestoPage({
         accounts={(accountRows ?? []) as FinancialAccount[]}
         ahorroGrossThisMonth={ahorroGrossThisMonth}
         ahorroGrossHistAvg={ahorroGrossHistAvg}
-        gastoRealThisMonth={gastoRealThisMonth}
-        gastoRealHistAvg={gastoRealHistAvg}
-        inversionRealThisMonth={inversionRealThisMonth}
-        inversionRealHistAvg={inversionRealHistAvg}
-        marginThisMonth={marginThisMonth}
         trendData={trendData}
-        gastoBreakdownThisMonth={gastoBreakdownThisMonth}
         ahorroBreakdownThisMonth={ahorroBreakdownThisMonth}
-        inversionBreakdownThisMonth={inversionBreakdownThisMonth}
       />
       <AguinaldoSection
         year={aguinaldoYear}

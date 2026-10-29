@@ -353,40 +353,33 @@ function TransferSummary({
   )
 }
 
-// ── Composición real, tendencia de 12 meses ─────────────────────────────────
-// Same four figures (Gasto/Ahorro/Inversión/Ingreso) as the single-month
-// card above, as stacked bars — one per month, % of that month's own
-// ingreso, with a reference line at 100% so a deficit month (egreso >
-// ingreso) is visibly a bar that crosses the line, not just a number.
+// ── Ahorro real, tendencia de 12 meses ──────────────────────────────────────
+// Just Ahorro — Gasto/Inversión/Margen used to live in this chart too, but
+// those are the same transactional data /resumen's funnel already shows
+// (classifyFlowTx), recomputed here with a cruder rule that didn't even
+// agree with it. Ahorro stays because it's the one figure genuinely unique
+// to this page: gross sobre deposits, not netted against withdrawals.
 
-const TREND_COLORS = { gasto: '#a1a1aa', ahorro: '#199e70', inversion: '#9085e9' }
-
-function CompositionTrendChart({
+function AhorroTrendChart({
   data,
 }: {
-  data: { month: string; income: number; gasto: number; ahorro: number; inversion: number; margin: number }[]
+  data: { month: string; ahorro: number }[]
 }) {
-  const points = data.map(d => {
-    const pct = (v: number) => d.income > 0 ? (v / d.income) * 100 : 0
-    return { ...d, gastoPct: pct(d.gasto), ahorroPct: pct(d.ahorro), inversionPct: pct(d.inversion) }
-  })
-  const withIncome = points.filter(p => p.income > 0)
-  if (withIncome.length === 0) return null
+  const withData = data.filter(p => p.ahorro > 0)
+  if (withData.length === 0) return null
 
-  const maxStack = Math.max(...points.map(p => p.gastoPct + p.ahorroPct + p.inversionPct), 100)
-  const ceiling  = maxStack * 1.1
+  const max = Math.max(...data.map(p => p.ahorro), 1) * 1.1
 
-  const W = 760, H = 160
+  const W = 760, H = 140
   const padL = 4, padR = 4, padT = 8, padB = 18
   const chartW = W - padL - padR
   const chartH = H - padT - padB
-  const N = points.length
+  const N = data.length
   const barGap = 3
   const barW = (chartW - barGap * (N - 1)) / N
 
-  const xOf  = (i: number) => padL + i * (barW + barGap)
-  const yOf  = (pct: number) => padT + chartH - (pct / ceiling) * chartH
-  const hOf  = (pct: number) => (pct / ceiling) * chartH
+  const xOf = (i: number) => padL + i * (barW + barGap)
+  const hOf = (v: number) => (v / max) * chartH
 
   function monthLabel(ym: string) {
     const [y, m] = ym.split('-')
@@ -395,54 +388,18 @@ function CompositionTrendChart({
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Tendencia · 12 meses</p>
-        <div className="flex items-center gap-3 text-[9px] text-zinc-600">
-          {Object.entries(TREND_COLORS).map(([k, c]) => (
-            <span key={k} className="flex items-center gap-1 capitalize">
-              <span className="inline-block w-1.5 h-1.5 rounded-sm" style={{ background: c }} />{k}
-            </span>
-          ))}
-        </div>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: '150px' }}>
-        {/* Línea de 100% del ingreso — cruzarla es gastar más de lo que entró */}
-        <line x1={padL} x2={W - padR} y1={yOf(100)} y2={yOf(100)}
-          stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="3,2" />
-        <text x={W - padR} y={yOf(100) - 3} textAnchor="end" fontSize="8" fill="#52525b">100% ingreso</text>
-
-        {points.map((p, i) => {
-          if (p.income <= 0) {
-            return (
-              <text key={p.month} x={xOf(i) + barW / 2} y={yOf(0) - 2} textAnchor="middle" fontSize="7" fill="#3f3f46">
-                sin datos
-              </text>
-            )
-          }
-          const segs: { key: keyof typeof TREND_COLORS; amount: number; pct: number }[] = [
-            { key: 'gasto',     amount: p.gasto,     pct: p.gastoPct },
-            { key: 'ahorro',    amount: p.ahorro,    pct: p.ahorroPct },
-            { key: 'inversion', amount: p.inversion, pct: p.inversionPct },
-          ]
-          let yCursor = yOf(0)
+      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Ahorro bruto · 12 meses</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: '130px' }}>
+        {data.map((p, i) => {
+          const h = hOf(p.ahorro)
           return (
-            <g key={p.month}>
-              {segs.map(({ key, amount, pct }) => {
-                if (pct <= 0) return null
-                const h = hOf(pct)
-                yCursor -= h
-                return (
-                  <rect key={key} x={xOf(i)} y={yCursor} width={barW} height={h} fill={TREND_COLORS[key]}
-                    opacity={0.9}>
-                    <title>{`${monthLabel(p.month)} · ${key}: ${fmt(amount)} (${pct.toFixed(0)}%)`}</title>
-                  </rect>
-                )
-              })}
-            </g>
+            <rect key={p.month} x={xOf(i)} y={padT + chartH - h} width={barW} height={h}
+              fill="#199e70" opacity={0.9} rx={1.5}>
+              <title>{`${monthLabel(p.month)}: ${fmt(p.ahorro)}`}</title>
+            </rect>
           )
         })}
-
-        {points.map((p, i) => (
+        {data.map((p, i) => (
           <text key={p.month} x={xOf(i) + barW / 2} y={H - 4} textAnchor="middle" fontSize="8" fill="#52525b">
             {monthLabel(p.month).split(' ')[0]}
           </text>
@@ -468,28 +425,15 @@ interface Props {
   // withdrawals (unlike /resumen's "Ahorro" card). See the section's own note.
   ahorroGrossThisMonth: number
   ahorroGrossHistAvg:   number
-  // Lifestyle spending (expense_group !== objetivos_financieros).
-  gastoRealThisMonth: number
-  gastoRealHistAvg:   number
-  // Fund/pension contributions (objetivos_financieros, SAVINGS_INVESTMENT/
-  // SAVINGS_PENSION) — disjoint from Ahorro real, which is sobre deposits.
-  inversionRealThisMonth: number
-  inversionRealHistAvg:   number
-  // incomeActual − (gasto + ahorro + inversión) for the viewed month — can
-  // be negative (egresos > ingreso ese mes, financed from savings/credit).
-  marginThisMonth: number
-  // Same four figures, 12 months, oldest first.
-  trendData: { month: string; income: number; gasto: number; ahorro: number; inversion: number; margin: number }[]
-  // Segundo nivel — de qué está hecho cada rubro, this month only.
-  gastoBreakdownThisMonth:     { name: string; amount: number }[]
-  ahorroBreakdownThisMonth:    { name: string; amount: number }[]
-  inversionBreakdownThisMonth: { name: string; amount: number }[]
+  // 12 months, oldest first.
+  trendData: { month: string; ahorro: number }[]
+  // Segundo nivel — qué sobres componen el ahorro de este mes.
+  ahorroBreakdownThisMonth: { name: string; amount: number }[]
 }
 
 export function PresupuestoClient({
   budgets, actualQ1, actualQ2, history, incomeActual, year, month, suggestions, envelopes, txCategories, accounts,
-  ahorroGrossThisMonth, ahorroGrossHistAvg, gastoRealThisMonth, gastoRealHistAvg, inversionRealThisMonth, inversionRealHistAvg,
-  marginThisMonth, trendData, gastoBreakdownThisMonth, ahorroBreakdownThisMonth, inversionBreakdownThisMonth,
+  ahorroGrossThisMonth, ahorroGrossHistAvg, trendData, ahorroBreakdownThisMonth,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -534,7 +478,6 @@ export function PresupuestoClient({
 
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
   const [showComposicion, setShowComposicion] = useState(false)
-  const [expandedCompRow, setExpandedCompRow] = useState<'gasto' | 'ahorro' | 'inversion' | null>(null)
   const [sortKey, setSortKey]             = useState<SortKey | null>(null)
   const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
   const [showNoLimit, setShowNoLimit]     = useState(false)
@@ -1205,138 +1148,66 @@ export function PresupuestoClient({
         </div>
       </div>
 
-      {/* Composición real — colapsable: no es lo primordial del módulo (eso
-          es la tabla de presupuesto abajo), es un complemento. Bruto, no
-          neteado: cada rubro responde una pregunta distinta de la que
-          responde el "Ahorro" de Resumen (cuánto quedó sin gastar). Gasto =
-          consumo normal (expense_group != objetivos_financieros). Ahorro =
-          depósitos a sobres (Vacaciones, Marchamo, Emma, Mariam…), sin
-          restar retiros posteriores. Inversión = aportes directos a fondos/
-          pensión (SAVINGS_INVESTMENT/PENSION) — un dato disjunto del de
-          Ahorro: ninguno de esos sobres carga un category_code de
-          inversión, y estos aportes nunca pasan por un sobre (verificado
-          contra los datos reales, no asumido).
-
-          "Balance del plan" arriba (presupuestado vs. presupuestado) y el
-          "Margen" de acá abajo (real vs. real) pueden decir cosas opuestas
-          — sobrante planeado pero déficit real, por ejemplo, cuando hay
-          gasto real que no estaba presupuestado — sin que sea una
-          contradicción: cada uno compara un par distinto. Por eso los
-          nombres ahora son explícitos ("del plan" / "real") en vez de un
-          "sobrante"/"déficit" genérico que leía como si se contradijeran. */}
+      {/* Ahorro real — colapsable: no es lo primordial del módulo (eso es la
+          tabla de presupuesto abajo), es un complemento. Bruto, depósitos a
+          sobres de ahorro (Vacaciones, Marchamo, Emma, Mariam…), sin restar
+          retiros posteriores — responde una pregunta distinta a la del
+          "Ahorro" de Resumen (cuánto quedó sin gastar). Gasto e Inversión
+          vivían acá también, pero eran la misma data transaccional que el
+          funnel de Resumen ya clasifica correctamente (classifyFlowTx) —
+          recalculada acá con una regla más cruda que ni siquiera coincidía
+          (préstamos contaban como "Gasto" acá, separados en Cuotas/Deuda
+          allá). Quitados: para gasto/inversión/margen del mes, /resumen
+          (período "Este mes") ya es la fuente única. */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
         <button onClick={() => setShowComposicion(v => !v)}
           className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.02] transition-colors">
-          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">
-            Composición real {marginThisMonth < 0 && incomeActual > 0 && <span className="text-rose-400 ml-1">· déficit este mes</span>}
-          </span>
-          <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showComposicion ? 'rotate-180' : ''}`} />
+          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">Ahorro real</span>
+          <div className="flex items-center gap-2">
+            {ahorroGrossThisMonth > 0 && (
+              <span className="text-[10px] font-bold text-[#199e70] tabular-nums">{fmt(ahorroGrossThisMonth)}</span>
+            )}
+            <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showComposicion ? 'rotate-180' : ''}`} />
+          </div>
         </button>
         {showComposicion && (
           <div className="px-3 pb-3 space-y-3">
-            {(() => {
-              const breakdowns = { gasto: gastoBreakdownThisMonth, ahorro: ahorroBreakdownThisMonth, inversion: inversionBreakdownThisMonth }
-              const rows: { key: 'gasto' | 'ahorro' | 'inversion'; label: string; color: string; amount: number; avg: number }[] = [
-                { key: 'gasto',     label: 'Gasto',     color: '#a1a1aa', amount: gastoRealThisMonth,     avg: gastoRealHistAvg },
-                { key: 'ahorro',    label: 'Ahorro',     color: '#199e70', amount: ahorroGrossThisMonth,   avg: ahorroGrossHistAvg },
-                { key: 'inversion', label: 'Inversión',  color: '#9085e9', amount: inversionRealThisMonth, avg: inversionRealHistAvg },
-              ]
-              const visible = rows.filter(r => r.amount > 0)
-              if (visible.length === 0 && incomeActual === 0) return null
-              const totalOut = gastoRealThisMonth + ahorroGrossThisMonth + inversionRealThisMonth
-              const outPct   = incomeActual > 0 ? (totalOut / incomeActual) * 100 : 0
-              return (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[9px] text-zinc-600">este mes, bruto</p>
-                    <p className="text-[9px] text-zinc-600 tabular-nums">
-                      {incomeActual > 0 ? `${outPct.toFixed(0)}% del ingreso` : ''}
-                    </p>
-                  </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] text-zinc-600">este mes, bruto — depósitos a sobres</span>
+                {ahorroGrossHistAvg > 0 && (
+                  <span className="text-[9px] text-zinc-600 tabular-nums">avg 3m: {fmt(ahorroGrossHistAvg)}</span>
+                )}
+              </div>
+              <p className="text-lg font-black tabular-nums text-[#199e70]">{fmt(ahorroGrossThisMonth)}</p>
 
-                  {/* Ingreso — la base de 100% contra la que leen los % de abajo */}
-                  <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Ingreso real</span>
-                    <span className="text-[10px] font-bold text-emerald-400 tabular-nums">{fmt(incomeActual)}</span>
-                  </div>
-
-                  <div className="flex rounded-full overflow-hidden h-1.5 mb-3 gap-[1px]">
-                    {visible.map(r => (
-                      <div key={r.key} style={{ flex: r.amount, background: r.color }}
-                        title={`${r.label}: ${fmt(r.amount)}`} />
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    {rows.map(r => {
-                      const pct = incomeActual > 0 ? (r.amount / incomeActual) * 100 : 0
-                      const hasBreakdown = breakdowns[r.key].length > 0
-                      const active = expandedCompRow === r.key
-                      return (
-                        <button key={r.key} disabled={!hasBreakdown}
-                          onClick={() => setExpandedCompRow(active ? null : r.key)}
-                          title={`${r.label}: ${fmt(r.amount)} (${pct.toFixed(0)}% del ingreso real)${r.avg > 0 ? ` · avg 3m: ${fmt(r.avg)}` : ''}`}
-                          className={`rounded-lg p-1 transition-colors ${hasBreakdown ? 'hover:bg-white/[0.04] cursor-pointer' : 'cursor-default'} ${active ? 'bg-white/[0.06]' : ''}`}>
-                          <p className="flex items-center justify-center gap-1.5 text-[9px] text-zinc-500 mb-0.5">
-                            <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: r.color }} />
-                            {r.label}{hasBreakdown ? ' ›' : ''}
-                          </p>
-                          <p className="text-sm font-black tabular-nums" style={{ color: r.color }}>{fmt(r.amount)}</p>
-                          <p className="text-[9px] text-zinc-600 mt-0.5 tabular-nums">
-                            {incomeActual > 0 ? `${pct.toFixed(0)}% del ingreso` : '—'}
-                          </p>
-                          {r.avg > 0 && <p className="text-[9px] text-zinc-700 tabular-nums">avg 3m: {fmt(r.avg)}</p>}
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {/* Segundo nivel — de qué está hecho el rubro seleccionado */}
-                  {expandedCompRow && breakdowns[expandedCompRow].length > 0 && (() => {
-                    const row = rows.find(r => r.key === expandedCompRow)!
-                    const entries = breakdowns[expandedCompRow]
+              {/* Segundo nivel — qué sobres lo componen */}
+              {ahorroBreakdownThisMonth.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-white/[0.06] space-y-1.5">
+                  {ahorroBreakdownThisMonth.map(e => {
+                    const pct = ahorroGrossThisMonth > 0 ? (e.amount / ahorroGrossThisMonth) * 100 : 0
                     return (
-                      <div className="mt-3 pt-2 border-t border-white/[0.06] space-y-1.5">
-                        <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: row.color }}>
-                          De qué está hecho: {row.label}
-                        </p>
-                        {entries.map(e => {
-                          const pct = row.amount > 0 ? (e.amount / row.amount) * 100 : 0
-                          return (
-                            <div key={e.name}>
-                              <div className="flex items-center justify-between gap-2 mb-0.5">
-                                <span className="text-[10px] text-zinc-400 truncate">{e.name}</span>
-                                <span className="text-[10px] tabular-nums shrink-0">
-                                  <span className="text-zinc-300 font-semibold">{fmt(e.amount)}</span>
-                                  <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>
-                                </span>
-                              </div>
-                              <div className="h-1.5 rounded-full bg-black/25 overflow-hidden">
-                                <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: row.color }} />
-                              </div>
-                            </div>
-                          )
-                        })}
+                      <div key={e.name}>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <span className="text-[10px] text-zinc-400 truncate">{e.name}</span>
+                          <span className="text-[10px] tabular-nums shrink-0">
+                            <span className="text-zinc-300 font-semibold">{fmt(e.amount)}</span>
+                            <span className="text-zinc-600"> · {pct.toFixed(0)}%</span>
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-black/25 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: '#199e70' }} />
+                        </div>
                       </div>
                     )
-                  })()}
-
-                  {/* Margen — responde directamente "¿el egreso fue más que el
-                      ingreso?" en vez de dejar tres porcentajes que no suman 100
-                      visiblemente. Mismo lenguaje que el funnel de Resumen. */}
-                  {incomeActual > 0 && marginThisMonth !== 0 && (
-                    <p className={`text-[9px] mt-3 pt-2 border-t border-white/[0.06] ${marginThisMonth > 0 ? 'text-zinc-500' : 'text-rose-400'}`}>
-                      {marginThisMonth > 0
-                        ? `${fmt(marginThisMonth)} no se movió de la cuenta (margen real)`
-                        : `${fmt(Math.abs(marginThisMonth))} de déficit real — el egreso fue mayor que el ingreso este mes, cubierto de ahorros/crédito previos`}
-                    </p>
-                  )}
+                  })}
                 </div>
-              )
-            })()}
+              )}
+            </div>
 
-            {/* Tendencia histórica — mismo Gasto/Ahorro/Inversión, 12 meses,
-                para seguir la tendencia en vez de un snapshot de un solo mes. */}
-            <CompositionTrendChart data={trendData} />
+            {/* Tendencia histórica — mismo Ahorro bruto, 12 meses, para
+                seguir la tendencia en vez de un snapshot de un solo mes. */}
+            <AhorroTrendChart data={trendData} />
           </div>
         )}
       </div>
