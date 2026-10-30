@@ -709,6 +709,22 @@ export default async function ProgresoPage() {
     if (entries.length > 0) liCatsByMonth[ym] = entries
   }
 
+  // Full per-category monthly series (every category with any activity in
+  // the window, not just each month's top 8) — powers the trend-selection/
+  // comparison view: pick a category from Top categorías or from a month's
+  // breakdown and see its whole 12m line, or compare a few side by side.
+  const liCatTrend: Record<string, { name: string; byYm: Record<string, number> }> = {}
+  for (const [code, monthlyAmts] of Object.entries(rootMonthly)) {
+    const byYm: Record<string, number> = {}
+    let hasActivity = false
+    for (const ym of curYMs) {
+      const amt = monthlyAmts[ym] ?? 0
+      byYm[ym] = amt
+      if (amt > 0) hasActivity = true
+    }
+    if (hasActivity) liCatTrend[code] = { name: catNameMap.get(code) ?? code, byYm }
+  }
+
   // Pass 3: monthly IQR on cleaned totals
   const liGlobalP95 = computeGlobalP95(cleanedLifestyleTxs)
   const liTopCats = Object.entries(rootMonthly)
@@ -1044,6 +1060,7 @@ export default async function ProgresoPage() {
           monthly:       liMonthly,
           topCats:       liTopCatsWithDrivers,
           catsByMonth:   liCatsByMonth,
+          catTrend:      liCatTrend,
         }}
       />
     </div>

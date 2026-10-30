@@ -21,6 +21,7 @@ type LifestyleData = {
   monthly: { ym: string; label: string; necesario: number; personal: number; income: number }[]
   topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
   catsByMonth: Record<string, { code: string; name: string; amount: number }[]>
+  catTrend: Record<string, { name: string; byYm: Record<string, number> }>
 }
 
 type SavingsRateMonth = {
@@ -2201,11 +2202,25 @@ function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
+// Cap at 3: the dataviz palette's CVD-safe categorical limit in dark mode.
+const TREND_COLORS = ['#22d3ee', '#a3e635', '#f59e0b']
+const TREND_CAT_LIMIT = TREND_COLORS.length
+
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
-  const { inflationRate, curTotal, prvTotal, monthly, topCats, catsByMonth } = data
+  const { inflationRate, curTotal, prvTotal, monthly, topCats, catsByMonth, catTrend } = data
   const [openCat, setOpenCat] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'crc' | 'pct'>('crc')
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
+  const [trendCats, setTrendCats] = useState<string[]>([])
+
+  function toggleTrendCat(code: string) {
+    setSelectedMonth(null)
+    setTrendCats(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code)
+      : prev.length >= TREND_CAT_LIMIT ? prev
+      : [...prev, code]
+    )
+  }
 
   const totalPct    = prvTotal > 0 ? (curTotal - prvTotal) / prvTotal : null
   const delta       = totalPct !== null ? totalPct - inflationRate : null
@@ -2222,6 +2237,14 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const maxBar = viewMode === 'pct'
     ? Math.max(...monthly.map(pctOf), 1)
     : Math.max(...monthly.map(m => m.necesario + m.personal), 1)
+
+  const trendSegVal = (v: number, income: number) =>
+    viewMode === 'pct' ? (income > 0 ? (v / income) * 100 : 0) : v
+  const trendMaxBar = trendCats.length > 0
+    ? Math.max(...monthly.flatMap(m =>
+        trendCats.map(code => trendSegVal(catTrend[code]?.byYm[m.ym] ?? 0, m.income))
+      ), 1)
+    : 1
 
   const selectedCats = selectedMonth ? catsByMonth[selectedMonth] ?? [] : []
   const selectedMonthLabel = monthly.find(m => m.ym === selectedMonth)?.label ?? null
@@ -2279,7 +2302,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
         <div>
           <div className="flex items-center justify-between mb-3">
             <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">
-              Tendencia mensual · clic para ver categorías de ese mes
+              {trendCats.length > 0 ? 'Tendencia por categoría' : 'Tendencia mensual · clic para ver categorías de ese mes'}
             </p>
             <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
               {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
@@ -2290,49 +2313,101 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
               ))}
             </div>
           </div>
-          <div className="flex items-end gap-1 h-20">
-            {monthly.map((m, i) => {
-              const total = m.necesario + m.personal
-              // Bar segment's value in the active unit (₡ or % del ingreso
-              // ese mes), then scaled to a 0-100 height against maxBar
-              // (which is itself in that same unit).
-              const segVal = (v: number) => viewMode === 'pct' ? (m.income > 0 ? (v / m.income) * 100 : 0) : v
-              const necH = (segVal(m.necesario) / maxBar) * 100
-              const perH = (segVal(m.personal)  / maxBar) * 100
-              const isSelected = selectedMonth === m.ym
-              const hasCats = (catsByMonth[m.ym] ?? []).length > 0
-              return (
-                <button key={i} disabled={!hasCats}
-                  onClick={() => setSelectedMonth(prev => prev === m.ym ? null : m.ym)}
-                  className={`flex-1 flex flex-col items-center group relative ${hasCats ? 'cursor-pointer' : 'cursor-default'}`}>
-                  <div className={`w-full flex flex-col justify-end rounded-t-sm transition-all ${isSelected ? 'ring-1 ring-white/40' : ''}`} style={{ height: '72px' }}>
-                    <div className="w-full rounded-t-sm" style={{ height: `${perH}%`, backgroundColor: '#a3e635', opacity: isSelected ? 0.95 : 0.55 }} />
-                    <div className="w-full"               style={{ height: `${necH}%`, backgroundColor: '#22d3ee', opacity: isSelected ? 0.95 : 0.55 }} />
-                  </div>
-                  <p className={`text-[7px] truncate w-full text-center leading-none mt-0.5 ${isSelected ? 'text-zinc-300 font-bold' : 'text-zinc-700'}`}>
-                    {m.label.split(' ')[0]}
-                  </p>
-                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
-                    <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
-                      <p className="text-zinc-300 font-bold">{m.label}</p>
-                      <p className="text-cyan-400">Nec: {fmtCRC(m.necesario)}</p>
-                      <p style={{ color: '#a3e635' }}>Per: {fmtCRC(m.personal)}</p>
-                      <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(total)}</p>
-                      {m.income > 0 && <p className="text-zinc-500">{pctOf(m).toFixed(0)}% del ingreso</p>}
+
+          {trendCats.length > 0 ? (
+            <>
+              <div className="flex items-end gap-1 h-20">
+                {monthly.map((m, i) => {
+                  const vals = trendCats.map(code => catTrend[code]?.byYm[m.ym] ?? 0)
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center group relative">
+                      <div className="w-full flex items-end justify-center gap-0.5" style={{ height: '72px' }}>
+                        {vals.map((v, ci) => {
+                          const h = (trendSegVal(v, m.income) / trendMaxBar) * 100
+                          return (
+                            <div key={ci} className="flex-1 rounded-t-sm transition-all"
+                              style={{ height: `${h}%`, backgroundColor: TREND_COLORS[ci], opacity: 0.8 }} />
+                          )
+                        })}
+                      </div>
+                      <p className="text-[7px] truncate w-full text-center leading-none mt-0.5 text-zinc-700">
+                        {m.label.split(' ')[0]}
+                      </p>
+                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+                        <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
+                          <p className="text-zinc-300 font-bold">{m.label}</p>
+                          {trendCats.map((code, ci) => (
+                            <p key={code} style={{ color: TREND_COLORS[ci] }}>
+                              {catTrend[code]?.name ?? code}: {fmtCRC(vals[ci])}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                {trendCats.map((code, ci) => (
+                  <span key={code} className="flex items-center gap-1.5 text-[9px] text-zinc-400">
+                    <span className="w-2 h-2 rounded-sm inline-block" style={{ backgroundColor: TREND_COLORS[ci] }} />
+                    {catTrend[code]?.name ?? code}
+                    <button onClick={() => toggleTrendCat(code)} className="text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
+                  </span>
+                ))}
+                <button onClick={() => setTrendCats([])}
+                  className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors ml-auto">
+                  ✕ ver general
                 </button>
-              )
-            })}
-          </div>
-          <div className="flex items-center gap-4 mt-2 text-[9px] text-zinc-600">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm inline-block bg-cyan-400/55" />Necesario
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm inline-block opacity-55" style={{ backgroundColor: '#a3e635' }} />Personal
-            </span>
-          </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-end gap-1 h-20">
+                {monthly.map((m, i) => {
+                  const total = m.necesario + m.personal
+                  // Bar segment's value in the active unit (₡ or % del ingreso
+                  // ese mes), then scaled to a 0-100 height against maxBar
+                  // (which is itself in that same unit).
+                  const segVal = (v: number) => viewMode === 'pct' ? (m.income > 0 ? (v / m.income) * 100 : 0) : v
+                  const necH = (segVal(m.necesario) / maxBar) * 100
+                  const perH = (segVal(m.personal)  / maxBar) * 100
+                  const isSelected = selectedMonth === m.ym
+                  const hasCats = (catsByMonth[m.ym] ?? []).length > 0
+                  return (
+                    <button key={i} disabled={!hasCats}
+                      onClick={() => setSelectedMonth(prev => prev === m.ym ? null : m.ym)}
+                      className={`flex-1 flex flex-col items-center group relative ${hasCats ? 'cursor-pointer' : 'cursor-default'}`}>
+                      <div className={`w-full flex flex-col justify-end rounded-t-sm transition-all ${isSelected ? 'ring-1 ring-white/40' : ''}`} style={{ height: '72px' }}>
+                        <div className="w-full rounded-t-sm" style={{ height: `${perH}%`, backgroundColor: '#a3e635', opacity: isSelected ? 0.95 : 0.55 }} />
+                        <div className="w-full"               style={{ height: `${necH}%`, backgroundColor: '#22d3ee', opacity: isSelected ? 0.95 : 0.55 }} />
+                      </div>
+                      <p className={`text-[7px] truncate w-full text-center leading-none mt-0.5 ${isSelected ? 'text-zinc-300 font-bold' : 'text-zinc-700'}`}>
+                        {m.label.split(' ')[0]}
+                      </p>
+                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+                        <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
+                          <p className="text-zinc-300 font-bold">{m.label}</p>
+                          <p className="text-cyan-400">Nec: {fmtCRC(m.necesario)}</p>
+                          <p style={{ color: '#a3e635' }}>Per: {fmtCRC(m.personal)}</p>
+                          <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(total)}</p>
+                          {m.income > 0 && <p className="text-zinc-500">{pctOf(m).toFixed(0)}% del ingreso</p>}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-4 mt-2 text-[9px] text-zinc-600">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-sm inline-block bg-cyan-400/55" />Necesario
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-sm inline-block opacity-55" style={{ backgroundColor: '#a3e635' }} />Personal
+                </span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -2354,8 +2429,18 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
               <div className="space-y-1.5">
                 {selectedCats.map(c => {
                   const pct = monthTotal > 0 ? (c.amount / monthTotal) * 100 : 0
+                  const trendIdx = trendCats.indexOf(c.code)
                   return (
                     <div key={c.code} className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleTrendCat(c.code)}
+                        title={trendIdx >= 0 ? 'Quitar de comparación' : 'Ver tendencia / comparar'}
+                        className="shrink-0 w-2.5 h-2.5 rounded-full border transition-colors"
+                        style={{
+                          borderColor: trendIdx >= 0 ? TREND_COLORS[trendIdx] : '#52525b',
+                          backgroundColor: trendIdx >= 0 ? TREND_COLORS[trendIdx] : 'transparent',
+                        }}
+                      />
                       <p className="text-[10px] text-zinc-400 w-28 truncate shrink-0">{c.name}</p>
                       <div className="flex-1 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
                         <div className="h-full rounded-full bg-cyan-400/60" style={{ width: `${(c.amount / maxAmt) * 100}%` }} />
@@ -2382,6 +2467,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
               const color  = yoy === null ? '#71717a' : yoy > inflationRate ? '#f43f5e' : yoy >= 0 ? '#f59e0b' : '#a3e635'
               const maxAvg = topCats[0].curAvg
               const isOpen = openCat === c.code
+              const trendIdx = trendCats.indexOf(c.code)
               return (
                 <div key={c.code}>
                   {/* Category row — clickable */}
@@ -2389,6 +2475,15 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                     className="flex items-center gap-2 cursor-pointer hover:bg-white/[0.03] rounded-lg px-1 -mx-1 py-1 transition-colors"
                     onClick={() => setOpenCat(prev => prev === c.code ? null : c.code)}
                   >
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleTrendCat(c.code) }}
+                      title={trendIdx >= 0 ? 'Quitar de comparación' : 'Ver tendencia / comparar'}
+                      className="shrink-0 w-2.5 h-2.5 rounded-full border transition-colors"
+                      style={{
+                        borderColor: trendIdx >= 0 ? TREND_COLORS[trendIdx] : '#52525b',
+                        backgroundColor: trendIdx >= 0 ? TREND_COLORS[trendIdx] : 'transparent',
+                      }}
+                    />
                     <span className="text-[9px] text-zinc-600 w-2.5 shrink-0 select-none" style={{
                       display: 'inline-block',
                       transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
