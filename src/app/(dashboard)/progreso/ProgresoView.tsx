@@ -2030,6 +2030,16 @@ const TREND_CAT_LIMIT = TREND_COLORS.length
 
 const TREND_PERIODS = [12, 24, 36, 60] as const
 
+// A 12m-sum-vs-12m-sum YoY% is correct but invisible month-to-month — one
+// noisy month can make the underlying trend unreadable in the raw bars/line.
+// Trailing average smooths that out for display only; it never touches the
+// headline % itself.
+function trailingAvg(values: number[], idx: number, window: number): number {
+  let sum = 0, n = 0
+  for (let k = Math.max(0, idx - window + 1); k <= idx; k++) { sum += values[k]; n++ }
+  return n > 0 ? sum / n : 0
+}
+
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const { inflationRate, curTotal, prvTotal, monthly, topCats, catsByMonth, catTrend } = data
   const [openCat, setOpenCat] = useState<string | null>(null)
@@ -2039,6 +2049,8 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const [trendPeriod, setTrendPeriod] = useState<typeof TREND_PERIODS[number]>(12)
   const [trendHoverIdx, setTrendHoverIdx] = useState<number | null>(null)
   const trendSvgRef = useRef<SVGSVGElement>(null)
+  const [smooth, setSmooth] = useState(false)
+  const SMOOTH_WINDOW = 3
 
   function toggleTrendCat(code: string) {
     setSelectedMonth(null)
@@ -2057,23 +2069,31 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const signalLabel = isBad ? 'Alerta' : isWarn ? 'Atención' : 'Óptimo'
   const hasOutliers = topCats.some(c => c.outlierCount > 0)
 
-  // % del ingreso ese mes — la pregunta "¿vivo bajo mis límites o estoy
-  // inflando el estilo de vida?" se responde con esto, no solo con ₡.
-  const pctOf = (m: LifestyleData['monthly'][number]) =>
-    m.income > 0 ? ((m.necesario + m.personal) / m.income) * 100 : 0
+  const necRaw = monthly.map(m => m.necesario)
+  const perRaw = monthly.map(m => m.personal)
+  const necVals = smooth ? necRaw.map((_, i) => trailingAvg(necRaw, i, SMOOTH_WINDOW)) : necRaw
+  const perVals = smooth ? perRaw.map((_, i) => trailingAvg(perRaw, i, SMOOTH_WINDOW)) : perRaw
+
   const maxBar = viewMode === 'pct'
-    ? Math.max(...monthly.map(pctOf), 1)
-    : Math.max(...monthly.map(m => m.necesario + m.personal), 1)
+    ? Math.max(...monthly.map((m, i) => m.income > 0 ? ((necVals[i] + perVals[i]) / m.income) * 100 : 0), 1)
+    : Math.max(...necVals.map((v, i) => v + perVals[i]), 1)
 
   // Comparison line chart — its own month axis (up to 5 years, independent
   // of the fixed 12m window above) so the period selector can zoom out.
   // No %-del-ingreso here: income is only known for the last 12m, and
   // comparing arbitrary categories against it isn't the point of this view.
   const trendVisibleMonths = catTrend.months.slice(-trendPeriod)
+  // Smoothed over the FULL history, then sliced to the visible period, so
+  // the trailing average has real lookback even at the start of a short
+  // window instead of just the 1-2 points inside it.
+  const trendValsByCode: Record<string, number[]> = {}
+  for (const code of trendCats) {
+    const fullRaw = catTrend.months.map(m => catTrend.series[code]?.byYm[m.ym] ?? 0)
+    const fullVals = smooth ? fullRaw.map((_, i) => trailingAvg(fullRaw, i, SMOOTH_WINDOW)) : fullRaw
+    trendValsByCode[code] = fullVals.slice(-trendPeriod)
+  }
   const trendMaxVal = trendCats.length > 0
-    ? Math.max(...trendVisibleMonths.flatMap(m =>
-        trendCats.map(code => catTrend.series[code]?.byYm[m.ym] ?? 0)
-      ), 1)
+    ? Math.max(...trendCats.flatMap(code => trendValsByCode[code]), 1)
     : 1
 
   const selectedCats = selectedMonth ? catsByMonth[selectedMonth] ?? [] : []
@@ -2134,25 +2154,34 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
             <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">
               {trendCats.length > 0 ? 'Tendencia por categoría' : 'Tendencia mensual · clic para ver categorías de ese mes'}
             </p>
-            {trendCats.length > 0 ? (
-              <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
-                {TREND_PERIODS.map(p => (
-                  <button key={p} onClick={() => setTrendPeriod(p)}
-                    className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
-                      trendPeriod === p ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                    }`}>{p < 60 ? `${p}m` : '5a'}</button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
-                {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
-                  <button key={o.k} onClick={() => setViewMode(o.k)}
-                    className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
-                      viewMode === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                    }`}>{o.l}</button>
-                ))}
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setSmooth(v => !v)}
+                title={`Promedio móvil de ${SMOOTH_WINDOW} meses, para ver la tendencia sin el ruido mes a mes`}
+                className={`px-2 py-0.5 rounded-lg text-[9px] font-black transition-all border ${
+                  smooth ? 'bg-[#a3e635]/15 text-[#a3e635] border-[#a3e635]/30' : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300 border-white/[0.06]'
+                }`}>
+                〜 Suavizar
+              </button>
+              {trendCats.length > 0 ? (
+                <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+                  {TREND_PERIODS.map(p => (
+                    <button key={p} onClick={() => setTrendPeriod(p)}
+                      className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
+                        trendPeriod === p ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                      }`}>{p < 60 ? `${p}m` : '5a'}</button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+                  {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
+                    <button key={o.k} onClick={() => setViewMode(o.k)}
+                      className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
+                        viewMode === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                      }`}>{o.l}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {trendCats.length > 0 ? (() => {
@@ -2185,10 +2214,10 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                       left: `${Math.min(Math.max((xOf(trendHoverIdx) / W) * 100, 12), 88)}%`, top: 0, transform: 'translateX(-50%)',
                     }}>
                       <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
-                        <p className="text-zinc-300 font-bold">{trendVisibleMonths[trendHoverIdx].label}</p>
+                        <p className="text-zinc-300 font-bold">{trendVisibleMonths[trendHoverIdx].label}{smooth ? ` · prom. ${SMOOTH_WINDOW}m` : ''}</p>
                         {trendCats.map((code, ci) => (
                           <p key={code} style={{ color: TREND_COLORS[ci] }}>
-                            {catTrend.series[code]?.name ?? code}: {fmtCRC(catTrend.series[code]?.byYm[trendVisibleMonths[trendHoverIdx].ym] ?? 0)}
+                            {catTrend.series[code]?.name ?? code}: {fmtCRC(trendValsByCode[code][trendHoverIdx])}
                           </p>
                         ))}
                       </div>
@@ -2201,8 +2230,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                         stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
                     ))}
                     {trendCats.map((code, ci) => {
-                      const series = trendVisibleMonths.map(m => catTrend.series[code]?.byYm[m.ym] ?? 0)
-                      const points = series.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')
+                      const points = trendValsByCode[code].map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')
                       return <polyline key={code} points={points} fill="none" stroke={TREND_COLORS[ci]} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
                     })}
                     {trendHoverIdx !== null && (
@@ -2210,7 +2238,7 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                         stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 2" />
                     )}
                     {trendCats.map((code, ci) => trendHoverIdx !== null && (
-                      <circle key={code} cx={xOf(trendHoverIdx)} cy={yOf(catTrend.series[code]?.byYm[trendVisibleMonths[trendHoverIdx].ym] ?? 0)}
+                      <circle key={code} cx={xOf(trendHoverIdx)} cy={yOf(trendValsByCode[code][trendHoverIdx])}
                         r={3} fill={TREND_COLORS[ci]} stroke="#0d120d" strokeWidth="1.5" />
                     ))}
                     {trendVisibleMonths.map((m, i) => {
@@ -2242,13 +2270,14 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
             <>
               <div className="flex items-end gap-1 h-20">
                 {monthly.map((m, i) => {
-                  const total = m.necesario + m.personal
+                  const nec = necVals[i], per = perVals[i]
+                  const total = nec + per
                   // Bar segment's value in the active unit (₡ or % del ingreso
                   // ese mes), then scaled to a 0-100 height against maxBar
                   // (which is itself in that same unit).
                   const segVal = (v: number) => viewMode === 'pct' ? (m.income > 0 ? (v / m.income) * 100 : 0) : v
-                  const necH = (segVal(m.necesario) / maxBar) * 100
-                  const perH = (segVal(m.personal)  / maxBar) * 100
+                  const necH = (segVal(nec) / maxBar) * 100
+                  const perH = (segVal(per) / maxBar) * 100
                   const isSelected = selectedMonth === m.ym
                   const hasCats = (catsByMonth[m.ym] ?? []).length > 0
                   return (
@@ -2264,11 +2293,11 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                       </p>
                       <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
                         <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
-                          <p className="text-zinc-300 font-bold">{m.label}</p>
-                          <p className="text-cyan-400">Nec: {fmtCRC(m.necesario)}</p>
-                          <p style={{ color: '#a3e635' }}>Per: {fmtCRC(m.personal)}</p>
+                          <p className="text-zinc-300 font-bold">{m.label}{smooth ? ` · prom. ${SMOOTH_WINDOW}m` : ''}</p>
+                          <p className="text-cyan-400">Nec: {fmtCRC(nec)}</p>
+                          <p style={{ color: '#a3e635' }}>Per: {fmtCRC(per)}</p>
                           <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(total)}</p>
-                          {m.income > 0 && <p className="text-zinc-500">{pctOf(m).toFixed(0)}% del ingreso</p>}
+                          {m.income > 0 && <p className="text-zinc-500">{(total / m.income * 100).toFixed(0)}% del ingreso</p>}
                         </div>
                       </div>
                     </button>
