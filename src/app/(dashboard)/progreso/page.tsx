@@ -206,6 +206,14 @@ export default async function ProgresoPage() {
   }
   const getRootCode = buildRootCodeMap((categories ?? []) as { code: string; parent_code?: string | null }[])
 
+  // FOOD_SUPER (supermercado) and FOOD_OUT (comida fuera) share a parent
+  // ('FOOD') purely for the category picker's UI grouping — they're a
+  // necesario/personal split in disguise, not two flavors of the same
+  // spending, so the Lifestyle Inflation breakdown (and its outlier
+  // fencing) keeps them apart instead of rolling both into one "FOOD" line.
+  const FOOD_LEAF_CODES = new Set(['FOOD_SUPER', 'FOOD_OUT'])
+  const liGroupCode = (code: string) => FOOD_LEAF_CODES.has(code) ? code : getRootCode(code)
+
   const liCurEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
   const liCurStart = new Date(now.getFullYear(), now.getMonth() - 12, 1)
   const liPrvStart = new Date(now.getFullYear(), now.getMonth() - 24, 1)
@@ -226,7 +234,7 @@ export default async function ProgresoPage() {
 
   // Pass 1: tx-level outlier fence, computed from the user's full history
   const { cleaned: cleanedLifestyleTxs, excludedByRoot: rootTxExcluded } =
-    cleanLifestyleOutliers(txs ?? [], getRootCode)
+    cleanLifestyleOutliers(txs ?? [], liGroupCode)
 
   // Lifestyle expenses: excludes savings/investments (objetivos_financieros), loan
   // payments, and outlier transactions (a car purchase, etc.) — same cleaning as
@@ -686,7 +694,7 @@ export default async function ProgresoPage() {
   // Pass 2: build monthly totals from cleaned transactions
   const rootMonthly: Record<string, Record<string, number>> = {}
   for (const tx of cleanedLifestyleTxs) {
-    const root   = getRootCode(tx.category_code ?? '__na__')
+    const root   = liGroupCode(tx.category_code ?? '__na__')
     const month  = tx.date?.slice(0, 7)
     const amount = Number(tx.amount ?? 0)
     if (!month) continue
@@ -749,7 +757,7 @@ export default async function ProgresoPage() {
   // Driver breakdown: group by concept using cleaned transactions (outliers excluded)
   const liTopCatsWithDrivers = liTopCats.map(cat => {
     const catTxs = cleanedLifestyleTxs.filter(tx =>
-      getRootCode(tx.category_code ?? '__na__') === cat.code
+      liGroupCode(tx.category_code ?? '__na__') === cat.code
     )
     const subSums: Record<string, { cur: number; prv: number }> = {}
     for (const tx of catTxs) {

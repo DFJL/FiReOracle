@@ -50,7 +50,14 @@ export function isLifestyleTx(tx: LifestyleTx, getRootCode: (code: string) => st
   if (tx.movement_type !== 'expense' && tx.movement_type !== 'cash_withdrawal') return false
   if (tx.expense_group === 'objetivos_financieros') return false
   if (isValuation(tx.concept)) return false
-  if (tx.category_code && getRootCode(tx.category_code) === 'LOANS') return false
+  // The regular monthly installment is a real obligation and belongs in
+  // lifestyle burn, same as isSurvivalTx treats it — only an extraordinary/
+  // discretionary paydown (equity-building, not spending) stays excluded.
+  if (
+    tx.category_code &&
+    getRootCode(tx.category_code) === 'LOANS' &&
+    isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
+  ) return false
   return true
 }
 
