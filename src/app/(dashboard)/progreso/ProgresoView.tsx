@@ -21,7 +21,10 @@ type LifestyleData = {
   monthly: { ym: string; label: string; necesario: number; personal: number; income: number }[]
   topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
   catsByMonth: Record<string, { code: string; name: string; amount: number }[]>
-  catTrend: Record<string, { name: string; byYm: Record<string, number> }>
+  catTrend: {
+    months: { ym: string; label: string }[]
+    series: Record<string, { name: string; byYm: Record<string, number> }>
+  }
 }
 
 type SavingsRateMonth = {
@@ -2206,12 +2209,17 @@ function fmtCRC(n: number) {
 const TREND_COLORS = ['#22d3ee', '#a3e635', '#f59e0b']
 const TREND_CAT_LIMIT = TREND_COLORS.length
 
+const TREND_PERIODS = [12, 24, 36, 60] as const
+
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const { inflationRate, curTotal, prvTotal, monthly, topCats, catsByMonth, catTrend } = data
   const [openCat, setOpenCat] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'crc' | 'pct'>('crc')
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
   const [trendCats, setTrendCats] = useState<string[]>([])
+  const [trendPeriod, setTrendPeriod] = useState<typeof TREND_PERIODS[number]>(12)
+  const [trendHoverIdx, setTrendHoverIdx] = useState<number | null>(null)
+  const trendSvgRef = useRef<SVGSVGElement>(null)
 
   function toggleTrendCat(code: string) {
     setSelectedMonth(null)
@@ -2238,11 +2246,14 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
     ? Math.max(...monthly.map(pctOf), 1)
     : Math.max(...monthly.map(m => m.necesario + m.personal), 1)
 
-  const trendSegVal = (v: number, income: number) =>
-    viewMode === 'pct' ? (income > 0 ? (v / income) * 100 : 0) : v
-  const trendMaxBar = trendCats.length > 0
-    ? Math.max(...monthly.flatMap(m =>
-        trendCats.map(code => trendSegVal(catTrend[code]?.byYm[m.ym] ?? 0, m.income))
+  // Comparison line chart — its own month axis (up to 5 years, independent
+  // of the fixed 12m window above) so the period selector can zoom out.
+  // No %-del-ingreso here: income is only known for the last 12m, and
+  // comparing arbitrary categories against it isn't the point of this view.
+  const trendVisibleMonths = catTrend.months.slice(-trendPeriod)
+  const trendMaxVal = trendCats.length > 0
+    ? Math.max(...trendVisibleMonths.flatMap(m =>
+        trendCats.map(code => catTrend.series[code]?.byYm[m.ym] ?? 0)
       ), 1)
     : 1
 
@@ -2304,64 +2315,111 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
             <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">
               {trendCats.length > 0 ? 'Tendencia por categoría' : 'Tendencia mensual · clic para ver categorías de ese mes'}
             </p>
-            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
-              {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
-                <button key={o.k} onClick={() => setViewMode(o.k)}
-                  className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
-                    viewMode === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}>{o.l}</button>
-              ))}
-            </div>
+            {trendCats.length > 0 ? (
+              <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
+                {TREND_PERIODS.map(p => (
+                  <button key={p} onClick={() => setTrendPeriod(p)}
+                    className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
+                      trendPeriod === p ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}>{p < 60 ? `${p}m` : '5a'}</button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
+                {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
+                  <button key={o.k} onClick={() => setViewMode(o.k)}
+                    className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
+                      viewMode === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}>{o.l}</button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {trendCats.length > 0 ? (
-            <>
-              <div className="flex items-end gap-1 h-20">
-                {monthly.map((m, i) => {
-                  const vals = trendCats.map(code => catTrend[code]?.byYm[m.ym] ?? 0)
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center group relative">
-                      <div className="w-full flex items-end justify-center gap-0.5" style={{ height: '72px' }}>
-                        {vals.map((v, ci) => {
-                          const h = (trendSegVal(v, m.income) / trendMaxBar) * 100
-                          return (
-                            <div key={ci} className="flex-1 rounded-t-sm transition-all"
-                              style={{ height: `${h}%`, backgroundColor: TREND_COLORS[ci], opacity: 0.8 }} />
-                          )
-                        })}
-                      </div>
-                      <p className="text-[7px] truncate w-full text-center leading-none mt-0.5 text-zinc-700">
-                        {m.label.split(' ')[0]}
-                      </p>
-                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
-                        <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
-                          <p className="text-zinc-300 font-bold">{m.label}</p>
-                          {trendCats.map((code, ci) => (
-                            <p key={code} style={{ color: TREND_COLORS[ci] }}>
-                              {catTrend[code]?.name ?? code}: {fmtCRC(vals[ci])}
-                            </p>
-                          ))}
-                        </div>
+          {trendCats.length > 0 ? (() => {
+            const W = 800, H = 110
+            const padL = 8, padR = 8, padT = 8, padB = 18
+            const chartW = W - padL - padR
+            const chartH = H - padT - padB
+            const N = trendVisibleMonths.length
+            const xOf = (i: number) => padL + (N <= 1 ? 0 : (i / (N - 1)) * chartW)
+            const yOf = (v: number) => padT + chartH - (Math.max(v, 0) / trendMaxVal) * chartH
+            const labelStep = Math.max(1, Math.ceil(N / 7))
+
+            const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+              const rect = trendSvgRef.current?.getBoundingClientRect()
+              if (!rect) return
+              const svgX = ((e.clientX - rect.left) / rect.width) * W
+              let closest = 0, minDist = Infinity
+              trendVisibleMonths.forEach((_, i) => {
+                const dist = Math.abs(xOf(i) - svgX)
+                if (dist < minDist) { minDist = dist; closest = i }
+              })
+              setTrendHoverIdx(closest)
+            }
+
+            return (
+              <>
+                <div className="relative">
+                  {trendHoverIdx !== null && (
+                    <div className="absolute z-10 pointer-events-none" style={{
+                      left: `${Math.min(Math.max((xOf(trendHoverIdx) / W) * 100, 12), 88)}%`, top: 0, transform: 'translateX(-50%)',
+                    }}>
+                      <div className="bg-[#0d120d] border border-white/[0.12] rounded-lg px-2 py-1.5 text-[9px] whitespace-nowrap space-y-0.5 shadow-xl">
+                        <p className="text-zinc-300 font-bold">{trendVisibleMonths[trendHoverIdx].label}</p>
+                        {trendCats.map((code, ci) => (
+                          <p key={code} style={{ color: TREND_COLORS[ci] }}>
+                            {catTrend.series[code]?.name ?? code}: {fmtCRC(catTrend.series[code]?.byYm[trendVisibleMonths[trendHoverIdx].ym] ?? 0)}
+                          </p>
+                        ))}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                {trendCats.map((code, ci) => (
-                  <span key={code} className="flex items-center gap-1.5 text-[9px] text-zinc-400">
-                    <span className="w-2 h-2 rounded-sm inline-block" style={{ backgroundColor: TREND_COLORS[ci] }} />
-                    {catTrend[code]?.name ?? code}
-                    <button onClick={() => toggleTrendCat(code)} className="text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
-                  </span>
-                ))}
-                <button onClick={() => setTrendCats([])}
-                  className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors ml-auto">
-                  ✕ ver general
-                </button>
-              </div>
-            </>
-          ) : (
+                  )}
+                  <svg ref={trendSvgRef} viewBox={`0 0 ${W} ${H}`} className="w-full cursor-crosshair" style={{ height: '110px' }}
+                    onMouseMove={handleMouseMove} onMouseLeave={() => setTrendHoverIdx(null)}>
+                    {[0, 0.5, 1].map(t => (
+                      <line key={t} x1={padL} x2={W - padR} y1={padT + chartH * (1 - t)} y2={padT + chartH * (1 - t)}
+                        stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+                    ))}
+                    {trendCats.map((code, ci) => {
+                      const series = trendVisibleMonths.map(m => catTrend.series[code]?.byYm[m.ym] ?? 0)
+                      const points = series.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')
+                      return <polyline key={code} points={points} fill="none" stroke={TREND_COLORS[ci]} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                    })}
+                    {trendHoverIdx !== null && (
+                      <line x1={xOf(trendHoverIdx)} x2={xOf(trendHoverIdx)} y1={padT} y2={padT + chartH}
+                        stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 2" />
+                    )}
+                    {trendCats.map((code, ci) => trendHoverIdx !== null && (
+                      <circle key={code} cx={xOf(trendHoverIdx)} cy={yOf(catTrend.series[code]?.byYm[trendVisibleMonths[trendHoverIdx].ym] ?? 0)}
+                        r={3} fill={TREND_COLORS[ci]} stroke="#0d120d" strokeWidth="1.5" />
+                    ))}
+                    {trendVisibleMonths.map((m, i) => {
+                      if (i % labelStep !== 0 && i !== N - 1) return null
+                      return (
+                        <text key={i} x={xOf(i)} y={H - 4} textAnchor="middle" fontSize="8" fill="#3f3f46">
+                          {m.label}
+                        </text>
+                      )
+                    })}
+                  </svg>
+                </div>
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  {trendCats.map((code, ci) => (
+                    <span key={code} className="flex items-center gap-1.5 text-[9px] text-zinc-400">
+                      <span className="w-2 h-0.5 rounded inline-block" style={{ backgroundColor: TREND_COLORS[ci] }} />
+                      {catTrend.series[code]?.name ?? code}
+                      <button onClick={() => toggleTrendCat(code)} className="text-zinc-600 hover:text-zinc-400 transition-colors">✕</button>
+                    </span>
+                  ))}
+                  <button onClick={() => setTrendCats([])}
+                    className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors ml-auto">
+                    ✕ ver general
+                  </button>
+                </div>
+              </>
+            )
+          })() : (
             <>
               <div className="flex items-end gap-1 h-20">
                 {monthly.map((m, i) => {

@@ -717,20 +717,27 @@ export default async function ProgresoPage() {
     if (entries.length > 0) liCatsByMonth[ym] = entries
   }
 
-  // Full per-category monthly series (every category with any activity in
-  // the window, not just each month's top 8) — powers the trend-selection/
-  // comparison view: pick a category from Top categorías or from a month's
-  // breakdown and see its whole 12m line, or compare a few side by side.
-  const liCatTrend: Record<string, { name: string; byYm: Record<string, number> }> = {}
+  // Full per-category monthly series, on its own month axis independent of
+  // the fixed 12m/24m YoY window above (5 years, so the period selector can
+  // zoom out past 12m) — powers the trend-selection/comparison view: pick a
+  // category from Top categorías or from a month's breakdown and see its
+  // whole history, or compare a few side by side.
+  const TREND_MONTH_COUNT = 60
+  const trendMonths: { ym: string; label: string }[] = []
+  for (let i = TREND_MONTH_COUNT - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
+    trendMonths.push({ ym: toYM(d), label: `${MONTH_LABELS_LIFESTYLE[d.getMonth()]} ${String(d.getFullYear()).slice(2)}` })
+  }
+  const liCatTrendSeries: Record<string, { name: string; byYm: Record<string, number> }> = {}
   for (const [code, monthlyAmts] of Object.entries(rootMonthly)) {
     const byYm: Record<string, number> = {}
     let hasActivity = false
-    for (const ym of curYMs) {
+    for (const { ym } of trendMonths) {
       const amt = monthlyAmts[ym] ?? 0
       byYm[ym] = amt
       if (amt > 0) hasActivity = true
     }
-    if (hasActivity) liCatTrend[code] = { name: catNameMap.get(code) ?? code, byYm }
+    if (hasActivity) liCatTrendSeries[code] = { name: catNameMap.get(code) ?? code, byYm }
   }
 
   // Pass 3: monthly IQR on cleaned totals
@@ -1068,7 +1075,7 @@ export default async function ProgresoPage() {
           monthly:       liMonthly,
           topCats:       liTopCatsWithDrivers,
           catsByMonth:   liCatsByMonth,
-          catTrend:      liCatTrend,
+          catTrend:      { months: trendMonths, series: liCatTrendSeries },
         }}
       />
     </div>
