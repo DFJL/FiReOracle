@@ -103,7 +103,7 @@ export function inferCategory(
 
   // ── Transport ─────────────────────────────────────────────────────────────
   if (/uber\b/i.test(v) || /\buber\b/i.test(c)) return 'TRANSPORT'
-  if (/didi|taxi|autobus|buses|tren\s*el[eé]ctr|transporte\s*p[uú]blico|buseta/i.test(t)) return 'TRANSPORT'
+  if (/didi|taxi|autobus|buses|\btren\b|transporte\s*p[uú]blico|buseta/i.test(t)) return 'TRANSPORT'
   if (/gasolina|combustible|diesel/i.test(c) || /servicentro|gasolinera|delta\b/i.test(v)) return 'CAR'
   if (/parqueo|estacionamiento|parking/i.test(c)) return 'CAR'
   if (/lavado\s*de\s*carro|marchamo|revisi[oó]n\s*carro|mantenimiento\s*carro|otros?\s*gastos?\s*(de\s*)?carro|alquiler\s*de\s*carro/i.test(c)) return 'CAR'
