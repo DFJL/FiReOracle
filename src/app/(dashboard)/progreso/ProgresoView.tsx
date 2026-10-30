@@ -172,6 +172,7 @@ export function ProgresoView({
   // + the regular loan installment) instead, so the number stays honest for
   // "what if I retire before the house is paid off".
   const [includeLoansInFire, setIncludeLoansInFire] = useState(false)
+  const [wealthTab, setWealthTab] = useState<'historico' | 'atribucion'>('atribucion')
   const targetExpWithToggle = includeLoansInFire ? avgMonthlyObligations : fireConfig.targetExp
   const fireNumber = includeLoansInFire
     ? (fireConfig.swr > 0 ? (avgMonthlyObligations * 12) / fireConfig.swr : 0)
@@ -533,9 +534,24 @@ export function ProgresoView({
         rate={rate}
       />
 
-      {/* Wealth Delta Attribution */}
+      {/* Wealth Delta Attribution + Historial Mensual — tabs so both read the
+          same net_worth_snapshots series side by side */}
       {wealthDelta.length > 0 && (
-        <WealthDeltaSection data={wealthDelta} currency={currency} rate={rate} />
+        <div>
+          <div className="flex items-center gap-1 mb-2">
+            {([{ k: 'historico' as const, l: 'Histórico' }, { k: 'atribucion' as const, l: 'Atribución' }]).map(t => (
+              <button key={t.k} onClick={() => setWealthTab(t.k)}
+                className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                  wealthTab === t.k ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'
+                }`}>{t.l}</button>
+            ))}
+          </div>
+          {wealthTab === 'historico' ? (
+            <NetWorthHistoryTab snapshots={snapshots} milestones={milestones} currency={currency} rate={rate} />
+          ) : (
+            <WealthDeltaSection data={wealthDelta} currency={currency} rate={rate} />
+          )}
+        </div>
       )}
 
       {/* Lifestyle Inflation */}
@@ -1653,6 +1669,7 @@ function WealthDeltaSection({
       <div>
         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Atribución del crecimiento patrimonial</p>
         <p className="text-[9px] text-zinc-600 mt-0.5">¿Qué impulsa el cambio en tu patrimonio? — hover para detalle</p>
+        <p className="text-[9px] text-zinc-700 mt-0.5">Cada barra es el cambio de inicio de ese mes a inicio del siguiente (ej. &quot;Ene&quot; = snapshot de enero → snapshot de febrero)</p>
       </div>
 
       {/* Legend */}
@@ -1793,6 +1810,154 @@ const MILESTONE_ICON: Record<Milestone['kind'], string> = {
   auto: '●',
   fire: '★',
   manual: '◆',
+}
+
+function nwhMonthLabel(m: string) {
+  const [y, mo] = m.split('-')
+  const names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+  return `${names[parseInt(mo) - 1]} '${y.slice(2)}`
+}
+
+const NWH_RANGES = [
+  { label: '1A',   months: 12 },
+  { label: '3A',   months: 36 },
+  { label: 'Todo', months: 9999 },
+]
+
+// Lighter companion to /patrimonio's own "Historial Mensual" (full
+// líquido/invertido/ilíquido/pasivos breakdown + asset/liability drawers) —
+// just the total net worth line, paired here with Atribución as a tab
+// since both read the same net_worth_snapshots series and should be easy
+// to cross-check against each other. Full breakdown stays a click away.
+function NetWorthHistoryTab({
+  snapshots, milestones, currency, rate,
+}: {
+  snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
+  milestones: Milestone[]
+  currency: 'CRC' | 'USD'
+  rate: number
+}) {
+  const [rangeMonths, setRangeMonths] = useState(12)
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  const convert = (v: number) => currency === 'CRC' ? v : v / rate
+  const sym     = currency === 'CRC' ? '₡' : '$'
+  const fmt = (v: number) => {
+    const val = convert(v)
+    const abs = Math.abs(val)
+    if (abs >= 1_000_000) return `${sym}${(val / 1_000_000).toFixed(1)}M`
+    if (abs >= 1_000)     return `${sym}${(val / 1_000).toFixed(0)}K`
+    return `${sym}${Math.round(val)}`
+  }
+
+  const sorted = [...snapshots].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+  const pts = sorted.slice(-rangeMonths).map(s => ({ month: s.snapshot_date.slice(0, 7), val: Number(s.net_worth_crc) }))
+
+  if (pts.length < 2) {
+    return (
+      <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5">
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] mb-0.5">Historial Mensual</p>
+        <p className="text-[9px] text-zinc-600">Patrimonio neto</p>
+        <p className="text-[10px] text-zinc-600 py-6 text-center">Sin snapshots suficientes aún.</p>
+      </div>
+    )
+  }
+
+  const W = 800, H = 160
+  const padL = 52, padR = 8, padT = 8, padB = 24
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+  const N = pts.length
+  const maxV = Math.max(...pts.map(p => p.val), 1)
+  const xOf = (i: number) => padL + (N <= 1 ? 0 : (i / (N - 1)) * chartW)
+  const yOf = (v: number) => padT + chartH - (Math.max(v, 0) / maxV) * chartH
+  const labelStep = Math.max(1, Math.ceil(N / 8))
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxV)
+  const linePoints = pts.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.val).toFixed(1)}`).join(' ')
+  const last = pts[pts.length - 1]
+
+  const milestoneMarkers = milestones
+    .map(m => ({ ...m, idx: pts.findIndex(p => p.month === m.date.slice(0, 7)) }))
+    .filter(m => m.idx >= 0)
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const svgX = ((e.clientX - rect.left) / rect.width) * W
+    let closest = 0, minDist = Infinity
+    pts.forEach((_, i) => { const d = Math.abs(xOf(i) - svgX); if (d < minDist) { minDist = d; closest = i } })
+    setHoverIdx(closest)
+  }
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Historial Mensual</p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">Patrimonio neto</p>
+        </div>
+        <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+          {NWH_RANGES.map(r => (
+            <button key={r.label} onClick={() => setRangeMonths(r.months)}
+              className={`px-2.5 py-0.5 rounded-md text-[9px] font-black tracking-wider transition-all ${
+                rangeMonths === r.months ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+              }`}>{r.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="relative">
+        {hoverIdx !== null && (
+          <div className="absolute z-10 pointer-events-none" style={{ left: `${(xOf(hoverIdx) / W) * 100}%`, top: 0, transform: 'translateX(-50%)' }}>
+            <div className="bg-[#111811] border border-[#a3e635]/20 rounded-xl px-3 py-2 shadow-xl whitespace-nowrap">
+              <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1 text-center">{nwhMonthLabel(pts[hoverIdx].month)}</p>
+              <p className="text-xs font-black text-[#a3e635]">{fmt(pts[hoverIdx].val)}</p>
+            </div>
+          </div>
+        )}
+        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full cursor-crosshair" style={{ height: '160px' }}
+          onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
+          {yTicks.map((v, i) => (
+            <g key={i}>
+              <line x1={padL} x2={W - padR} y1={yOf(v)} y2={yOf(v)} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+              <text x={padL - 4} y={yOf(v) + 4} textAnchor="end" fontSize="9" fill="#3f3f46">{fmt(v)}</text>
+            </g>
+          ))}
+          <polyline points={linePoints} fill="none" stroke="#a3e635" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {hoverIdx === null && <circle cx={xOf(N - 1)} cy={yOf(last.val)} r={3} fill="#a3e635" opacity={0.9} />}
+          {pts.map((p, i) => {
+            if (i % labelStep !== 0 && i !== N - 1) return null
+            return (
+              <text key={i} x={xOf(i)} y={H - 4} textAnchor="middle" fontSize="9" fill={hoverIdx === i ? '#71717a' : '#3f3f46'}>
+                {nwhMonthLabel(p.month)}
+              </text>
+            )
+          })}
+          {milestoneMarkers.map((m, i) => {
+            const x = xOf(m.idx)
+            const color = MILESTONE_COLOR[m.kind]
+            return (
+              <g key={`${m.kind}-${m.date}-${i}`} opacity={0.85}>
+                <title>{`${new Date(m.date + 'T12:00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })} — ${m.label}`}</title>
+                <line x1={x} x2={x} y1={padT} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="2 3" opacity={0.3} />
+                <circle cx={x} cy={padT + chartH + 4} r={3} fill={color} />
+              </g>
+            )
+          })}
+          {hoverIdx !== null && (
+            <>
+              <line x1={xOf(hoverIdx)} y1={padT} x2={xOf(hoverIdx)} y2={padT + chartH} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="3 2" />
+              <circle cx={xOf(hoverIdx)} cy={yOf(pts[hoverIdx].val)} r={4} fill="#a3e635" stroke="#0d120d" strokeWidth="1.5" />
+            </>
+          )}
+        </svg>
+      </div>
+      <Link href="/patrimonio" className="block text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
+        ver desglose completo (líquido, invertido, ilíquido, pasivos) →
+      </Link>
+    </div>
+  )
 }
 
 function CombinedChart({
