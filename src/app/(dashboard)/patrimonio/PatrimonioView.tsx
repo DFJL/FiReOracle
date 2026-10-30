@@ -71,6 +71,12 @@ type Props = {
   pensionesBreakdown: { name: string; balance: number }[]
   totalPensiones: number
   milestones: Milestone[]
+  wealthDelta: WealthDeltaMonth[]
+}
+
+export type WealthDeltaMonth = {
+  ym: string; label: string
+  delta: number; savings: number; returns: number; residual: number
 }
 
 const ASSET_TYPES = [
@@ -137,6 +143,177 @@ const NW_RANGES = [
 
 const MILESTONE_COLOR: Record<Milestone['kind'], string> = { auto: '#f59e0b', fire: '#a3e635', manual: '#f472b6' }
 const MILESTONE_ICON: Record<Milestone['kind'], string> = { auto: '●', fire: '★', manual: '◆' }
+
+function WealthDeltaSection({
+  data, currency, rate,
+}: {
+  data: WealthDeltaMonth[]
+  currency: 'CRC' | 'USD'
+  rate: number
+}) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+
+  const sym = currency === 'CRC' ? '₡' : '$'
+  const cvt = (v: number) => currency === 'CRC' ? v : v / rate
+  const fmt = (v: number) => {
+    const val = cvt(v)
+    const abs = Math.abs(val)
+    const sign = val < 0 ? '−' : val > 0 ? '+' : ''
+    if (abs >= 1_000_000) return `${sign}${sym}${(Math.abs(val) / 1_000_000).toFixed(2)}M`
+    if (abs >= 1_000)     return `${sign}${sym}${(Math.abs(val) / 1_000).toFixed(0)}K`
+    return `${sign}${sym}${Math.round(Math.abs(val)).toLocaleString('es-CR')}`
+  }
+
+  // Scale: max of positive contributions (right) and negative residual (left)
+  const maxRight = Math.max(...data.map(m =>
+    Math.max(m.savings, 0) + Math.max(m.returns, 0) + Math.max(m.residual, 0)
+  ), 1)
+  const maxLeft  = Math.max(...data.map(m => Math.max(-m.residual, 0)), 0)
+  const maxAbs   = Math.max(maxRight, maxLeft, 1)
+
+  const total = data.reduce((acc, m) => ({
+    delta: acc.delta + m.delta, savings: acc.savings + m.savings,
+    returns: acc.returns + m.returns, residual: acc.residual + m.residual,
+  }), { delta: 0, savings: 0, returns: 0, residual: 0 })
+
+  const hovM = hovIdx !== null ? data[hovIdx] : null
+
+  return (
+    <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-4">
+      <div>
+        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Atribución del crecimiento patrimonial</p>
+        <p className="text-[9px] text-zinc-600 mt-0.5">¿Qué impulsa el cambio en tu patrimonio? — hover para detalle</p>
+        <p className="text-[9px] text-zinc-700 mt-0.5">Cada barra es el cambio de inicio de ese mes a inicio del siguiente (ej. &quot;Ene&quot; = snapshot de enero → snapshot de febrero) — comparala contra la columna &quot;MoM %&quot; de la tabla</p>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 text-[9px] text-zinc-500">
+        <span className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black text-rose-400/70">← Pérdida</span>
+        </span>
+        {([
+          { color: '#34d399', label: 'Ahorro activo' },
+          { color: '#60a5fa', label: 'Rendimientos' },
+          { color: '#fbbf24', label: 'FX / Revaluación' },
+        ] as const).map(({ color, label }) => (
+          <span key={label} className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm inline-block" style={{ backgroundColor: color }} />
+            {label}
+          </span>
+        ))}
+        <span className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black text-emerald-400/70">Ganancia →</span>
+        </span>
+      </div>
+
+      {/* Diverging bar chart */}
+      <div className="space-y-1">
+        {data.map((m, idx) => {
+          const posTotal = Math.max(m.savings, 0) + Math.max(m.returns, 0) + Math.max(m.residual, 0)
+          const negTotal = Math.max(-m.residual, 0)
+          // Each side spans 0→50% of the container from center
+          const rightPct = (posTotal / maxAbs) * 50   // % of full width
+          const leftPct  = (negTotal / maxAbs) * 50
+
+          // Proportional segments within the right bar
+          const savPct  = posTotal > 0 ? (Math.max(m.savings,   0) / posTotal) * 100 : 0
+          const retPct  = posTotal > 0 ? (Math.max(m.returns,   0) / posTotal) * 100 : 0
+          const resPct  = posTotal > 0 ? (Math.max(m.residual,  0) / posTotal) * 100 : 0
+
+          const isHov = hovIdx === idx
+
+          return (
+            <div
+              key={m.ym}
+              className={`flex items-center gap-2 py-0.5 rounded-lg cursor-default transition-colors ${isHov ? 'bg-white/[0.03]' : ''}`}
+              onMouseEnter={() => setHovIdx(idx)}
+              onMouseLeave={() => setHovIdx(null)}
+            >
+              <p className="text-[9px] text-zinc-500 w-10 shrink-0 text-right tabular-nums">{m.label}</p>
+
+              {/* Chart: fixed-height, centered */}
+              <div className="flex-1 relative h-4 flex items-center">
+                {/* Left half (losses extend left from center) */}
+                <div className="w-1/2 h-full flex justify-end overflow-hidden pr-px">
+                  {negTotal > 0 && (
+                    <div
+                      className={`h-full rounded-l transition-opacity ${isHov ? 'opacity-90' : 'opacity-60'}`}
+                      style={{ width: `${leftPct * 2}%`, backgroundColor: '#f43f5e' }}
+                    />
+                  )}
+                </div>
+
+                {/* Center line */}
+                <div className="w-px h-full shrink-0 bg-zinc-600/60" />
+
+                {/* Right half (gains extend right from center) */}
+                <div className="w-1/2 h-full flex overflow-hidden pl-px">
+                  {posTotal > 0 && (
+                    <div
+                      className={`h-full flex rounded-r overflow-hidden transition-opacity ${isHov ? 'opacity-90' : 'opacity-65'}`}
+                      style={{ width: `${rightPct * 2}%` }}
+                    >
+                      <div className="h-full bg-emerald-400" style={{ width: `${savPct}%` }} />
+                      <div className="h-full bg-blue-400"    style={{ width: `${retPct}%` }} />
+                      <div className="h-full bg-amber-400"   style={{ width: `${resPct}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <p className={`text-[9px] font-black w-14 shrink-0 tabular-nums text-right ${m.delta >= 0 ? 'text-zinc-300' : 'text-rose-400'}`}>
+                {fmt(m.delta)}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Interactive detail card */}
+      <div className={`rounded-xl border transition-all duration-150 overflow-hidden ${
+        hovM ? 'border-white/[0.08] bg-white/[0.02]' : 'border-transparent bg-transparent'
+      }`}>
+        {hovM ? (
+          <div className="p-3">
+            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.14em] mb-2.5">{hovM.label} — desglose</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {([
+                { label: 'Ahorro activo', value: hovM.savings,  color: 'text-emerald-400' },
+                { label: 'Rendimientos',  value: hovM.returns,  color: 'text-blue-400'    },
+                { label: 'FX / Reval.',   value: hovM.residual, color: hovM.residual >= 0 ? 'text-amber-400' : 'text-rose-400' },
+                { label: 'Total ΔPN',     value: hovM.delta,    color: hovM.delta >= 0 ? 'text-white font-black' : 'text-rose-400 font-black' },
+              ] as const).map(({ label, value, color }) => (
+                <div key={label}>
+                  <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-0.5">{label}</p>
+                  <p className={`text-sm tabular-nums ${color}`}>{fmt(value)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 h-[68px] flex items-center justify-center">
+            <p className="text-[9px] text-zinc-700">Hover sobre un mes para ver el desglose</p>
+          </div>
+        )}
+      </div>
+
+      {/* 12-month totals strip */}
+      <div className="grid grid-cols-4 gap-2 pt-1 border-t border-white/[0.04]">
+        {([
+          { label: 'Ahorro 12m',  value: total.savings,  color: 'text-emerald-400' },
+          { label: 'Rend. 12m',   value: total.returns,  color: 'text-blue-400'    },
+          { label: 'FX/Reval.',   value: total.residual, color: total.residual >= 0 ? 'text-amber-400' : 'text-rose-400' },
+          { label: 'ΔPN 12m',     value: total.delta,    color: total.delta >= 0 ? 'text-white' : 'text-rose-400' },
+        ] as const).map(({ label, value, color }) => (
+          <div key={label} className="text-center">
+            <p className={`text-xs font-black tabular-nums ${color}`}>{fmt(value)}</p>
+            <p className="text-[8px] text-zinc-600 mt-0.5 uppercase tracking-wider">{label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function NetWorthChart({
   snapshots, fallback, fmt, assets, liabilities, loans, milestones,
@@ -640,10 +817,11 @@ export function PatrimonioView({
   liquidBalance, totalInvested, iliquidTotal, iliquidInvestable,
   totalLiabilities, totalActivos, patrimonioNeto, activosInvertibles,
   assets, assetHistory, liabilities, loans, monthlyTrend, snapshots, exchangeRate, netWorthItems,
-  envelopeBreakdown, bucketBreakdown, pensionesBreakdown, totalPensiones, milestones,
+  envelopeBreakdown, bucketBreakdown, pensionesBreakdown, totalPensiones, milestones, wealthDelta,
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [historialTab, setHistorialTab] = useState<'tabla' | 'atribucion'>('tabla')
   const { currency } = useCurrency()
 
   const rate = exchangeRate.sell
@@ -1056,8 +1234,22 @@ export function PatrimonioView({
           </form>
         )}
 
-        {/* Snapshot history table */}
-        {sorted.length > 0 ? (
+        {/* Tabla / Atribución — two readings of the same monthly deltas,
+            easy to flip between and compare */}
+        {wealthDelta.length > 0 && (
+          <div className="flex items-center gap-1">
+            {([{ k: 'tabla' as const, l: 'Tabla' }, { k: 'atribucion' as const, l: 'Atribución' }]).map(t => (
+              <button key={t.k} onClick={() => setHistorialTab(t.k)}
+                className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                  historialTab === t.k ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'
+                }`}>{t.l}</button>
+            ))}
+          </div>
+        )}
+
+        {historialTab === 'atribucion' && wealthDelta.length > 0 ? (
+          <WealthDeltaSection data={wealthDelta} currency={currency} rate={rate} />
+        ) : sorted.length > 0 ? (
           <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] overflow-hidden">
             <table className="w-full text-xs">
               <thead>
