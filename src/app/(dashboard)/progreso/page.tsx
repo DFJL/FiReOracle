@@ -661,17 +661,25 @@ export default async function ProgresoPage() {
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
 
   // Monthly trend — last 12 complete months (uses cleaned txs, outliers excluded)
-  type LiMonth = { label: string; necesario: number; personal: number }
+  // income per month is the same filter as avgMonthlyIncome below (active,
+  // non-passive) so "% del ingreso" here reads against the same base that
+  // number already uses elsewhere on this page.
+  type LiMonth = { ym: string; label: string; necesario: number; personal: number; income: number }
   const liMonthly: LiMonth[] = []
   for (let i = 11; i >= 0; i--) {
     const d   = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
     const ym  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const lbl = `${MONTH_LABELS_LIFESTYLE[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`
     const monthTxs = cleanedLifestyleTxs.filter(tx => tx.date?.slice(0, 7) === ym)
+    const monthIncome = (txs ?? [])
+      .filter(tx => tx.date?.slice(0, 7) === ym && tx.movement_type === 'income' && !tx.is_passive_income)
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
     liMonthly.push({
+      ym,
       label:     lbl,
       necesario: monthTxs.filter(tx => tx.expense_group === 'necesario').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
       personal:  monthTxs.filter(tx => tx.expense_group === 'personal').reduce((s, tx) => s + Number(tx.amount ?? 0), 0),
+      income:    monthIncome,
     })
   }
 
@@ -684,6 +692,21 @@ export default async function ProgresoPage() {
     if (!month) continue
     if (!rootMonthly[root]) rootMonthly[root] = {}
     rootMonthly[root][month] = (rootMonthly[root][month] ?? 0) + amount
+  }
+
+  // Per-month category breakdown — for "clic un mes → ver de qué estuvo
+  // hecho ese mes" below the trend bars, instead of the Top categorías
+  // list always showing the 12m aggregate regardless of what's clicked.
+  // Same rootMonthly pass 2 data above, just sliced by month instead of
+  // summed across curYMs/prvYMs.
+  const liCatsByMonth: Record<string, { code: string; name: string; amount: number }[]> = {}
+  for (const ym of curYMs) {
+    const entries = Object.entries(rootMonthly)
+      .map(([code, monthly]) => ({ code, name: catNameMap.get(code) ?? code, amount: monthly[ym] ?? 0 }))
+      .filter(c => c.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 8)
+    if (entries.length > 0) liCatsByMonth[ym] = entries
   }
 
   // Pass 3: monthly IQR on cleaned totals
@@ -1020,6 +1043,7 @@ export default async function ProgresoPage() {
           prvTotal:      liPrvTotal,
           monthly:       liMonthly,
           topCats:       liTopCatsWithDrivers,
+          catsByMonth:   liCatsByMonth,
         }}
       />
     </div>

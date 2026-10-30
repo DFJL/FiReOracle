@@ -18,8 +18,9 @@ type LifestyleData = {
   inflationRate: number
   curTotal: number
   prvTotal: number
-  monthly: { label: string; necesario: number; personal: number }[]
+  monthly: { ym: string; label: string; necesario: number; personal: number; income: number }[]
   topCats: { code: string; name: string; curAvg: number; yoyPct: number | null; outlierCount: number; drivers: { key: string; curAvg: number; prvAvg: number; yoyPct: number | null }[] }[]
+  catsByMonth: Record<string, { code: string; name: string; amount: number }[]>
 }
 
 type SavingsRateMonth = {
@@ -2201,8 +2202,10 @@ function fmtCRC(n: number) {
 }
 
 function LifestyleTrendSection({ data }: { data: LifestyleData }) {
-  const { inflationRate, curTotal, prvTotal, monthly, topCats } = data
+  const { inflationRate, curTotal, prvTotal, monthly, topCats, catsByMonth } = data
   const [openCat, setOpenCat] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'crc' | 'pct'>('crc')
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
 
   const totalPct    = prvTotal > 0 ? (curTotal - prvTotal) / prvTotal : null
   const delta       = totalPct !== null ? totalPct - inflationRate : null
@@ -2211,7 +2214,17 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
   const signalColor = isBad ? '#f43f5e' : isWarn ? '#f59e0b' : '#a3e635'
   const signalLabel = isBad ? 'Alerta' : isWarn ? 'Atención' : 'Óptimo'
   const hasOutliers = topCats.some(c => c.outlierCount > 0)
-  const maxBar      = Math.max(...monthly.map(m => m.necesario + m.personal), 1)
+
+  // % del ingreso ese mes — la pregunta "¿vivo bajo mis límites o estoy
+  // inflando el estilo de vida?" se responde con esto, no solo con ₡.
+  const pctOf = (m: LifestyleData['monthly'][number]) =>
+    m.income > 0 ? ((m.necesario + m.personal) / m.income) * 100 : 0
+  const maxBar = viewMode === 'pct'
+    ? Math.max(...monthly.map(pctOf), 1)
+    : Math.max(...monthly.map(m => m.necesario + m.personal), 1)
+
+  const selectedCats = selectedMonth ? catsByMonth[selectedMonth] ?? [] : []
+  const selectedMonthLabel = monthly.find(m => m.ym === selectedMonth)?.label ?? null
 
   return (
     <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-5 space-y-5">
@@ -2264,18 +2277,39 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
 
       {monthly.length > 0 && (
         <div>
-          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-3">Tendencia mensual</p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">
+              Tendencia mensual · clic para ver categorías de ese mes
+            </p>
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06] shrink-0">
+              {([{ k: 'crc' as const, l: '₡' }, { k: 'pct' as const, l: '%' }]).map(o => (
+                <button key={o.k} onClick={() => setViewMode(o.k)}
+                  className={`px-2 py-0.5 rounded-md text-[9px] font-black transition-all ${
+                    viewMode === o.k ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>{o.l}</button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-end gap-1 h-20">
             {monthly.map((m, i) => {
-              const necH = (m.necesario / maxBar) * 100
-              const perH = (m.personal  / maxBar) * 100
+              const total = m.necesario + m.personal
+              // Bar segment's value in the active unit (₡ or % del ingreso
+              // ese mes), then scaled to a 0-100 height against maxBar
+              // (which is itself in that same unit).
+              const segVal = (v: number) => viewMode === 'pct' ? (m.income > 0 ? (v / m.income) * 100 : 0) : v
+              const necH = (segVal(m.necesario) / maxBar) * 100
+              const perH = (segVal(m.personal)  / maxBar) * 100
+              const isSelected = selectedMonth === m.ym
+              const hasCats = (catsByMonth[m.ym] ?? []).length > 0
               return (
-                <div key={i} className="flex-1 flex flex-col items-center group relative">
-                  <div className="w-full flex flex-col justify-end" style={{ height: '72px' }}>
-                    <div className="w-full rounded-t-sm" style={{ height: `${perH}%`, backgroundColor: '#a3e635', opacity: 0.55 }} />
-                    <div className="w-full"               style={{ height: `${necH}%`, backgroundColor: '#22d3ee', opacity: 0.55 }} />
+                <button key={i} disabled={!hasCats}
+                  onClick={() => setSelectedMonth(prev => prev === m.ym ? null : m.ym)}
+                  className={`flex-1 flex flex-col items-center group relative ${hasCats ? 'cursor-pointer' : 'cursor-default'}`}>
+                  <div className={`w-full flex flex-col justify-end rounded-t-sm transition-all ${isSelected ? 'ring-1 ring-white/40' : ''}`} style={{ height: '72px' }}>
+                    <div className="w-full rounded-t-sm" style={{ height: `${perH}%`, backgroundColor: '#a3e635', opacity: isSelected ? 0.95 : 0.55 }} />
+                    <div className="w-full"               style={{ height: `${necH}%`, backgroundColor: '#22d3ee', opacity: isSelected ? 0.95 : 0.55 }} />
                   </div>
-                  <p className="text-[7px] text-zinc-700 truncate w-full text-center leading-none mt-0.5">
+                  <p className={`text-[7px] truncate w-full text-center leading-none mt-0.5 ${isSelected ? 'text-zinc-300 font-bold' : 'text-zinc-700'}`}>
                     {m.label.split(' ')[0]}
                   </p>
                   <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
@@ -2283,10 +2317,11 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
                       <p className="text-zinc-300 font-bold">{m.label}</p>
                       <p className="text-cyan-400">Nec: {fmtCRC(m.necesario)}</p>
                       <p style={{ color: '#a3e635' }}>Per: {fmtCRC(m.personal)}</p>
-                      <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(m.necesario + m.personal)}</p>
+                      <p className="text-zinc-400 border-t border-white/[0.06] pt-0.5">Total: {fmtCRC(total)}</p>
+                      {m.income > 0 && <p className="text-zinc-500">{pctOf(m).toFixed(0)}% del ingreso</p>}
                     </div>
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -2301,7 +2336,42 @@ function LifestyleTrendSection({ data }: { data: LifestyleData }) {
         </div>
       )}
 
-      {topCats.length > 0 && (
+      {selectedMonth ? (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em]">
+              Categorías · {selectedMonthLabel}
+            </p>
+            <button onClick={() => setSelectedMonth(null)}
+              className="text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
+              ✕ ver general (12m)
+            </button>
+          </div>
+          {selectedCats.length > 0 ? (() => {
+            const monthTotal = selectedCats.reduce((s, c) => s + c.amount, 0)
+            const maxAmt = selectedCats[0].amount
+            return (
+              <div className="space-y-1.5">
+                {selectedCats.map(c => {
+                  const pct = monthTotal > 0 ? (c.amount / monthTotal) * 100 : 0
+                  return (
+                    <div key={c.code} className="flex items-center gap-2">
+                      <p className="text-[10px] text-zinc-400 w-28 truncate shrink-0">{c.name}</p>
+                      <div className="flex-1 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-cyan-400/60" style={{ width: `${(c.amount / maxAmt) * 100}%` }} />
+                      </div>
+                      <p className="text-[10px] tabular-nums text-zinc-400 w-16 text-right shrink-0">{fmtCRC(c.amount)}</p>
+                      <p className="text-[9px] font-black tabular-nums text-zinc-500 w-10 text-right shrink-0">{pct.toFixed(0)}%</p>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })() : (
+            <p className="text-[10px] text-zinc-600 text-center py-2">Sin gastos registrados ese mes.</p>
+          )}
+        </div>
+      ) : topCats.length > 0 && (
         <div>
           <p className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.14em] mb-2">
             Top categorías · promedio mensual
