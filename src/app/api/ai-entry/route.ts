@@ -20,6 +20,15 @@ type Envelope = {
   custodio: string
 }
 
+// Only buckets the FAB already knows a live balance for (currentBalance set)
+// can be targeted by a "saldo actual" statement — others are omitted from
+// the prompt entirely so the model never invents a balance update for one.
+type ValorizacionBucket = {
+  id: string
+  name: string
+  currentBalance: number
+}
+
 type ConvMessage = { role: 'user' | 'assistant'; content: string }
 
 export async function POST(req: Request) {
@@ -33,6 +42,7 @@ export async function POST(req: Request) {
     fileType?: string   // MIME type
     categories: Category[]
     envelopes: Envelope[]
+    valorizacionBuckets?: ValorizacionBucket[]
   }
 
   if (!body.messages?.length) return new Response('Bad request', { status: 400 })
@@ -54,6 +64,10 @@ export async function POST(req: Request) {
     .map(e => `${e.id}: ${e.custodio} › ${e.name}`)
     .join('\n')
 
+  const bucketLines = (body.valorizacionBuckets ?? [])
+    .map(b => `${b.id}: ${b.name} (saldo registrado: ₡${b.currentBalance.toLocaleString('es-CR')})`)
+    .join('\n')
+
   const systemPrompt = `Sos un asistente de entrada de datos financieros para un usuario en Costa Rica (moneda base: CRC ₡). Extraés datos de transacciones desde texto libre, imágenes de recibos o PDFs.
 
 HOY: ${today}
@@ -69,6 +83,9 @@ ${catLines || '(ninguna cargada)'}
 SOBRES DISPONIBLES (solo para tipo ahorro):
 ${envLines || '(ninguno)'}
 
+FONDOS CON SALDO ACTUALIZABLE (ROP, FCL, Pensión Voluntaria y similares):
+${bucketLines || '(ninguno)'}
+
 REGLAS:
 - Montos siempre en CRC salvo que el documento sea claramente en USD
 - Fechas en YYYY-MM-DD; si no está en el input, usá ${today}
@@ -77,6 +94,15 @@ REGLAS:
 - Elegí la category_code de la lista; si ninguna aplica, omitilo
 - Preferí siempre la categoría más ESPECÍFICA disponible sobre una genérica tipo "Ingreso Pasivo" u "Otros ingresos" — ej: un rendimiento de un fondo de inversión o protocolo crypto conocido va en su categoría de rendimientos específica, no en la genérica, aunque ambas parezcan aplicar
 - Hacé máximo UNA pregunta si algo crítico es ambiguo; nunca hagas múltiples preguntas
+
+SALDO ACTUAL DE UN FONDO: si el usuario dice el saldo TOTAL actual de uno de
+los fondos listados arriba (ej. "el ROP quedó en 35 millones", "la pensión
+voluntaria subió a 4.5 millones", "FCL está en ₡12,300,000") — en vez de un
+monto de transacción — respondé con "bucket_balance_id" (el id exacto de la
+lista) y "bucket_balance_amount" (el saldo total que dijo, no la diferencia:
+eso lo calcula la app). NO calculés vos la diferencia ni pongas "amount".
+Seguí completando type:"ingreso" y el resto de los campos normales
+(date, concept) igual que cualquier otro "complete".
 
 RECIBOS/FACTURAS CON VARIOS ÍTEMS: cuando la imagen/PDF es un recibo o
 factura con una lista de productos/servicios claramente distintos y con
@@ -97,6 +123,9 @@ Cuando tenés datos suficientes para UN solo gasto/ingreso:
 
 Cuando es un recibo/factura con varios ítems distintos:
 {"status":"multi","vendor":"AutoMercado","date":"${today}","total":45230,"currency":"CRC","items":[{"concept":"Leche + lácteos","amount":8500,"category_code":"FOOD_SUPER"},{"concept":"Shampoo","amount":4200,"category_code":"PERSONAL_CARE"}]}
+
+Cuando el usuario da el saldo actual de un fondo de la lista (no un monto de transacción):
+{"status":"complete","fields":{"type":"ingreso","date":"${today}","concept":"Ajuste de valor ROP & FCL","bucket_balance_id":"745756a9-372b-42f1-b084-4cd7b18f839f","bucket_balance_amount":35000000}}
 
 Cuando necesitás UNA aclaración:
 {"status":"question","question":"¿Ese pago en PriceSmart fue por comestibles o artículos del hogar?","partial":{"amount":26500,"vendor":"PriceSmart","type":"gasto"}}`

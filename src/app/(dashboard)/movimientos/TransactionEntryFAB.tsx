@@ -29,7 +29,7 @@ function resolveCategory(concept: string, txType: 'expense' | 'income'): string 
 }
 
 type Envelope = { id: string; name: string; custodio: string; parent_envelope_id: string | null }
-type InvestmentBucket = { id: string; name: string }
+type InvestmentBucket = { id: string; name: string; currentBalance?: number; valorizacionConcept?: string }
 type Category = {
   code: string; name: string; parent_code: string | null
   category_type: string; group_gasto: string | null
@@ -113,6 +113,11 @@ export function TransactionEntryFAB({
   // flags
   const [isPassive, setIsPassive]     = useState(false)
   const [passiveKind, setPassiveKind] = useState<'cobrado' | 'valorizacion'>('cobrado')
+  // "Saldo actual" sub-mode for valorización: type the fund's total instead of
+  // computing the delta yourself — only offered for buckets whose live balance
+  // we know (currentBalance), so the implied gain/loss can be inferred.
+  const [saldoMode, setSaldoMode]     = useState(false)
+  const [saldoActual, setSaldoActual] = useState('')
   const [isSettlement, setIsSettlement] = useState(false)
   const [isSurvival, setIsSurvival]   = useState(false)
   // envelopes
@@ -262,6 +267,7 @@ export function TransactionEntryFAB({
     setCurrency('CRC'); setAmountUSD(''); setFxRate('')
     setVendor(''); setConcept(''); setCategoryCode(''); setExpenseGroup('personal')
     setIsPassive(false); setPassiveKind('cobrado'); setIsSettlement(false); setIsSurvival(false)
+    setSaldoMode(false); setSaldoActual('')
     setEnvelopeId(''); setFromEnvelopeId(''); setToEnvelopeId('')
     setInvestmentBucketId('')
     setShowBucketWarning(false); setBucketWarningAcked(false)
@@ -315,6 +321,9 @@ export function TransactionEntryFAB({
           fileType: aiFile?.type,
           categories,
           envelopes,
+          valorizacionBuckets: buckets
+            .filter((b): b is InvestmentBucket & { currentBalance: number } => b.currentBalance !== undefined)
+            .map(b => ({ id: b.id, name: b.name, currentBalance: b.currentBalance })),
         }),
       })
 
@@ -371,6 +380,21 @@ export function TransactionEntryFAB({
         if (typeof f.is_settlement === 'boolean') setIsSettlement(f.is_settlement)
         if (typeof f.is_survival_expense === 'boolean') setIsSurvival(f.is_survival_expense)
         if (typeof f.envelope_id === 'string') setEnvelopeId(f.envelope_id)
+        // "Dijo el saldo actual de un fondo" — route it through the same
+        // saldo-actual mechanism the manual toggle uses, instead of treating
+        // bucket_balance_amount as a plain transaction amount.
+        if (typeof f.bucket_balance_id === 'string' && typeof f.bucket_balance_amount === 'number') {
+          const bucket = buckets.find(b => b.id === f.bucket_balance_id)
+          if (bucket?.currentBalance !== undefined) {
+            setType('ingreso')
+            setInvestmentBucketId(bucket.id)
+            setIsPassive(true)
+            setPassiveKind('valorizacion')
+            setSaldoMode(true)
+            setSaldoActual(String(f.bucket_balance_amount))
+            if (!f.concept && bucket.valorizacionConcept) setConcept(bucket.valorizacionConcept)
+          }
+        }
         setAiPrefilled(true)
         setAiMode(false)
         setAiMessages([])
@@ -410,6 +434,18 @@ export function TransactionEntryFAB({
     ? (parseFloat(amountUSD) * parseFloat(fxRate)).toFixed(0)
     : ''
 
+  const selectedBucket = buckets.find(b => b.id === investmentBucketId)
+  const canUseSaldoMode = isPassive && passiveKind === 'valorizacion' && selectedBucket?.currentBalance !== undefined
+  // Derived rather than mirrored into state: if the bucket/passiveKind
+  // selection changes out from under an active saldo-mode entry (e.g. bucket
+  // deselected), this just goes back to false on its own — nothing to reset.
+  const saldoModeActive = saldoMode && canUseSaldoMode
+  // Signed — a drop in value is a legitimate negative valorización (movement_type
+  // stays null either way), not a separate "gasto" entry.
+  const saldoDelta = saldoModeActive && saldoActual.trim()
+    ? parseFloat(saldoActual) - (selectedBucket!.currentBalance as number)
+    : null
+
   // Mirrors the same balance debit the /prestamos "Registrar pago" flow does —
   // selecting a préstamo bancario used to only tag the tx (loan_id), never
   // actually debiting loans.current_balance.
@@ -439,8 +475,12 @@ export function TransactionEntryFAB({
     e.preventDefault()
     setError(null)
 
-    const amtCRC = currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount)
-    if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
+    const amtCRC = saldoModeActive && saldoDelta !== null
+      ? saldoDelta
+      : (currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount))
+    if (saldoModeActive) {
+      if (saldoDelta === null || Number.isNaN(saldoDelta) || saldoDelta === 0) { setError('Ingresá el saldo actual (tiene que ser distinto al registrado)'); return }
+    } else if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
     if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
@@ -511,8 +551,12 @@ export function TransactionEntryFAB({
     e.preventDefault()
     setError(null)
 
-    const amtCRC = currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount)
-    if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
+    const amtCRC = saldoModeActive && saldoDelta !== null
+      ? saldoDelta
+      : (currency === 'USD' ? parseFloat(crcFromUSD || '0') : parseFloat(amount))
+    if (saldoModeActive) {
+      if (saldoDelta === null || Number.isNaN(saldoDelta) || saldoDelta === 0) { setError('Ingresá el saldo actual (tiene que ser distinto al registrado)'); return }
+    } else if (!amtCRC || amtCRC <= 0) { setError('Monto inválido'); return }
     if (needsBucketConfirmation()) { setShowBucketWarning(true); return }
 
     startTransition(async () => {
@@ -842,8 +886,9 @@ export function TransactionEntryFAB({
                 )}
               </div>
 
-              {/* Amount fields depend on currency */}
-              {(type === 'traslado' || currency === 'CRC') ? (
+              {/* Amount fields depend on currency — skipped entirely when the
+                  "saldo actual" sub-mode is driving the amount instead */}
+              {type === 'ingreso' && saldoModeActive ? null : (type === 'traslado' || currency === 'CRC') ? (
                 <div>
                   <label className={lbl}>Monto (₡ CRC)</label>
                   <input type="number" min="0" step="any" value={amount}
@@ -1035,6 +1080,47 @@ export function TransactionEntryFAB({
                             <div className="text-[9px] opacity-70 mt-0.5">se reinvirtió en el fondo</div>
                           </button>
                         </div>
+
+                        {canUseSaldoMode && (
+                          <div className="pt-1 border-t border-white/[0.06] space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] text-zinc-500">
+                                Saldo registrado: {selectedBucket!.currentBalance!.toLocaleString('es-CR', { maximumFractionDigits: 0 })}
+                              </span>
+                              <button type="button"
+                                onClick={() => {
+                                  setSaldoMode(v => {
+                                    const next = !v
+                                    if (next && !concept.trim() && selectedBucket?.valorizacionConcept) setConcept(selectedBucket.valorizacionConcept)
+                                    return next
+                                  })
+                                }}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                                  saldoMode
+                                    ? 'bg-purple-400/15 text-purple-300 border-purple-400/40'
+                                    : 'bg-white/[0.03] text-zinc-500 border-white/[0.06] hover:text-zinc-300'
+                                }`}>
+                                {saldoMode ? '✓ Digitando saldo actual' : 'Digitar saldo actual en vez del ajuste'}
+                              </button>
+                            </div>
+                            {saldoMode && (
+                              <div>
+                                <input
+                                  type="number" step="any" inputMode="decimal"
+                                  value={saldoActual}
+                                  onChange={e => setSaldoActual(e.target.value)}
+                                  placeholder="Saldo total actual (₡)"
+                                  className={inputCls}
+                                />
+                                {saldoDelta !== null && !Number.isNaN(saldoDelta) && (
+                                  <p className={`text-[10px] mt-1 font-bold ${saldoDelta >= 0 ? 'text-[#a3e635]' : 'text-rose-400'}`}>
+                                    {saldoDelta >= 0 ? '+' : ''}{saldoDelta.toLocaleString('es-CR', { maximumFractionDigits: 2 })} de {saldoDelta >= 0 ? 'rendimiento' : 'pérdida de valor'} implícito
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                     <button type="button" onClick={() => setIsSettlement(v => !v)}
