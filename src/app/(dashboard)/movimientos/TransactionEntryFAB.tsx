@@ -173,6 +173,7 @@ export function TransactionEntryFAB({
   type ReceiptItem = { concept: string; amount: number; category_code: string }
   const [receiptMode, setReceiptMode]     = useState(false)
   const [receiptVendor, setReceiptVendor] = useState('')
+  const [receiptEnvelopeId, setReceiptEnvelopeId] = useState('')
   const [receiptDate, setReceiptDate]     = useState(today())
   const [receiptItems, setReceiptItems]   = useState<ReceiptItem[]>([])
   const [receiptParsedTotal, setReceiptParsedTotal] = useState(0)
@@ -199,6 +200,7 @@ export function TransactionEntryFAB({
         date: receiptDate,
         vendor: receiptVendor,
         items: receiptItems.map(it => ({ concept: it.concept, amount: it.amount, category_code: it.category_code || undefined })),
+        debit_envelope_id: receiptEnvelopeId || undefined,
       })
       setReceiptSaving(false)
       if (result?.error) { setReceiptError(result.error); return }
@@ -282,7 +284,7 @@ export function TransactionEntryFAB({
     setShowOpcionales(false)
     // reset receipt state
     setReceiptMode(false); setReceiptVendor(''); setReceiptDate(today())
-    setReceiptItems([]); setReceiptParsedTotal(0); setReceiptError(null)
+    setReceiptItems([]); setReceiptParsedTotal(0); setReceiptError(null); setReceiptEnvelopeId('')
   }
 
   function close() { reset(); setOpen(false) }
@@ -804,6 +806,18 @@ export function TransactionEntryFAB({
                   <p className="text-[10px] text-amber-400 px-1">
                     El recibo dice ₡{receiptParsedTotal.toLocaleString('es-CR')} — revisá que los ítems sumen bien (puede haber impuestos o algo sin desglosar).
                   </p>
+                )}
+
+                {leafEnvelopes.length > 0 && (
+                  <div>
+                    <label className={lbl}>Sobre de origen <span className="text-zinc-700 normal-case tracking-normal">(opcional)</span></label>
+                    <select value={receiptEnvelopeId} onChange={e => setReceiptEnvelopeId(e.target.value)} className={inputCls}>
+                      <option value="">Sin sobre (solo registra el gasto)</option>
+                      {leafEnvelopes.map(env => (
+                        <option key={env.id} value={env.id}>{envelopeLabel(env, leafEnvelopes)}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
 
                 {receiptError && (

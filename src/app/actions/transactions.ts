@@ -442,6 +442,7 @@ export async function createReceiptTransactions(input: {
   vendor: string
   items: ReceiptItemInput[]
   notes?: string
+  debit_envelope_id?: string  // retiro from this envelope for the receipt's total, same as a plain gasto
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -504,11 +505,24 @@ export async function createReceiptTransactions(input: {
   )
   if (itemsErr) return { error: itemsErr.message }
 
+  if (input.debit_envelope_id) {
+    const sideErr = await applySideEffects(admin, user.id, {
+      date: input.date,
+      amount: total,
+      debit_envelope_id: input.debit_envelope_id,
+      concept: `Recibo · ${items.length} ítems`,
+      vendor: input.vendor,
+      source_tx_id: parentId,
+    })
+    if (sideErr) return { error: sideErr }
+  }
+
   revalidatePath('/resumen')
   revalidatePath('/flujo')
   revalidatePath('/progreso')
   revalidatePath('/inversiones')
   revalidatePath('/patrimonio')
+  revalidatePath('/liquidez')
   return { error: null, parentId }
 }
 
