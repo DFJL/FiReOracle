@@ -958,6 +958,8 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
   const [editingTx, setEditingTx]   = useState<TxClient | null>(null)
   const [confirmDel, setConfirmDel] = useState<string | null>(null)  // tx.id being confirmed
   const [delPending, startDelTrans] = useTransition()
+  const [page, setPage]             = useState(0)
+  const [pageSize, setPageSize]     = useState(25)
 
   function cycleSort(key: TxSortKey) {
     if (sortKey === key) { setSortAsc(a => !a) } else { setSortKey(key); setSortAsc(false) }
@@ -993,6 +995,12 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search, sortKey, sortAsc])
 
+  // pageSize 0 = "Todas" (no pagination). Clamped at render instead of reset
+  // via effect, so a narrower search/filter can't strand the page past the end.
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(filtered.length / pageSize)) : 1
+  const safePage    = Math.min(page, totalPages - 1)
+  const pageRows    = pageSize > 0 ? filtered.slice(safePage * pageSize, (safePage + 1) * pageSize) : filtered
+
   function fmtTx(crc: number) {
     if (currency === 'USD') {
       const usd = crc / tcSell
@@ -1015,8 +1023,15 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
     <div className="rounded-2xl bg-[#0d120d] border border-[#a3e635]/[0.10] overflow-hidden">
       <div className="px-4 py-3 border-b border-[#a3e635]/[0.10] flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-xs font-semibold text-zinc-300">{title} <span className="text-zinc-600 font-normal">({filtered.length})</span></h3>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar…"
-          className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+            className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-2 py-1.5 text-[10px] text-zinc-400 focus:outline-none">
+            {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} por página</option>)}
+            <option value={0}>Todas</option>
+          </select>
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} placeholder="Buscar…"
+            className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none w-full sm:w-40" />
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs min-w-[700px]">
@@ -1042,7 +1057,7 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.03]">
-            {filtered.slice(0, 300).map((tx) => {
+            {pageRows.map((tx) => {
               const badge = TYPE_BADGE[tx.movement_type ?? '']
               const color = AMT_COLOR[tx.movement_type ?? ''] ?? 'text-zinc-400'
               const sign  = tx.movement_type === 'expense' ? '−' : tx.movement_type === 'income' ? '+' : ''
@@ -1122,6 +1137,19 @@ function TxTable({ rows, title, vMap, cMap, currency, tcSell, categories, bucket
           </tbody>
         </table>
       </div>
+      {pageSize > 0 && totalPages > 1 && (
+        <div className="px-4 py-2.5 border-t border-white/[0.04] flex items-center justify-between gap-3">
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}
+            className="text-[10px] font-black text-zinc-400 hover:text-zinc-200 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors">
+            ‹ Anterior
+          </button>
+          <span className="text-[10px] text-zinc-600">Página {safePage + 1} de {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage >= totalPages - 1}
+            className="text-[10px] font-black text-zinc-400 hover:text-zinc-200 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors">
+            Siguiente ›
+          </button>
+        </div>
+      )}
     </div>
     </>
   )
@@ -1169,6 +1197,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   const { currency } = useCurrency()
   const [showTrend, setShowTrend]   = useState(true)
   const [showFunnel, setShowFunnel] = useState(true)
+  const [showLatest, setShowLatest] = useState(true)
 
   const tcSell = exchangeRate?.sell ?? 515
   const toUSD  = (crc: number) => crc / tcSell
@@ -1532,6 +1561,24 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
               ? <MultiTrendChart points={trendPoints} />
               : <p className="text-center text-xs text-zinc-600 py-6">Sin datos para este período</p>
             }
+          </div>
+        )}
+      </div>
+
+      {/* ── Últimos movimientos — fast path to "¿qué fue lo último que
+          registré?" without drilling through el funnel → categoría →
+          subcategoría. Mismo TxTable que el detalle de abajo, sin filtrar
+          por bucket/categoría, siempre con lo más reciente primero. ── */}
+      <div className="rounded-2xl bg-white/[0.03] border border-white/[0.06] mb-4 overflow-hidden">
+        <button onClick={() => setShowLatest(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em] text-left">Últimos movimientos</p>
+          <ChevronDown size={14} className={`text-zinc-600 transition-transform ${showLatest ? 'rotate-180' : ''}`} />
+        </button>
+        {showLatest && (
+          <div className="px-4 pb-4">
+            <TxTable rows={txList} title="Últimos movimientos" vMap={vMap} cMap={cMap} currency={currency} tcSell={tcSell}
+              categories={categories} buckets={buckets} onTxUpdated={handleTxUpdated} onTxDeleted={handleTxDeleted} />
           </div>
         )}
       </div>
