@@ -189,15 +189,54 @@ export async function getEnvelopeMovements(envelopeId: string): Promise<{ data: 
   }
 }
 
+const OPPOSITE_TRASLADO: Record<string, MovType> = {
+  traslado_out: 'traslado_in',
+  traslado_in: 'traslado_out',
+}
+
 export async function deleteEnvelopeMovement(movementId: string): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autorizado' }
 
+  const { data: movement, error: fetchErr } = await supabase
+    .from('envelope_movements')
+    .select('id, envelope_id, date, amount, movement_type, notes')
+    .eq('id', movementId)
+    .eq('user_id', user.id)
+    .single()
+  if (fetchErr || !movement) return { error: fetchErr?.message ?? 'Movimiento no encontrado' }
+
+  // A traslado leg has no explicit DB link to its counterpart in the other
+  // envelope, so pair it heuristically: same date, exact opposite amount,
+  // same notes, opposite leg type, different envelope. Only cascade when
+  // that's unambiguous — a 1-out-to-many-in split (self-loan abonos,
+  // interest distribution) won't match on amount for more than one leg at
+  // once, so it correctly falls back to deleting just this row.
+  const opposite = OPPOSITE_TRASLADO[movement.movement_type as string]
+  let pairedId: string | null = null
+  if (opposite) {
+    const { data: candidates } = await supabase
+      .from('envelope_movements')
+      .select('id, envelope_id, amount, notes')
+      .eq('user_id', user.id)
+      .eq('date', movement.date)
+      .eq('movement_type', opposite)
+      .neq('envelope_id', movement.envelope_id)
+      .neq('id', movement.id)
+
+    const matches = (candidates ?? []).filter(c =>
+      Math.abs(Number(c.amount) + Number(movement.amount)) < 0.01 &&
+      (c.notes ?? null) === (movement.notes ?? null)
+    )
+    if (matches.length === 1) pairedId = matches[0].id
+  }
+
+  const idsToDelete = pairedId ? [movement.id, pairedId] : [movement.id]
   const { error } = await supabase
     .from('envelope_movements')
     .delete()
-    .eq('id', movementId)
+    .in('id', idsToDelete)
     .eq('user_id', user.id)
 
   if (error) return { error: error.message }
