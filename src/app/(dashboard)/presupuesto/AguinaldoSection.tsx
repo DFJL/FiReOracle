@@ -415,22 +415,26 @@ export function AguinaldoSection({
 
   const totalBudget = allocations.reduce((s, a) => s + a.amount, 0)
   const totalReal   = allocations.reduce((s, a) => s + (a.real_amount ?? 0), 0)
+
+  // Savings already sitting in linked sobres count as available toward
+  // their lines' budgeted amount, on top of the incoming aguinaldo itself —
+  // "disponible" is the real total pot the lines below draw against, so
+  // both bars below measure against it, not against the aguinaldo alone
+  // (otherwise linking a sobre that already covers part of a línea would
+  // never move "excede por" / "sin presupuestar" at all).
+  const coverageMap = computeCoverage(allocations, envelopeBalanceMap)
+  const totalCovered = allocations.reduce((s, a) => s + (coverageMap[a.id] ?? 0), 0)
+  const totalDisponible = totalAmount + totalCovered
+
   // "Presupuestado" = planned/committed, NOT spent — a budget row with no
   // real_amount yet contributes 0 to totalReal regardless of how much of
   // the pot its budget line claims. Two separate bars on purpose, so
   // "ya planeé casi todo" (normal, even healthy) never reads as "ya gasté
   // casi todo" (which would only be true if totalReal were also high).
-  const pctBudgeted = totalAmount > 0 ? Math.min((totalBudget / totalAmount) * 100, 100) : 0
-  const pctSpent     = totalAmount > 0 ? Math.min((totalReal / totalAmount) * 100, 100) : 0
-
-  // Savings already sitting in linked sobres count as available toward
-  // their lines' budgeted amount — a third, separate figure from the
-  // incoming aguinaldo itself, so "disponible" = aguinaldo + that.
-  const coverageMap = computeCoverage(allocations, envelopeBalanceMap)
-  const totalCovered = allocations.reduce((s, a) => s + (coverageMap[a.id] ?? 0), 0)
-  const totalDisponible = totalAmount + totalCovered
-  const unbudgeted   = totalAmount - totalBudget
-  const unspent      = totalAmount - totalReal
+  const pctBudgeted = totalDisponible > 0 ? Math.min((totalBudget / totalDisponible) * 100, 100) : 0
+  const pctSpent     = totalDisponible > 0 ? Math.min((totalReal / totalDisponible) * 100, 100) : 0
+  const unbudgeted   = totalDisponible - totalBudget
+  const unspent      = totalDisponible - totalReal
 
   // Grouped rendering — ungrouped lines (group_name null) show under a
   // generic "Otros" bucket last, grouped ones keep first-seen order.
@@ -538,7 +542,7 @@ export function AguinaldoSection({
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Presupuestado <span className="text-zinc-700 normal-case tracking-normal">(planeado)</span></p>
               </div>
-              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalBudget)} / {fmtCRC(totalAmount)}</p>
+              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalBudget)} / {fmtCRC(totalDisponible)}</p>
               <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
                 <div className={`h-full rounded-full ${unbudgeted < -0.5 ? 'bg-rose-500' : 'bg-amber-400'}`}
                   style={{ width: `${pctBudgeted}%`, opacity: 0.7 }} />
@@ -553,7 +557,7 @@ export function AguinaldoSection({
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-wider">Ejecutado <span className="text-zinc-700 normal-case tracking-normal">(gastado)</span></p>
               </div>
-              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalReal)} / {fmtCRC(totalAmount)}</p>
+              <p className="text-[10px] text-zinc-500 tabular-nums mb-1">{fmtCRC(totalReal)} / {fmtCRC(totalDisponible)}</p>
               <div className="h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
                 <div className="h-full rounded-full bg-emerald-400" style={{ width: `${pctSpent}%`, opacity: 0.7 }} />
               </div>
