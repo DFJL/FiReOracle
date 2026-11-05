@@ -126,18 +126,23 @@ export async function toggleQuincena(id: string, q: 1 | 2, done: boolean, year: 
   revalidatePath('/presupuesto')
 }
 
-export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, month: number): Promise<void> {
+export async function bulkToggleQuincena(
+  q: 1 | 2, done: boolean, year: number, month: number, ids?: string[],
+): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('No autorizado')
 
   const admin = createAdminClient()
 
+  let budgetsQuery = admin.from('budgets')
+    .select('id, category, q1_done, q2_done')
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+  if (ids?.length) budgetsQuery = budgetsQuery.in('id', ids)
+
   const [{ data: all }, { data: monthlyDone }] = await Promise.all([
-    admin.from('budgets')
-      .select('id, category, q1_done, q2_done')
-      .eq('user_id', user.id)
-      .eq('is_active', true),
+    budgetsQuery,
     admin.from('budget_monthly_done')
       .select('category, q1_done, q2_done')
       .eq('user_id', user.id)
@@ -145,10 +150,21 @@ export async function bulkToggleQuincena(q: 1 | 2, done: boolean, year: number, 
       .eq('month', month),
   ])
 
+  // "Current state" must mirror the exact same priority the page itself
+  // reads with (monthly_done row > budget-row flag, the row only being a
+  // valid fallback for the real current month) — otherwise a category
+  // that's "done" only via its budget-row flag (no monthly_done row yet)
+  // reads here as not-done, gets silently skipped, and reappears checked
+  // the moment the page re-fetches.
+  const now = new Date()
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const doneMap = new Map((monthlyDone ?? []).map(d => [d.category, d]))
   const changing = (all ?? []).filter(b => {
     const cur = doneMap.get(b.category)
-    return (cur ? (q === 1 ? cur.q1_done : cur.q2_done) : false) !== done
+    const curDone = cur
+      ? (q === 1 ? cur.q1_done : cur.q2_done)
+      : (isCurrentMonth ? (q === 1 ? b.q1_done : b.q2_done) : false)
+    return curDone !== done
   })
   if (!changing.length) { revalidatePath('/presupuesto'); return }
 

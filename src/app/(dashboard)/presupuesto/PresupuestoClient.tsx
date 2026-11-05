@@ -440,7 +440,7 @@ export function PresupuestoClient({
 
   type OptAction =
     | { type: 'toggle'; id: string; q: 1 | 2; done: boolean }
-    | { type: 'bulk';   q: 1 | 2; done: boolean }
+    | { type: 'bulk';   q: 1 | 2; done: boolean; ids?: Set<string> }
 
   const [optimisticBudgets, dispatchOptimistic] = useOptimistic(
     budgets,
@@ -451,7 +451,10 @@ export function PresupuestoClient({
           : b
         )
       }
-      return state.map(b => ({ ...b, [action.q === 1 ? 'q1_done' : 'q2_done']: action.done }))
+      return state.map(b => (!action.ids || action.ids.has(b.id))
+        ? { ...b, [action.q === 1 ? 'q1_done' : 'q2_done']: action.done }
+        : b
+      )
     },
   )
 
@@ -702,12 +705,18 @@ export function PresupuestoClient({
     })
   }
 
-  function handleBulkToggle(q: 1 | 2) {
-    const allDone = optimisticBudgets.every(b => (q === 1 ? b.q1_done : b.q2_done))
+  // scope: the lines this toggle applies to — omit for the whole table,
+  // pass a subsection's own lines (Gastos, Ahorros / Inversión, Ingresos
+  // esperados, or the combined Egresos group) to scope it to just those.
+  function handleBulkToggle(q: 1 | 2, scope?: Budget[]) {
+    const target = scope ?? optimisticBudgets
+    if (!target.length) return
+    const allDone = target.every(b => (q === 1 ? b.q1_done : b.q2_done))
     const done = !allDone
+    const ids = scope ? new Set(scope.map(b => b.id)) : undefined
     startTransition(async () => {
-      dispatchOptimistic({ type: 'bulk', q, done })
-      await bulkToggleQuincena(q, done, year, month)
+      dispatchOptimistic({ type: 'bulk', q, done, ids })
+      await bulkToggleQuincena(q, done, year, month, ids ? [...ids] : undefined)
     })
   }
 
@@ -796,11 +805,33 @@ export function PresupuestoClient({
 
   // ── egresos parent header (expense + savings combined) ───────────────────────
 
+  // Scoped bulk-toggle checkbox for a group/section header row — stops
+  // the click from also bubbling into the row's own collapse toggle.
+  function GroupToggleCell({ q, scope, bg }: { q: 1 | 2; scope: Budget[]; bg: string }) {
+    const done = scope.length > 0 && scope.every(b => (q === 1 ? b.q1_done : b.q2_done))
+    return (
+      <td className={bg}>
+        <div className="flex justify-center">
+          <button
+            onClick={e => { e.stopPropagation(); handleBulkToggle(q, scope) }}
+            disabled={isPending || scope.length === 0}
+            title={done ? `Desmarcar Q${q} de este grupo` : `Marcar Q${q} listo para este grupo`}
+            className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors hover:opacity-70 ${
+              done ? 'bg-[#a3e635] border-[#a3e635] text-black' : 'border-zinc-600 hover:border-zinc-400'
+            }`}>
+            {done && <Check size={9} />}
+          </button>
+        </div>
+      </td>
+    )
+  }
+
   function renderEgresosHeader() {
     const egCollapsed = collapsed.has('egresos')
     const q1Plan = totalPlanQ1, q2Plan = totalPlanQ2
     const q1Real = totalActQ1,  q2Real = totalActQ2
     const pct    = totalPct
+    const egresosScope = [...expenseLines, ...savingsLines]
     return (
       <tr key="egresos-header"
         onClick={() => toggleSection('egresos')}
@@ -817,10 +848,10 @@ export function PresupuestoClient({
         </td>
         <td className="px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold text-zinc-200">{fmt(q1Plan)}</td>
         <td className={`px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold ${pctCls(q1Plan > 0 ? q1Real / q1Plan * 100 : 0)}`}>{fmt(q1Real)}</td>
-        <td className="bg-zinc-900/80" />
+        <GroupToggleCell q={1} scope={egresosScope} bg="bg-zinc-900/80" />
         <td className="px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold text-zinc-200">{fmt(q2Plan)}</td>
         <td className={`px-3 py-2 bg-zinc-900/80 text-right tabular-nums text-xs font-bold ${pctCls(q2Plan > 0 ? q2Real / q2Plan * 100 : 0)}`}>{fmt(q2Real)}</td>
-        <td className="bg-zinc-900/80" />
+        <GroupToggleCell q={2} scope={egresosScope} bg="bg-zinc-900/80" />
         <td className="bg-zinc-900/80" />
         <td className="px-2 py-2 bg-zinc-900/80">
           <div className="flex items-center gap-1 justify-end">
@@ -867,14 +898,14 @@ export function PresupuestoClient({
           <td className={`px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold ${pctCls(sectionPlanQ1 > 0 ? sectionActQ1 / sectionPlanQ1 * 100 : 0)}`}>
             {sectionActQ1 ? fmt(sectionActQ1) : ''}
           </td>
-          <td className="bg-zinc-900/50" />
+          <GroupToggleCell q={1} scope={lines} bg="bg-zinc-900/50" />
           <td className="px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold text-zinc-300">
             {sectionPlanQ2 ? fmt(sectionPlanQ2) : ''}
           </td>
           <td className={`px-3 py-1.5 bg-zinc-900/50 text-right tabular-nums text-xs font-semibold ${pctCls(sectionPlanQ2 > 0 ? sectionActQ2 / sectionPlanQ2 * 100 : 0)}`}>
             {sectionActQ2 ? fmt(sectionActQ2) : ''}
           </td>
-          <td className="bg-zinc-900/50" />
+          <GroupToggleCell q={2} scope={lines} bg="bg-zinc-900/50" />
           <td className="bg-zinc-900/50" />
           <td className="px-2 py-1.5 bg-zinc-900/50">
             {sectionPlan > 0 && (
