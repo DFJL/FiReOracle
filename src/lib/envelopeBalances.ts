@@ -26,18 +26,21 @@ export type MovementRow = {
 }
 
 /**
- * True for any movement that represents a real bank interest credit —
- * either the legacy direct-credit path (movement_type 'interes', money
- * created from nothing — used before a custodio had a holding sobre) or
- * the current conservation-respecting path (a transfer out of that
- * holding sobre, typed 'traslado_in' so it doesn't inflate the liquid
- * total, tagged by notes instead of type). Needed wherever "interest
- * credited" has to mean both, not just the older of the two.
+ * True for a movement backed by a verified real interest transfer — a
+ * 'traslado_in' out of a real "sobre de intereses" holding account, tagged
+ * by notes, where the amount is checked to balance exactly against what
+ * left that holding account. Deliberately excludes the legacy
+ * movement_type 'interes' path (a one-off 2026-05-31 migration that
+ * segregated a presumed historical interest amount out of several
+ * envelopes' balances with no corresponding debit anywhere to verify it
+ * against) — that path is money already excluded from the countable
+ * balance (see sumLiquid), but it isn't a confirmed real credit either, so
+ * it no longer inflates "Int. acreditado" alongside the real ones.
  */
 export function isInterestCredit(
   m: { movement_type?: string | null; type?: string | null; notes?: string | null }
 ): boolean {
-  return (m.movement_type ?? m.type) === 'interes' || /acreditado proporcionalmente/i.test(m.notes ?? '')
+  return (m.movement_type ?? m.type) === 'traslado_in' && /acreditado proporcionalmente/i.test(m.notes ?? '')
 }
 
 function isActive(e: EnvelopeRow): boolean {
