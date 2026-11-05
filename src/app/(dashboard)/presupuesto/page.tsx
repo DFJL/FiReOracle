@@ -6,17 +6,18 @@ import type { Envelope, TxCategory, FinancialAccount } from './PresupuestoClient
 import { AguinaldoSection } from './AguinaldoSection'
 import { getGroupLabel, displayCategory } from '../resumen/categoryUtils'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
+import { computeEnvelopeBalances, rollupBalance } from '@/lib/envelopeBalances'
 
 export default async function PresupuestoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ m?: string }>
+  searchParams: Promise<{ m?: string; ay?: string }>
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { m } = await searchParams
+  const { m, ay } = await searchParams
   const now = new Date()
   const [yearStr, monthStr] = (m ?? '').split('-')
   const year  = parseInt(yearStr)  || now.getFullYear()
@@ -53,7 +54,8 @@ export default async function PresupuestoPage({
   // salary earned Dec 1 (prev year) through Nov 30 — independent of which month
   // is being browsed above, always anchored to today's real date so it doesn't
   // shift while paging through past/future budget months.
-  const aguinaldoYear = now.getFullYear()
+  const aguinaldoYear = parseInt(ay ?? '') || now.getFullYear()
+  const hasExplicitAguinaldoYear = !!ay
   const aguinaldoPeriodStart = `${aguinaldoYear - 1}-12-01`
   const aguinaldoPeriodEnd   = `${aguinaldoYear}-11-30`
 
@@ -71,6 +73,8 @@ export default async function PresupuestoPage({
     { data: aguinaldoAllocRows },
     { data: aguinaldoGrossRows },
     { data: envelopeDepositRows },
+    { data: aguinaldoYearRows },
+    { data: envelopeMovementRows },
   ] = await Promise.all([
     admin.from('budgets')
       .select('id, category, monthly_limit, q1_amount, q2_amount, q1_done, q2_done, sort_order, budget_type, effective_from, notes, envelope_id, auto_tx_category_code, auto_tx_account_id')
@@ -187,6 +191,20 @@ export default async function PresupuestoPage({
       .eq('movement_type', 'deposito')
       .gte('date', trendStartDate)
       .lte('date', lastDayOfMonth),
+
+    // Every year that already has aguinaldo allocations — for the year
+    // switcher, so past cycles stay reachable and aren't just inferred
+    // from "now".
+    admin.from('aguinaldo_allocations')
+      .select('year')
+      .eq('user_id', user.id),
+
+    // Every envelope movement — needed to compute current balances for
+    // allocation lines linked to a sobre (so a linked sobre's real balance
+    // counts as that line's "real", instead of a manually-typed figure).
+    admin.from('envelope_movements')
+      .select('envelope_id, amount, movement_type')
+      .eq('user_id', user.id),
   ])
 
   // Dedup: keep only the most recent effective row per category
@@ -405,6 +423,30 @@ export default async function PresupuestoPage({
     aguinaldoProjected = (aguinaldoGrossSum + missingAmount) / 12
   }
 
+  // Year switcher options — every year with existing allocations, plus
+  // today's real year and whatever year is currently being viewed, so
+  // navigating always has somewhere to land even before any line exists.
+  const availableAguinaldoYears = [...new Set([
+    ...(aguinaldoYearRows ?? []).map(r => r.year),
+    now.getFullYear(),
+    aguinaldoYear,
+  ])].sort((a, b) => b - a)
+
+  // Balance of every sobre, rolled up through its subtree — lets an
+  // allocation line linked to a sobre show that sobre's real balance as
+  // its "real" instead of a manually-entered figure.
+  const { ownBalance: envOwnBalance, countableIds: envCountableIds } =
+    computeEnvelopeBalances(envelopeRows ?? [], envelopeMovementRows ?? [])
+  const envChildrenByParent: Record<string, { id: string; parent_envelope_id: string | null }[]> = {}
+  for (const e of envelopeRows ?? []) {
+    if (!e.parent_envelope_id) continue
+    ;(envChildrenByParent[e.parent_envelope_id] ??= []).push(e)
+  }
+  const envelopeBalanceMap: Record<string, number> = {}
+  for (const e of envelopeRows ?? []) {
+    envelopeBalanceMap[e.id] = rollupBalance(e.id, envChildrenByParent, envOwnBalance, envCountableIds)
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
       <PresupuestoClient
@@ -437,6 +479,9 @@ export default async function PresupuestoPage({
         grossSalaryEntries={aguinaldoGrossRows ?? []}
         envelopes={(envelopeRows ?? []) as Envelope[]}
         txCategories={(catRows ?? []) as TxCategory[]}
+        envelopeBalanceMap={envelopeBalanceMap}
+        availableYears={availableAguinaldoYears}
+        hasExplicitYear={hasExplicitAguinaldoYear}
       />
     </div>
   )

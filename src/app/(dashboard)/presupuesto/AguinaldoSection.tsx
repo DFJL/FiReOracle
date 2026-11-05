@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   addAguinaldoAllocation, updateAguinaldoAllocation, deleteAguinaldoAllocation, moveAguinaldoAllocation,
   addGrossSalaryEntry, updateGrossSalaryEntry, deleteGrossSalaryEntry,
@@ -10,6 +12,16 @@ import type { Envelope, TxCategory } from './PresupuestoClient'
 
 function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
+}
+
+// A line linked to a sobre that still exists shows that sobre's current
+// balance as its "real" — the whole point of linking it — instead of a
+// manually-typed figure, which would just drift out of sync.
+function effectiveReal(alloc: AguinaldoAllocation, envelopeBalanceMap: Record<string, number>): number {
+  if (alloc.envelope_id && envelopeBalanceMap[alloc.envelope_id] !== undefined) {
+    return envelopeBalanceMap[alloc.envelope_id]
+  }
+  return alloc.real_amount ?? 0
 }
 
 function fmtDate(iso: string) {
@@ -29,12 +41,13 @@ function pctColor(pct: number) {
 // ── Allocation row ──────────────────────────────────────────────────────────
 
 function AllocationRow({
-  alloc, year, envelopes, txCategories, isFirst, isLast,
+  alloc, year, envelopes, txCategories, envelopeBalanceMap, isFirst, isLast,
 }: {
   alloc: AguinaldoAllocation
   year: number
   envelopes: Envelope[]
   txCategories: TxCategory[]
+  envelopeBalanceMap: Record<string, number>
   isFirst: boolean
   isLast: boolean
 }) {
@@ -50,7 +63,8 @@ function AllocationRow({
   const [, startMove]               = useTransition()
 
   const envelopeName = alloc.envelope_id ? envelopes.find(e => e.id === alloc.envelope_id)?.name : null
-  const real = alloc.real_amount ?? 0
+  const linkedBalance = envelopeId ? envelopeBalanceMap[envelopeId] : undefined
+  const real = effectiveReal(alloc, envelopeBalanceMap)
   const pct  = alloc.amount > 0 ? (real / alloc.amount) * 100 : 0
 
   function move(direction: 'up' | 'down') {
@@ -59,7 +73,9 @@ function AllocationRow({
 
   function save() {
     const amt = parseFloat(amount.replace(/,/g, ''))
-    const realVal = realAmount.trim() === '' ? null : parseFloat(realAmount.replace(/,/g, ''))
+    // Once linked to a sobre, "real" comes from that sobre's balance — the
+    // manually-typed figure becomes meaningless and isn't persisted.
+    const realVal = envelopeId ? null : (realAmount.trim() === '' ? null : parseFloat(realAmount.replace(/,/g, '')))
     if (!label.trim())    { setError('Nombre requerido'); return }
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
     setError('')
@@ -101,7 +117,13 @@ function AllocationRow({
           </div>
           <div>
             <p className="text-[8px] text-zinc-600 uppercase mb-0.5">Real</p>
-            <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp} />
+            {envelopeId ? (
+              <div className={`${inp} flex items-center text-zinc-400`}>
+                {fmtCRC(linkedBalance ?? 0)} <span className="text-zinc-600 ml-1">(saldo del sobre)</span>
+              </div>
+            ) : (
+              <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp} />
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -114,6 +136,9 @@ function AllocationRow({
             {txCategories.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
           </select>
         </div>
+        {envelopeId && (
+          <p className="text-[9px] text-zinc-600">Vinculado a un sobre: el real se toma de su saldo, no se escribe a mano.</p>
+        )}
         {error && <p className="text-[10px] text-rose-400">{error}</p>}
         <div className="flex gap-1.5">
           <button onClick={save} disabled={isPending}
@@ -334,6 +359,7 @@ function AddGrossEntryForm() {
 export function AguinaldoSection({
   year, periodStart, periodEnd, estimatedAmount, estimateSource, monthsCovered,
   projectedAmount, receivedAmount, allocations, grossSalaryEntries, envelopes, txCategories,
+  envelopeBalanceMap, availableYears, hasExplicitYear,
 }: {
   year: number
   periodStart: string
@@ -347,10 +373,21 @@ export function AguinaldoSection({
   grossSalaryEntries: AguinaldoGrossSalaryEntry[]
   envelopes: Envelope[]
   txCategories: TxCategory[]
+  envelopeBalanceMap: Record<string, number>
+  availableYears: number[]
+  hasExplicitYear: boolean
 }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [collapsed, setCollapsed]       = useState(false)
   const [showLedger, setShowLedger]     = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  function goToYear(y: number) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('ay', String(y))
+    router.push(`/presupuesto?${params.toString()}`)
+  }
   const isActual = receivedAmount > 0
   // Projecting unpaid-yet months at the current known rate is more realistic
   // for planning than the strict sum ÷ 12 (which treats unpaid months as
@@ -360,7 +397,7 @@ export function AguinaldoSection({
   const totalAmount = isActual ? receivedAmount : usingProjection ? projectedAmount! : estimatedAmount
 
   const totalBudget = allocations.reduce((s, a) => s + a.amount, 0)
-  const totalReal   = allocations.reduce((s, a) => s + (a.real_amount ?? 0), 0)
+  const totalReal   = allocations.reduce((s, a) => s + effectiveReal(a, envelopeBalanceMap), 0)
   // "Presupuestado" = planned/committed, NOT spent — a budget row with no
   // real_amount yet contributes 0 to totalReal regardless of how much of
   // the pot its budget line claims. Two separate bars on purpose, so
@@ -394,13 +431,34 @@ export function AguinaldoSection({
     })
   }
 
-  if (totalAmount <= 0 && allocations.length === 0 && grossSalaryEntries.length === 0) return null
+  // Hide the whole block only on the default (no explicit year chosen)
+  // view when there's truly nothing to show — once the user has navigated
+  // to a specific year via the switcher (e.g. to start a new version),
+  // keep rendering so the empty state + add form are reachable.
+  if (!hasExplicitYear && totalAmount <= 0 && allocations.length === 0 && grossSalaryEntries.length === 0) return null
 
   return (
     <div className="bg-amber-400/[0.04] rounded-2xl border border-amber-400/[0.12] overflow-hidden">
       <button onClick={() => setCollapsed(v => !v)} className="w-full flex items-center justify-between px-5 py-4 text-left">
         <div>
-          <p className="text-[9px] font-black text-amber-400/60 uppercase tracking-[0.18em]">🎄 Aguinaldo {year}</p>
+          <div className="flex items-center gap-1">
+            <p className="text-[9px] font-black text-amber-400/60 uppercase tracking-[0.18em]">🎄 Aguinaldo {year}</p>
+            <div className="flex items-center gap-0.5 ml-1" onClick={e => e.stopPropagation()}>
+              <button onClick={() => goToYear(year - 1)} className="text-zinc-600 hover:text-amber-400/70 transition-colors">
+                <ChevronLeft size={11} />
+              </button>
+              <select
+                value={year}
+                onChange={e => goToYear(parseInt(e.target.value))}
+                className="bg-transparent text-[9px] text-zinc-500 hover:text-amber-400/70 focus:outline-none cursor-pointer"
+              >
+                {availableYears.map(y => <option key={y} value={y} className="bg-zinc-900">{y}</option>)}
+              </select>
+              <button onClick={() => goToYear(year + 1)} className="text-zinc-600 hover:text-amber-400/70 transition-colors">
+                <ChevronRight size={11} />
+              </button>
+            </div>
+          </div>
           <p className="text-xl font-black text-white mt-0.5">
             {fmtCRC(totalAmount)}
             <span className="text-xs font-normal text-zinc-500 ml-2">
@@ -507,6 +565,7 @@ export function AguinaldoSection({
                   {!isCollapsed && items.map((a, i) => (
                     <AllocationRow
                       key={a.id} alloc={a} year={year} envelopes={envelopes} txCategories={txCategories}
+                      envelopeBalanceMap={envelopeBalanceMap}
                       isFirst={i === 0} isLast={i === items.length - 1}
                     />
                   ))}
