@@ -14,14 +14,30 @@ function fmtCRC(n: number) {
   return `₡${Math.round(n).toLocaleString('es-CR')}`
 }
 
-// A line linked to a sobre that still exists shows that sobre's current
-// balance as its "real" — the whole point of linking it — instead of a
-// manually-typed figure, which would just drift out of sync.
-function effectiveReal(alloc: AguinaldoAllocation, envelopeBalanceMap: Record<string, number>): number {
-  if (alloc.envelope_id && envelopeBalanceMap[alloc.envelope_id] !== undefined) {
-    return envelopeBalanceMap[alloc.envelope_id]
+// A line linked to a sobre that already holds savings counts that money as
+// available toward its budgeted amount — NOT as "real/ejecutado" (that stays
+// a manual figure, tracking what's actually been spent). When the same sobre
+// is linked to several lines, its balance is split across them weighted by
+// each line's own budgeted amount, so the money isn't claimed in full by
+// every line that points to it.
+function computeCoverage(
+  allocations: AguinaldoAllocation[],
+  envelopeBalanceMap: Record<string, number>,
+): Record<string, number> {
+  const byEnvelope: Record<string, AguinaldoAllocation[]> = {}
+  for (const a of allocations) {
+    if (!a.envelope_id) continue
+    ;(byEnvelope[a.envelope_id] ??= []).push(a)
   }
-  return alloc.real_amount ?? 0
+  const coverage: Record<string, number> = {}
+  for (const lines of Object.values(byEnvelope)) {
+    const envId = lines[0].envelope_id as string
+    const balance = envelopeBalanceMap[envId] ?? 0
+    const totalWeight = lines.reduce((s, l) => s + l.amount, 0)
+    if (totalWeight <= 0) continue
+    for (const l of lines) coverage[l.id] = balance * (l.amount / totalWeight)
+  }
+  return coverage
 }
 
 function fmtDate(iso: string) {
@@ -41,13 +57,14 @@ function pctColor(pct: number) {
 // ── Allocation row ──────────────────────────────────────────────────────────
 
 function AllocationRow({
-  alloc, year, envelopes, txCategories, envelopeBalanceMap, isFirst, isLast,
+  alloc, year, envelopes, txCategories, envelopeBalanceMap, coverage, isFirst, isLast,
 }: {
   alloc: AguinaldoAllocation
   year: number
   envelopes: Envelope[]
   txCategories: TxCategory[]
   envelopeBalanceMap: Record<string, number>
+  coverage: number
   isFirst: boolean
   isLast: boolean
 }) {
@@ -64,8 +81,9 @@ function AllocationRow({
 
   const envelopeName = alloc.envelope_id ? envelopes.find(e => e.id === alloc.envelope_id)?.name : null
   const linkedBalance = envelopeId ? envelopeBalanceMap[envelopeId] : undefined
-  const real = effectiveReal(alloc, envelopeBalanceMap)
+  const real = alloc.real_amount ?? 0
   const pct  = alloc.amount > 0 ? (real / alloc.amount) * 100 : 0
+  const faltante = Math.max(0, alloc.amount - coverage)
 
   function move(direction: 'up' | 'down') {
     startMove(async () => { await moveAguinaldoAllocation(alloc.id, year, direction) })
@@ -73,9 +91,7 @@ function AllocationRow({
 
   function save() {
     const amt = parseFloat(amount.replace(/,/g, ''))
-    // Once linked to a sobre, "real" comes from that sobre's balance — the
-    // manually-typed figure becomes meaningless and isn't persisted.
-    const realVal = envelopeId ? null : (realAmount.trim() === '' ? null : parseFloat(realAmount.replace(/,/g, '')))
+    const realVal = realAmount.trim() === '' ? null : parseFloat(realAmount.replace(/,/g, ''))
     if (!label.trim())    { setError('Nombre requerido'); return }
     if (!amt || amt <= 0) { setError('Monto inválido'); return }
     setError('')
@@ -117,13 +133,7 @@ function AllocationRow({
           </div>
           <div>
             <p className="text-[8px] text-zinc-600 uppercase mb-0.5">Real</p>
-            {envelopeId ? (
-              <div className={`${inp} flex items-center text-zinc-400`}>
-                {fmtCRC(linkedBalance ?? 0)} <span className="text-zinc-600 ml-1">(saldo del sobre)</span>
-              </div>
-            ) : (
-              <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp} />
-            )}
+            <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -137,7 +147,9 @@ function AllocationRow({
           </select>
         </div>
         {envelopeId && (
-          <p className="text-[9px] text-zinc-600">Vinculado a un sobre: el real se toma de su saldo, no se escribe a mano.</p>
+          <p className="text-[9px] text-zinc-600">
+            El sobre tiene ₡{Math.round(linkedBalance ?? 0).toLocaleString('es-CR')} ahorrados — eso cuenta como disponible para esta línea, no como ejecutado.
+          </p>
         )}
         {error && <p className="text-[10px] text-rose-400">{error}</p>}
         <div className="flex gap-1.5">
@@ -164,7 +176,12 @@ function AllocationRow({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs text-zinc-200 truncate">{alloc.label}</p>
-        {envelopeName && <p className="text-[9px] text-zinc-600 truncate">→ {envelopeName}</p>}
+        {envelopeName && (
+          <p className="text-[9px] text-zinc-600 truncate">
+            → {envelopeName} · disponible {fmtCRC(coverage)}
+            {faltante > 0.5 ? <span className="text-amber-400/70"> (faltan {fmtCRC(faltante)})</span> : ' ✓'}
+          </p>
+        )}
       </div>
       <div className="text-right shrink-0 w-20">
         <p className="text-[10px] tabular-nums text-zinc-400">{fmtCRC(alloc.amount)}</p>
@@ -397,7 +414,7 @@ export function AguinaldoSection({
   const totalAmount = isActual ? receivedAmount : usingProjection ? projectedAmount! : estimatedAmount
 
   const totalBudget = allocations.reduce((s, a) => s + a.amount, 0)
-  const totalReal   = allocations.reduce((s, a) => s + effectiveReal(a, envelopeBalanceMap), 0)
+  const totalReal   = allocations.reduce((s, a) => s + (a.real_amount ?? 0), 0)
   // "Presupuestado" = planned/committed, NOT spent — a budget row with no
   // real_amount yet contributes 0 to totalReal regardless of how much of
   // the pot its budget line claims. Two separate bars on purpose, so
@@ -405,6 +422,13 @@ export function AguinaldoSection({
   // casi todo" (which would only be true if totalReal were also high).
   const pctBudgeted = totalAmount > 0 ? Math.min((totalBudget / totalAmount) * 100, 100) : 0
   const pctSpent     = totalAmount > 0 ? Math.min((totalReal / totalAmount) * 100, 100) : 0
+
+  // Savings already sitting in linked sobres count as available toward
+  // their lines' budgeted amount — a third, separate figure from the
+  // incoming aguinaldo itself, so "disponible" = aguinaldo + that.
+  const coverageMap = computeCoverage(allocations, envelopeBalanceMap)
+  const totalCovered = allocations.reduce((s, a) => s + (coverageMap[a.id] ?? 0), 0)
+  const totalDisponible = totalAmount + totalCovered
   const unbudgeted   = totalAmount - totalBudget
   const unspent      = totalAmount - totalReal
 
@@ -467,6 +491,11 @@ export function AguinaldoSection({
           </p>
           {usingProjection && (
             <p className="text-[9px] text-zinc-600 mt-0.5">estricto (solo lo registrado ÷ 12): {fmtCRC(estimatedAmount)}</p>
+          )}
+          {totalCovered > 0.5 && (
+            <p className="text-[9px] text-amber-400/60 mt-0.5">
+              + {fmtCRC(totalCovered)} ya ahorrado en sobres vinculados → disponible {fmtCRC(totalDisponible)}
+            </p>
           )}
         </div>
         <span className="text-zinc-600 text-xs">{collapsed ? '▾' : '▴'}</span>
@@ -565,7 +594,7 @@ export function AguinaldoSection({
                   {!isCollapsed && items.map((a, i) => (
                     <AllocationRow
                       key={a.id} alloc={a} year={year} envelopes={envelopes} txCategories={txCategories}
-                      envelopeBalanceMap={envelopeBalanceMap}
+                      envelopeBalanceMap={envelopeBalanceMap} coverage={coverageMap[a.id] ?? 0}
                       isFirst={i === 0} isLast={i === items.length - 1}
                     />
                   ))}
