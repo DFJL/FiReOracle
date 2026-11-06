@@ -8,11 +8,13 @@ import type { HistoryPoint, HistorySeries } from './PortfolioHistory'
 import { PortfolioYield } from './PortfolioYield'
 import { PortfolioAnalysis, type MonthlyContribution, type MonthlyIncome, type EnvelopeCluster } from './PortfolioAnalysis'
 import { PortfolioModelPanel, type BucketOption, type AssetOption, type PositionOption } from './PortfolioModelPanel'
+import { RentalPerformanceSection, type RentalAssetView } from './RentalPerformanceSection'
 import { getPortfolioTargets } from '@/app/actions/portfolio'
 import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
+import { computeRentalPerformance } from '@/lib/rentalPerformance'
 import type { PortfolioModelCategory } from '@/lib/portfolioModel'
 
 const LIQUID_KEY = '__liquidez__'
@@ -83,10 +85,10 @@ export default async function InversionesPage() {
       .eq('user_id', user.id)
       .order('date', { ascending: true }),
     admin.from('assets')
-      .select('id, name, value_crc, is_investable, loan_id, portfolio_model_category')
+      .select('id, name, value_crc, as_of_date, is_investable, is_rental, loan_id, purchase_price_crc, purchase_date, portfolio_model_category')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('loans')
-      .select('id, current_balance, currency_code')
+      .select('id, current_balance, currency_code, interest_rate, end_date')
       .eq('user_id', user.id),
     admin.from('portfolio_model_targets')
       .select('category, target_pct')
@@ -581,6 +583,35 @@ export default async function InversionesPage() {
     target_pct: Number(t.target_pct),
   }))
 
+  const rentalAssets: RentalAssetView[] = (assetRows ?? [])
+    .filter(a => a.is_rental)
+    .map(a => {
+      const loan = (loanRows ?? []).find(l => l.id === a.loan_id) ?? null
+      const perf = computeRentalPerformance({
+        asset: {
+          value_crc: a.value_crc,
+          as_of_date: a.as_of_date,
+          purchase_price_crc: a.purchase_price_crc,
+          purchase_date: a.purchase_date,
+        },
+        loan,
+        txs: txs ?? [],
+        fxRate: exchangeRate.sell,
+      })
+      return {
+        id: a.id,
+        name: a.name,
+        valueCrc: Number(a.value_crc ?? 0),
+        equityCrc: perf.equityCrc,
+        noiMonthly: perf.noiMonthly,
+        dscr: perf.dscr,
+        capRate: perf.capRate,
+        cashOnCash: perf.cashOnCash,
+        appreciationCAGR: perf.appreciationCAGR,
+        totalReturn: perf.totalReturn,
+      }
+    })
+
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <PortfolioView
@@ -625,6 +656,7 @@ export default async function InversionesPage() {
         targets={modelTargets}
         exchangeRate={exchangeRate}
       />
+      <RentalPerformanceSection assets={rentalAssets} />
     </div>
   )
 }

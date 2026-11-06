@@ -331,6 +331,8 @@ export type Database = {
           name: string
           notes: string | null
           portfolio_model_category: string | null
+          purchase_date: string | null
+          purchase_price_crc: number | null
           sort_order: number
           updated_at: string
           user_id: string
@@ -348,6 +350,8 @@ export type Database = {
           name: string
           notes?: string | null
           portfolio_model_category?: string | null
+          purchase_date?: string | null
+          purchase_price_crc?: number | null
           sort_order?: number
           updated_at?: string
           user_id: string
@@ -365,6 +369,8 @@ export type Database = {
           name?: string
           notes?: string | null
           portfolio_model_category?: string | null
+          purchase_date?: string | null
+          purchase_price_crc?: number | null
           sort_order?: number
           updated_at?: string
           user_id?: string
@@ -1052,6 +1058,77 @@ export type Database = {
             columns: ["linked_envelope_id"]
             isOneToOne: false
             referencedRelation: "savings_envelopes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      investment_instruments: {
+        Row: {
+          annual_rate: number | null
+          bucket_id: string | null
+          created_at: string
+          currency_code: string | null
+          external_ref: string | null
+          id: string
+          industry: string | null
+          instrument_type: string
+          is_active: boolean
+          maturity_date: string | null
+          metadata: Json | null
+          monthly_contribution: number | null
+          name: string
+          notes: string | null
+          purchase_date: string | null
+          term_months: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          annual_rate?: number | null
+          bucket_id?: string | null
+          created_at?: string
+          currency_code?: string | null
+          external_ref?: string | null
+          id?: string
+          industry?: string | null
+          instrument_type: string
+          is_active?: boolean
+          maturity_date?: string | null
+          metadata?: Json | null
+          monthly_contribution?: number | null
+          name: string
+          notes?: string | null
+          purchase_date?: string | null
+          term_months?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          annual_rate?: number | null
+          bucket_id?: string | null
+          created_at?: string
+          currency_code?: string | null
+          external_ref?: string | null
+          id?: string
+          industry?: string | null
+          instrument_type?: string
+          is_active?: boolean
+          maturity_date?: string | null
+          metadata?: Json | null
+          monthly_contribution?: number | null
+          name?: string
+          notes?: string | null
+          purchase_date?: string | null
+          term_months?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investment_instruments_bucket_id_fkey"
+            columns: ["bucket_id"]
+            isOneToOne: false
+            referencedRelation: "user_investment_buckets"
             referencedColumns: ["id"]
           },
         ]
