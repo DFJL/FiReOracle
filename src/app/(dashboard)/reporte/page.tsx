@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { ReporteView } from './ReporteView'
+import { isActiveIncome } from '@/lib/incomeAllocation'
 
 function addMonths(dateStr: string, months: number): string {
   const d = new Date(dateStr + 'T12:00:00')
@@ -54,21 +55,21 @@ export default async function ReportePage({
   ] = await Promise.all([
     admin
       .from('transactions')
-      .select('movement_type, amount, category_code, expense_group')
+      .select('movement_type, amount, category_code, expense_group, is_passive_income')
       .eq('user_id', user.id)
       .gte('date', monthStart)
       .lt('date', nextMonthStart)
       .not('amount', 'is', null),
     admin
       .from('transactions')
-      .select('movement_type, amount, category_code, expense_group')
+      .select('movement_type, amount, category_code, expense_group, is_passive_income')
       .eq('user_id', user.id)
       .gte('date', prevMonthStart)
       .lt('date', monthStart)
       .not('amount', 'is', null),
     admin
       .from('transactions')
-      .select('movement_type, amount, category_code, expense_group')
+      .select('movement_type, amount, category_code, expense_group, is_passive_income')
       .eq('user_id', user.id)
       .gte('date', yearAgoStart)
       .lt('date', yearAgoEnd)
@@ -89,7 +90,7 @@ export default async function ReportePage({
     let expenses = 0
     for (const tx of txs ?? []) {
       const amt = Number(tx.amount ?? 0)
-      if (tx.movement_type === 'income') income += amt
+      if (isActiveIncome(tx)) income += amt
       else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') expenses += amt
     }
     const net = income - expenses

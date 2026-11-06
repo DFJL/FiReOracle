@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { MonthlyBarsChart, SavingsHeatmap, MonthData } from './CashFlowChart'
-import { isDepositTx, isValuationConcept } from '@/lib/incomeAllocation'
+import { isDepositTx, isValuationConcept, isActiveIncome } from '@/lib/incomeAllocation'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ function monthlyAggregates(txs: TxRow[]): (MonthData & { hasData: boolean })[] {
     const key = tx.date.slice(0, 7)
     if (!map[key]) map[key] = { income: 0, expenses: 0, withdrawals: 0 }
     const amt = Number(tx.amount ?? 0)
-    if (tx.movement_type === 'income' && !tx.is_settlement) {
+    if (isActiveIncome(tx) && !tx.is_settlement) {
       map[key].income += amt
     } else if (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') {
       // Shared with /resumen and /progreso (@/lib/incomeAllocation) — a
