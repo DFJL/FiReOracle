@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { isValuationConcept } from '@/lib/incomeAllocation'
 import { type FlowWindow } from '@/lib/ahorroInversionFlow'
@@ -157,6 +158,19 @@ function SegmentedFunnelStep({
           })}
         </div>
       </div>
+      {/* Always-visible legend — the bar's own colors only explain
+          themselves on hover, which nobody discovers by accident. */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+        {visible.map(s => {
+          const pct = amount > 0 ? (s.amount / amount) * 100 : 0
+          return (
+            <span key={s.key} className="inline-flex items-center gap-1 text-[9px] text-zinc-500">
+              <span className="w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: s.color }} />
+              {s.label} <span className="text-zinc-600">{pct.toFixed(0)}%</span>
+            </span>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -293,6 +307,10 @@ export function IncomeFunnel({
   // 'cuotas' | 'deuda'). Optional: cards render without a sparkline if absent.
   trendByBucket?: Partial<Record<UiBucket, number[]>>
 }) {
+  // Which half of "Por tipo" shows — kept separate from selectedBucket so
+  // switching tabs never changes what's drilled into below.
+  const [sideTab, setSideTab] = useState<'egresos' | 'ingresos'>('egresos')
+
   // ── Income sources (a different question from gasto/ahorro/inversión —
   // "where income came from", not "where it went") ──────────────────────
   let activeIncome = 0, passiveIncome = 0, patrimonial = 0
@@ -376,46 +394,80 @@ export function IncomeFunnel({
 
       {/* ── De qué están hechos los egresos y el ingreso — un card por
           pregunta; tocá un item para ver sus categorías y transacciones
-          abajo. ── */}
-      <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-2">
-        Por tipo · tocá uno para ver el detalle
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <BucketGroupCard
-          label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          selected={selectedBucket} onSelect={onSelectBucket}
-          items={(['necesario', 'discrecional'] as UiBucket[]).map(b => (
-            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
-              trend: trendFor(b), trendTitle: trendTitleFor(b) }
-          ))}
-        />
-        <BucketGroupCard
-          label="Ahorro e inversión" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          selected={selectedBucket} onSelect={onSelectBucket}
-          items={(['ahorro', 'inversion'] as UiBucket[]).map(b => (
-            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
-              trend: trendFor(b), trendTitle: trendTitleFor(b) }
-          ))}
-        />
-        {/* Cuotas (scheduled installments) + Deuda (extra paydowns) — both
-            loan-servicing, not lifestyle consumption. */}
-        <BucketGroupCard
-          label="Deuda" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          selected={selectedBucket} onSelect={onSelectBucket}
-          items={(['cuotas', 'deuda'] as UiBucket[]).map(b => (
-            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
-          ))}
-        />
-        <BucketGroupCard
-          label="Ingreso, por fuente" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
-          showPctOfIncome={false} selected={selectedBucket} onSelect={onSelectBucket}
-          items={[
-            { key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME },
-            { key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME },
-            { key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL },
-          ]}
-        />
+          abajo. Egresos (de dónde se fue la plata) e Ingresos (de dónde
+          vino) son preguntas de naturaleza distinta, así que van en tabs
+          separados en vez de mezclados en la misma grilla. ── */}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider">
+          Por tipo · tocá uno para ver el detalle
+        </p>
+        <div className="flex gap-1 bg-white/[0.03] rounded-lg p-0.5">
+          <button
+            type="button"
+            onClick={() => setSideTab('egresos')}
+            className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wide transition-colors"
+            style={{
+              background: sideTab === 'egresos' ? 'rgba(217,89,38,0.15)' : 'transparent',
+              color: sideTab === 'egresos' ? '#d95926' : '#71717a',
+            }}
+          >
+            Egresos
+          </button>
+          <button
+            type="button"
+            onClick={() => setSideTab('ingresos')}
+            className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wide transition-colors"
+            style={{
+              background: sideTab === 'ingresos' ? 'rgba(163,230,53,0.15)' : 'transparent',
+              color: sideTab === 'ingresos' ? '#a3e635' : '#71717a',
+            }}
+          >
+            Ingresos
+          </button>
+        </div>
       </div>
+
+      {sideTab === 'egresos' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <BucketGroupCard
+            label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+            selected={selectedBucket} onSelect={onSelectBucket}
+            items={(['necesario', 'discrecional'] as UiBucket[]).map(b => (
+              { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
+                trend: trendFor(b), trendTitle: trendTitleFor(b) }
+            ))}
+          />
+          <BucketGroupCard
+            label="Ahorro e inversión" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+            selected={selectedBucket} onSelect={onSelectBucket}
+            items={(['ahorro', 'inversion'] as UiBucket[]).map(b => (
+              { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
+                trend: trendFor(b), trendTitle: trendTitleFor(b) }
+            ))}
+          />
+          {/* Cuotas (scheduled installments) + Deuda (extra paydowns) — both
+              loan-servicing, not lifestyle consumption. */}
+          <BucketGroupCard
+            label="Deuda" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+            selected={selectedBucket} onSelect={onSelectBucket}
+            items={(['cuotas', 'deuda'] as UiBucket[]).map(b => (
+              { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
+            ))}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-2">
+          <BucketGroupCard
+            label="Ingreso, por fuente" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
+            showPctOfIncome={false} selected={selectedBucket} onSelect={onSelectBucket}
+            items={[
+              { key: 'active',      label: 'Ingreso activo',   amount: activeIncome,  color: COLOR_ACTIVE_INCOME },
+              { key: 'passive',     label: 'Ingreso pasivo',   amount: passiveIncome, color: COLOR_PASSIVE_INCOME },
+              { key: 'patrimonial', label: 'Val. patrimonial', amount: patrimonial,   color: COLOR_PATRIMONIAL },
+            ]}
+          />
+        </div>
+      )}
     </div>
   )
 }
