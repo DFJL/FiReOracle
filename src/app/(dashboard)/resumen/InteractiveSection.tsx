@@ -29,6 +29,10 @@ export interface TxClient {
   category_code: string | null
   movement_type: string | null
   amount: number | null
+  // Historical-rate USD equivalent, backfilled for multi-year investment/
+  // crypto transactions (historical_exchange_rates_monthly) — null for
+  // everything else, where today's rate is the only one that ever applied.
+  amount_usd?: number | null
   expense_group: string | null
   is_settlement: boolean
   is_passive_income?: boolean
@@ -1412,17 +1416,31 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
   }
 
   // Category breakdown (L1)
+  // A multi-year CRC total converted at today's single rate overstates the
+  // real dollar cost of anything bought while the colón was weaker (most of
+  // this account's investment history — the colón has strengthened ~25%
+  // since 2021). For transactions with a backfilled historical amount_usd,
+  // accumulate `amount_usd * tcSell` instead of raw CRC — fmtAmt's existing
+  // USD branch divides by tcSell again, so this round-trips to the correct
+  // historical dollar figure without changing fmtAmt or any render call
+  // site. In CRC mode this would be wrong, so it only applies in USD mode.
+  const txAmountForDisplay = (tx: TxClient): number => {
+    const crc = Number(tx.amount ?? 0)
+    if (currency !== 'USD' || tx.amount_usd == null) return crc
+    return Number(tx.amount_usd) * tcSell
+  }
+
   const cats = useMemo(() => {
     const map: Record<string, { amount: number; count: number }> = {}
     for (const tx of tabTxs) {
       const cat = getDisplayCat(tx)
       if (!map[cat]) map[cat] = { amount: 0, count: 0 }
-      map[cat].amount += Number(tx.amount ?? 0)
+      map[cat].amount += txAmountForDisplay(tx)
       map[cat].count++
     }
     return Object.entries(map).map(([category, v]) => ({ category, ...v })).sort((a, b) => b.amount - a.amount)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabTxs])
+  }, [tabTxs, currency, tcSell])
 
   // Filtered by selected category
   const catTxs = useMemo(() =>
@@ -1438,11 +1456,12 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
       const k = raw.toLowerCase().trim().replace(/\s+/g, ' ')
       const display = normalizeConcept(raw)
       if (!map[k]) map[k] = { amount: 0, count: 0, display }
-      map[k].amount += Number(tx.amount ?? 0)
+      map[k].amount += txAmountForDisplay(tx)
       map[k].count++
     }
     return Object.entries(map).map(([, v]) => ({ name: v.display, ...v })).sort((a, b) => b.amount - a.amount).slice(0, 30)
-  }, [catTxs])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catTxs, currency, tcSell])
 
   // Final transaction list (L3) — match by normalized concept
   const tableTxs = useMemo(() =>
