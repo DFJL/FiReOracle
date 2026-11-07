@@ -419,8 +419,76 @@ export async function computeYieldHistory(): Promise<{
 
   if (upsertErr) return { error: upsertErr.message, rows: 0 }
 
+  // 7. Mirror snapshot_based buckets' computed yield into `transactions` as
+  // real is_passive_income rows — every consumer of "ingreso pasivo"
+  // (resumen, progreso's FI/FS/runway, the funnel) reads transactions, not
+  // investment_yield_history, so without this a bucket like Crypto/DeFi or
+  // IBKR — whose yield only ever exists as a balance-delta computation, no
+  // underlying transaction — was invisible everywhere except /inversiones'
+  // own yield card. Re-reads the table fresh (not allRows) so an
+  // 'imported'-protected month mirrors the human-corrected value, not
+  // whatever this run happened to compute for it.
+  await mirrorSnapshotYieldToTransactions(admin, user.id, buckets)
+
   revalidatePath('/inversiones')
+  revalidatePath('/resumen')
+  revalidatePath('/progreso')
   return { error: null, rows: allRows.length }
+}
+
+async function mirrorSnapshotYieldToTransactions(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  buckets: Bucket[],
+): Promise<void> {
+  const snapshotBuckets = buckets.filter(b => b.bucket_type === 'snapshot_based')
+  if (snapshotBuckets.length === 0) return
+
+  const bucketIds = snapshotBuckets.map(b => b.id)
+  const bucketById = new Map(snapshotBuckets.map(b => [b.id, b]))
+
+  const { data: yieldRows } = await admin
+    .from('investment_yield_history')
+    .select('bucket_id, product_name, year_month, yield_usd, exchange_rate')
+    .eq('user_id', userId)
+    .in('bucket_id', bucketIds)
+
+  if (!yieldRows?.length) return
+
+  const mirrorRows = (yieldRows as { bucket_id: string; product_name: string; year_month: string; yield_usd: number; exchange_rate: number }[])
+    .filter(r => Math.abs(Number(r.yield_usd)) >= 0.5) // skip rounding-noise months
+    .map(r => {
+      const bucket = bucketById.get(r.bucket_id)
+      const name = bucket?.name ?? r.product_name
+      const isCrypto = /crypto|defi/i.test(name)
+      const yieldUsd = Number(r.yield_usd)
+      const rate = Number(r.exchange_rate)
+      const ym = String(r.year_month).slice(0, 7)
+      const [y, m] = ym.split('-').map(Number)
+      const lastDay = new Date(y, m, 0).getDate()
+      return {
+        user_id: userId,
+        external_id: `yield_mirror::${r.bucket_id}::${ym}`,
+        date: `${ym}-${String(lastDay).padStart(2, '0')}`,
+        vendor: name,
+        concept: `Rendimiento ${name}`,
+        detail: `Sincronizado desde rendimiento calculado — ${ym}`,
+        category_code: isCrypto ? 'INVESTMENT_RETURN_CRYPTO' : 'INVESTMENT_RETURN',
+        movement_type: null,
+        amount: Math.round(yieldUsd * rate * 100) / 100,
+        currency_code: 'USD',
+        exchange_rate_used: rate,
+        amount_usd: yieldUsd,
+        expense_group: 'na',
+        is_settlement: false,
+        is_passive_income: true,
+        investment_bucket_id: r.bucket_id,
+        source: 'import' as const,
+      }
+    })
+
+  if (mirrorRows.length === 0) return
+  await admin.from('transactions').upsert(mirrorRows, { onConflict: 'external_id' })
 }
 
 // Alias used by PortfolioYield component
