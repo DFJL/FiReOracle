@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { isValuationConcept } from '@/lib/incomeAllocation'
 import { type FlowWindow } from '@/lib/ahorroInversionFlow'
+import { Sparkline } from '@/components/Sparkline'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,17 @@ function SegmentedFunnelStep({
 // below (selectedBucket/onSelect, lifted up instead of kept as local
 // state), so there's no second, disagreeing nav for the same split. ──────
 
-type GroupItem = { key: DrillBucket; label: string; amount: number; color: string }
+type GroupItem = {
+  key: DrillBucket
+  label: string
+  amount: number
+  color: string
+  // % of income, trailing-12m, one point per month — independent of
+  // whatever window the funnel itself is showing, so the sparkline always
+  // reads as "last 12 months" even if the card above says "Todo" or "YTD".
+  trend?: number[]
+  trendTitle?: string
+}
 
 function BucketGroupCard({
   label, items, fmtAmt, monthsInWindow, totalIncome, showPctOfIncome = true, selected, onSelect,
@@ -231,11 +242,16 @@ function BucketGroupCard({
                   <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: i.color }} />
                   <span className={`text-[10px] truncate ${active ? 'text-zinc-100 font-semibold' : 'text-zinc-400'}`}>{i.label} ›</span>
                 </span>
-                <span className="text-right tabular-nums shrink-0">
-                  <span className="block text-[12px] font-bold text-zinc-200">
-                    {fmtAmt(i.amount)}{visible.length > 1 && <span className="text-zinc-500"> · {pct.toFixed(0)}%</span>}
+                <span className="flex items-center gap-2 shrink-0">
+                  {i.trend && i.trend.length > 1 && (
+                    <Sparkline data={i.trend} color={i.color} title={i.trendTitle} width={36} height={14} />
+                  )}
+                  <span className="text-right tabular-nums">
+                    <span className="block text-[12px] font-bold text-zinc-200">
+                      {fmtAmt(i.amount)}{visible.length > 1 && <span className="text-zinc-500"> · {pct.toFixed(0)}%</span>}
+                    </span>
+                    {avgText && <span className="block text-[9px] text-zinc-600">{avgText}</span>}
                   </span>
-                  {avgText && <span className="block text-[9px] text-zinc-600">{avgText}</span>}
                 </span>
               </div>
             </button>
@@ -264,6 +280,7 @@ export function IncomeFunnel({
   onCollapse,
   selectedBucket,
   onSelectBucket,
+  trendByBucket,
 }: {
   transactions: TxClient[]
   flow: FlowWindow
@@ -271,6 +288,10 @@ export function IncomeFunnel({
   onCollapse?: () => void
   selectedBucket: DrillBucket | null
   onSelectBucket: (key: DrillBucket) => void
+  // % of income trailing-12m, one point per of the last ~13 months — keyed
+  // by UiBucket ('necesario' | 'discrecional' | 'ahorro' | 'inversion' |
+  // 'cuotas' | 'deuda'). Optional: cards render without a sparkline if absent.
+  trendByBucket?: Partial<Record<UiBucket, number[]>>
 }) {
   // ── Income sources (a different question from gasto/ahorro/inversión —
   // "where income came from", not "where it went") ──────────────────────
@@ -305,6 +326,13 @@ export function IncomeFunnel({
     if (b === 'necesario') return flow.gastoSurvival
     if (b === 'discrecional') return flow.gastoDiscrecional
     return flow[b]
+  }
+
+  const trendFor = (b: UiBucket): number[] | undefined => trendByBucket?.[b]
+  const trendTitleFor = (b: UiBucket): string | undefined => {
+    const t = trendByBucket?.[b]
+    if (!t || t.length < 2) return undefined
+    return `hace ${t.length - 1} meses: ${(t[0] * 100).toFixed(0)}% del ingreso → hoy: ${(t[t.length - 1] * 100).toFixed(0)}%`
   }
 
   return (
@@ -357,14 +385,16 @@ export function IncomeFunnel({
           label="Gasto" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
           selected={selectedBucket} onSelect={onSelectBucket}
           items={(['necesario', 'discrecional'] as UiBucket[]).map(b => (
-            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
+            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
+              trend: trendFor(b), trendTitle: trendTitleFor(b) }
           ))}
         />
         <BucketGroupCard
           label="Ahorro e inversión" fmtAmt={fmtAmt} monthsInWindow={monthsInWindow} totalIncome={totalIncome}
           selected={selectedBucket} onSelect={onSelectBucket}
           items={(['ahorro', 'inversion'] as UiBucket[]).map(b => (
-            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b] }
+            { key: b, label: DRILL_BUCKET_LABEL[b], amount: amountFor(b), color: UI_BUCKET_COLOR[b],
+              trend: trendFor(b), trendTitle: trendTitleFor(b) }
           ))}
         />
         {/* Cuotas (scheduled installments) + Deuda (extra paydowns) — both

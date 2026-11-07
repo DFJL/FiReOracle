@@ -6,6 +6,7 @@ import Link from 'next/link'
 import type { ExchangeRate } from '@/lib/exchange-rate'
 import { createLifeEvent, deleteLifeEvent } from '@/app/actions/lifeEvents'
 import { useCurrency, formatCurrency } from '@/lib/currency'
+import { Sparkline } from '@/components/Sparkline'
 
 export type Milestone = { date: string; label: string; kind: 'auto' | 'fire' | 'manual'; amount?: number; id?: string }
 
@@ -554,29 +555,6 @@ export function ProgresoView({
           </Link>
         </p>
       )}
-    </div>
-  )
-}
-
-// Tiny inline trend line — no axes/labels, meant to sit inside a KPI card
-// without adding a new section. `title` carries the "then → now" detail as a
-// native hover tooltip instead of more on-screen text.
-function Sparkline({ data, color, title }: { data: number[]; color: string; title?: string }) {
-  if (data.length < 2) return null
-  const w = 60, h = 18
-  const max = Math.max(...data, 0.0001)
-  const min = Math.min(...data, 0)
-  const range = max - min || 1
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w
-    const y = h - ((v - min) / range) * h
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-  return (
-    <div title={title}>
-      <svg width={w} height={h} className="overflow-visible">
-        <polyline points={pts} fill="none" stroke={color} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" opacity={0.75} />
-      </svg>
     </div>
   )
 }

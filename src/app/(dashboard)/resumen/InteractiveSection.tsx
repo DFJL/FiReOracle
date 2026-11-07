@@ -1301,6 +1301,34 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
     )
   }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap, cutoff, earliestTxDate])
 
+  // % of income trailing-12m, re-run month by month — independent of
+  // flowWindow's own (user-selected) period, so the funnel cards' sparkline
+  // always reads "last 12 months" regardless of which window tab is active.
+  const trendByBucket = useMemo(() => {
+    const months = 13
+    const now = new Date()
+    const result: Record<'necesario' | 'discrecional' | 'ahorro' | 'inversion', number[]> = {
+      necesario: [], discrecional: [], ahorro: [], inversion: [],
+    }
+    for (let i = months - 1; i >= 0; i--) {
+      const end   = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const start = new Date(end.getFullYear(), end.getMonth() - 12, 1)
+      const toStr   = end.toISOString().slice(0, 10)
+      const fromStr = start.toISOString().slice(0, 10)
+      const fw = computeFlowWindow(
+        txList as Parameters<typeof computeFlowWindow>[0],
+        (envelopeMovements ?? []) as Parameters<typeof computeFlowWindow>[1],
+        savingsEnvelopeIds, envelopeNameMap, catNameMap, fromStr, toStr,
+      )
+      const income = fw.income
+      result.necesario.push(income > 0 ? fw.gastoSurvival / income : 0)
+      result.discrecional.push(income > 0 ? fw.gastoDiscrecional / income : 0)
+      result.ahorro.push(income > 0 ? fw.ahorro / income : 0)
+      result.inversion.push(income > 0 ? fw.inversion / income : 0)
+    }
+    return result
+  }, [txList, envelopeMovements, savingsEnvelopeIds, envelopeNameMap, catNameMap])
+
   // Same days/30.44 estimate IncomeFunnel uses for its own "~X/mes" —
   // reused here so the category/subcategory browser's per-row averages
   // agree with the funnel's, not a second slightly-different formula.
@@ -1600,6 +1628,7 @@ export function InteractiveSection({ transactions, categories, buckets, accounts
             <IncomeFunnel
               transactions={periodTxs} flow={flowWindow} fmtAmt={(n) => fmtAmt(n)} onCollapse={() => setShowFunnel(false)}
               selectedBucket={selectedBucket} onSelectBucket={selectBucket}
+              trendByBucket={trendByBucket}
             />
           )
           : (
