@@ -333,10 +333,12 @@ export type Database = {
           portfolio_model_category: string | null
           purchase_date: string | null
           purchase_price_crc: number | null
+          purchase_price_usd: number | null
           sort_order: number
           updated_at: string
           user_id: string
           value_crc: number
+          value_usd: number | null
         }
         Insert: {
           as_of_date: string
@@ -352,10 +354,12 @@ export type Database = {
           portfolio_model_category?: string | null
           purchase_date?: string | null
           purchase_price_crc?: number | null
+          purchase_price_usd?: number | null
           sort_order?: number
           updated_at?: string
           user_id: string
           value_crc: number
+          value_usd?: number | null
         }
         Update: {
           as_of_date?: string
@@ -371,10 +375,12 @@ export type Database = {
           portfolio_model_category?: string | null
           purchase_date?: string | null
           purchase_price_crc?: number | null
+          purchase_price_usd?: number | null
           sort_order?: number
           updated_at?: string
           user_id?: string
           value_crc?: number
+          value_usd?: number | null
         }
         Relationships: [
           {

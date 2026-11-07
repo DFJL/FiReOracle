@@ -85,7 +85,7 @@ export default async function InversionesPage() {
       .eq('user_id', user.id)
       .order('date', { ascending: true }),
     admin.from('assets')
-      .select('id, name, value_crc, as_of_date, is_investable, is_rental, loan_id, purchase_price_crc, purchase_date, portfolio_model_category')
+      .select('id, name, value_crc, as_of_date, is_investable, is_rental, loan_id, purchase_price_crc, purchase_date, purchase_price_usd, value_usd, portfolio_model_category')
       .eq('user_id', user.id).eq('is_active', true),
     admin.from('loans')
       .select('id, current_balance, currency_code, interest_rate, end_date')
@@ -593,6 +593,8 @@ export default async function InversionesPage() {
           as_of_date: a.as_of_date,
           purchase_price_crc: a.purchase_price_crc,
           purchase_date: a.purchase_date,
+          purchase_price_usd: a.purchase_price_usd,
+          value_usd: a.value_usd,
         },
         loan,
         txs: txs ?? [],

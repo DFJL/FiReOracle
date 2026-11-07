@@ -93,6 +93,15 @@ export interface RentalPerformanceInput {
     as_of_date: string | null
     purchase_price_crc: number | string | null
     purchase_date: string | null
+    // USD basis, when known — preferred for appreciation over the CRC
+    // columns above, which get converted at whatever FX rate happened to be
+    // in use on each entry's own date (e.g. ~505 at a 2013 purchase vs ~455
+    // on a 2026 revaluation). Diffing two CRC figures converted at different
+    // rates measures colón movement as much as the property, understating
+    // or overstating the real appreciation depending on which way the colón
+    // moved. The USD figures sidestep that entirely.
+    purchase_price_usd?: number | string | null
+    value_usd?: number | string | null
   }
   loan: RentalLoan | null
   txs: RentalTx[]
@@ -142,9 +151,14 @@ export function computeRentalPerformance(input: RentalPerformanceInput): RentalP
   const equityCrc = valueCrc - loanBalanceCrc
   const cashOnCash = computeCashOnCash(noiAnnual, debtServiceMonthly * 12, equityCrc)
 
+  const purchaseUsd = Number(input.asset.purchase_price_usd ?? 0)
+  const currentUsd = Number(input.asset.value_usd ?? 0)
+  const hasUsdBasis = purchaseUsd > 0 && currentUsd > 0
   const purchaseValueCrc = Number(input.asset.purchase_price_crc ?? 0)
   const appreciationCAGR = input.asset.purchase_date
-    ? computeAppreciationCAGR(purchaseValueCrc, valueCrc, input.asset.purchase_date, asOfDate)
+    ? hasUsdBasis
+      ? computeAppreciationCAGR(purchaseUsd, currentUsd, input.asset.purchase_date, asOfDate)
+      : computeAppreciationCAGR(purchaseValueCrc, valueCrc, input.asset.purchase_date, asOfDate)
     : null
 
   const totalReturn = computeTotalReturn(cashOnCash, appreciationCAGR)
