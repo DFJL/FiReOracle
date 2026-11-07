@@ -246,8 +246,15 @@ function buildSnapshotYieldRows(
 // above always skips them. Two flavors of "net new capital" for the month,
 // depending on how this bucket is funded:
 //   - crypto_portfolio_links present (e.g. Crypto/DeFi): flow comes from the
-//     linked DeFiReTracker portfolios' buy/sell/transfer txs, weighted by
-//     ownership %.
+//     linked DeFiReTracker portfolios' transfer_in/transfer_out/deposit txs
+//     (real capital entering/leaving the tracked wallets), weighted by
+//     ownership %. `buy`/`sell` are excluded — they're swaps *within* the
+//     portfolio (e.g. selling HYPE to buy HYBR, an LP rebalance, a dust
+//     cleanup) and the resulting value change is already inside the balance
+//     delta, not new capital. The one exception: a `sell` whose
+//     funds_bucket_id is set means the proceeds left this portfolio to fund
+//     a different FireOracle bucket (e.g. "Compra mensual IBKR (Venta
+//     virtual de crypto)") — that's a real outflow, same as transfer_out.
 //   - no links (e.g. IBKR): flow comes from this bucket's own regular
 //     `transactions` rows (investment_bucket_id = bucket.id) — the deposit/
 //     mirror rows written by cryptoSync.ts and any manual "Inversión IBKR"
@@ -295,19 +302,20 @@ async function computeSnapshotBucketYieldRows(
     const portfolioIds = links.map(l => l.portfolio_id)
     const { data: txs } = await crypto
       .from('transactions')
-      .select('portfolio_id, type, qty, price_usd, fee_usd, date')
+      .select('portfolio_id, type, qty, price_usd, fee_usd, date, funds_bucket_id')
       .in('portfolio_id', portfolioIds)
       .range(0, 49999)
 
     const pctByPortfolio = new Map(links.map(l => [l.portfolio_id, Number(l.ownership_pct) / 100]))
-    for (const t of (txs ?? []) as { portfolio_id: string; type: string; qty: number; price_usd: number; fee_usd: number | null; date: string }[]) {
+    for (const t of (txs ?? []) as { portfolio_id: string; type: string; qty: number; price_usd: number; fee_usd: number | null; date: string; funds_bucket_id: string | null }[]) {
       const pct = pctByPortfolio.get(t.portfolio_id)
       if (pct == null || !t.date) continue
       const ym = t.date.slice(0, 7)
       const qty = Number(t.qty), price = Number(t.price_usd), fee = Number(t.fee_usd ?? 0)
       let flow = 0
-      if (t.type === 'buy' || t.type === 'transfer_in') flow = (qty * price + fee) * pct
-      else if (t.type === 'sell' || t.type === 'transfer_out') flow = -(qty * price - fee) * pct
+      if (t.type === 'transfer_in' || t.type === 'deposit') flow = (qty * price + fee) * pct
+      else if (t.type === 'transfer_out') flow = -(qty * price - fee) * pct
+      else if (t.type === 'sell' && t.funds_bucket_id) flow = -(qty * price - fee) * pct
       else continue
       monthlyFlowUsd.set(ym, (monthlyFlowUsd.get(ym) ?? 0) + flow)
     }
