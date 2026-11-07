@@ -97,6 +97,8 @@ type Props = {
   passiveIncome12m: number
   passiveToIncomeRatio: number
   passiveIncomeData: PassiveIncomeData
+  fiHistory: number[]
+  fsHistory: number[]
   realizedReturnRate: number | null
   forecastYears: { year: number; balance: number }[]
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
@@ -127,7 +129,7 @@ export function ProgresoView({
   wealthMap,
   fireNumber: fireNumberProp, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
-  passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate,
+  passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate, fiHistory, fsHistory,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, savingsRateTrend, ahorroInversionData, lifestyle, milestones,
 }: Props) {
@@ -464,6 +466,12 @@ export function ProgresoView({
           sub={avgMonthlyObligations > 0 ? `meta: ${fmt(avgMonthlyObligations)}/mes` : 'sin datos'}
           color={fiRatio >= 1 ? '#a3e635' : fiRatio >= 0.5 ? '#f59e0b' : '#71717a'}
           tooltip="Financial Independence: % de tus gastos totales (incluyendo cuotas de préstamos) cubiertos por ingresos pasivos. Al llegar al 100% sos financieramente independiente — no necesitás trabajar."
+          sparkline={fiHistory}
+          sparklineTitle={
+            fiHistory.length > 1
+              ? `hace ${fiHistory.length - 1} meses: ${(fiHistory[0] * 100).toFixed(0)}% → hoy: ${(fiHistory[fiHistory.length - 1] * 100).toFixed(0)}%`
+              : undefined
+          }
         />
 
         <KpiCard
@@ -473,6 +481,12 @@ export function ProgresoView({
           sub={avgMonthlySurvivalExpenses > 0 ? `básico: ${fmt(avgMonthlySurvivalExpenses)}/mes` : 'marcá gastos básicos'}
           color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
           tooltip="Financial Security: % de tus gastos básicos de sobrevivencia (vivienda, comida, salud) cubiertos por ingresos pasivos. Al 100% tenés seguridad financiera total."
+          sparkline={fsHistory}
+          sparklineTitle={
+            fsHistory.length > 1
+              ? `hace ${fsHistory.length - 1} meses: ${(fsHistory[0] * 100).toFixed(0)}% → hoy: ${(fsHistory[fsHistory.length - 1] * 100).toFixed(0)}%`
+              : undefined
+          }
         />
       </div>
 
@@ -544,8 +558,32 @@ export function ProgresoView({
   )
 }
 
-function KpiCard({ label, value, unit, sub, color, tooltip }: {
+// Tiny inline trend line — no axes/labels, meant to sit inside a KPI card
+// without adding a new section. `title` carries the "then → now" detail as a
+// native hover tooltip instead of more on-screen text.
+function Sparkline({ data, color, title }: { data: number[]; color: string; title?: string }) {
+  if (data.length < 2) return null
+  const w = 60, h = 18
+  const max = Math.max(...data, 0.0001)
+  const min = Math.min(...data, 0)
+  const range = max - min || 1
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w
+    const y = h - ((v - min) / range) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <div title={title}>
+      <svg width={w} height={h} className="overflow-visible">
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" opacity={0.75} />
+      </svg>
+    </div>
+  )
+}
+
+function KpiCard({ label, value, unit, sub, color, tooltip, sparkline, sparklineTitle }: {
   label: string; value: string; unit: string; sub: string; color: string; tooltip?: string
+  sparkline?: number[]; sparklineTitle?: string
 }) {
   const [show, setShow] = useState(false)
   return (
@@ -571,9 +609,18 @@ function KpiCard({ label, value, unit, sub, color, tooltip }: {
           </div>
         )}
       </div>
-      <p className="text-2xl font-black leading-none" style={{ color }}>{value}</p>
-      <p className="text-[10px] text-zinc-500 mt-1">{unit}</p>
-      <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <p className="text-2xl font-black leading-none" style={{ color }}>{value}</p>
+          <p className="text-[10px] text-zinc-500 mt-1">{unit}</p>
+          <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>
+        </div>
+        {sparkline && sparkline.length > 1 && (
+          <div className="shrink-0 pb-0.5">
+            <Sparkline data={sparkline} color={color} title={sparklineTitle} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

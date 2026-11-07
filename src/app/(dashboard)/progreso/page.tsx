@@ -605,6 +605,39 @@ export default async function ProgresoPage() {
     .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
   const avgMonthlyObligations  = avgMonthlyExpenses + avgMonthlyLoanPayments
   const avgMonthlyPassiveIncome = passiveIncome12m / 12
+
+  // FI/FS ratio history — same trailing-12m formula as the snapshot above,
+  // just re-run month by month so the KPI cards can show a sparkline instead
+  // of only today's number. Reuses the already-outlier-cleaned arrays
+  // (cleanLifestyleOutliers/cleanSurvivalOutliers run once, independent of
+  // the window) so this doesn't redo outlier detection per month.
+  const FI_FS_HISTORY_MONTHS = 13
+  const fiHistory: number[] = []
+  const fsHistory: number[] = []
+  for (let i = FI_FS_HISTORY_MONTHS - 1; i >= 0; i--) {
+    const end   = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const start = new Date(end.getFullYear(), end.getMonth() - 12, 1)
+    const endStr   = end.toISOString().slice(0, 10)
+    const startStr = start.toISOString().slice(0, 10)
+
+    const monthlyExpenses = avgMonthlyInWindow(cleanedLifestyleTxs, startStr, endStr)
+    const monthlySurvival = avgMonthlyInWindow(cleanedSurvivalTxs, startStr, endStr)
+    const monthlyLoanPayments = (txs ?? [])
+      .filter(tx =>
+        tx.date && tx.date >= startStr && tx.date < endStr &&
+        (tx.movement_type === 'expense' || tx.movement_type === 'cash_withdrawal') &&
+        isLoanPayment(tx.vendor, tx.concept, tx.category_code) &&
+        !isExtraLoanPrincipalPayment(tx.concept, tx.category_code)
+      )
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+    const monthlyObligations = monthlyExpenses + monthlyLoanPayments
+    const monthlyPassive = passiveTxsAll
+      .filter(tx => tx.date && tx.date >= startStr && tx.date < endStr)
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+
+    fiHistory.push(monthlyObligations > 0 ? monthlyPassive / monthlyObligations : 0)
+    fsHistory.push(monthlySurvival > 0 ? monthlyPassive / monthlySurvival : 0)
+  }
   // Share of TOTAL income (active + passive) that's passive — a diversification
   // gauge distinct from the FI/FS ratios below (which compare against expenses,
   // not income): this one tracks how much you still depend on active work.
@@ -976,6 +1009,8 @@ export default async function ProgresoPage() {
         avgMonthlyIncome={avgMonthlyIncome}
         avgMonthlyDeposits={avgMonthlyDeposits}
         passiveIncome12m={passiveIncome12m}
+        fiHistory={fiHistory}
+        fsHistory={fsHistory}
         passiveToIncomeRatio={passiveToIncomeRatio}
         passiveIncomeData={{
           sources: passiveSources,
