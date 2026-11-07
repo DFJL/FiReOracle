@@ -594,8 +594,9 @@ function KpiCard({ label, value, unit, sub, color, tooltip, sparkline, sparkline
           <p className="text-[10px] text-zinc-600 mt-0.5">{sub}</p>
         </div>
         {sparkline && sparkline.length > 1 && (
-          <div className="shrink-0 pb-0.5">
-            <Sparkline data={sparkline} color={color} title={sparklineTitle} />
+          <div className="shrink-0 pb-0.5 flex flex-col items-end gap-0.5">
+            <Sparkline data={sparkline} color={color} title={sparklineTitle} width={72} height={26} />
+            <span className="text-[8px] text-zinc-600 whitespace-nowrap">12m</span>
           </div>
         )}
       </div>
@@ -954,25 +955,29 @@ function FuMoneyChart({
           <span className="text-[10px] text-zinc-300 text-right">
             <div>{fmtDate(hovered.ms)}</div>
             {visible.fu && (
-              <div>
+              <div className="flex items-center justify-end gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block shrink-0" />
+                <span className="text-zinc-500">FU Money:</span>
                 <span className="font-bold" style={{
                   color: hovered.fuMonths >= runwayGreen ? '#a3e635' :
                          hovered.fuMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
                 }}>
                   {hovered.fuMonths.toFixed(1)}m
                 </span>
-                <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.fuBalance)})</span>
+                <span className="text-zinc-600">({fmtLiquid(hovered.fuBalance)})</span>
               </div>
             )}
             {visible.runway && (
-              <div>
+              <div className="flex items-center justify-end gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block shrink-0" />
+                <span className="text-zinc-500">Runway:</span>
                 <span className="font-bold" style={{
                   color: hovered.runwayMonths >= runwayGreen ? '#a3e635' :
                          hovered.runwayMonths >= runwayYellow ? '#f59e0b' : '#f43f5e'
                 }}>
                   {hovered.runwayMonths.toFixed(1)}m
                 </span>
-                <span className="text-zinc-600 ml-1">({fmtLiquid(hovered.liquid)})</span>
+                <span className="text-zinc-600">({fmtLiquid(hovered.liquid)})</span>
               </div>
             )}
           </span>
