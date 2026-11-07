@@ -63,15 +63,27 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
 
   const rangeLabel = rangeMonths === 0 ? 'todo' : `${rangeMonths}m`
 
-  // Summary cards — only products with yield data in the selected range
+  // Summary cards — only products with yield data in the selected range.
+  // Money-weighted real return, not a compounded average of monthly %s:
+  // total $ earned over the window ÷ average capital invested over that
+  // same window, scaled to a year by the actual number of months present.
+  // (Previously: averaged only the *positive* monthly yield_pct values —
+  // silently dropping loss months inflated the average — then compounded
+  // that inflated average via (1+avg)^12, a second distortion on top for a
+  // volatile instrument like crypto. Same methodology progreso's
+  // "Rendimiento real" already uses, so the two stop disagreeing by formula.)
   const summaries = [...new Set(filtered.map(r => r.product_name))].map(name => {
-    const pr      = filtered.filter(r => r.product_name === name)
-    const nonZero = pr.filter(r => r.yield_pct > 0)
-    const avg     = nonZero.length > 0 ? nonZero.reduce((s, r) => s + r.yield_pct, 0) / nonZero.length : 0
-    const ann     = (Math.pow(1 + avg / 100, 12) - 1) * 100
+    const pr = filtered.filter(r => r.product_name === name)
+    const monthsWithData = pr.length
     const totalUsd = pr.reduce((s, r) => s + r.yield_usd, 0)
-    const lastRow  = [...pr].reverse().find(r => r.invested_usd > 0)
-    return { name, avg, ann, totalUsd, lastInvestedUsd: lastRow?.invested_usd ?? 0, months: nonZero.length }
+    const avgInvestedUsd = monthsWithData > 0
+      ? pr.reduce((s, r) => s + r.invested_usd, 0) / monthsWithData
+      : 0
+    const ann = avgInvestedUsd > 0 && monthsWithData > 0
+      ? (totalUsd / avgInvestedUsd) * (12 / monthsWithData) * 100
+      : 0
+    const lastRow = [...pr].reverse().find(r => r.invested_usd > 0)
+    return { name, ann, totalUsd, avgInvestedUsd, lastInvestedUsd: lastRow?.invested_usd ?? 0, months: monthsWithData }
   }).filter(s => s.months > 0)
     .sort((a, b) => b.ann - a.ann)
 
@@ -83,17 +95,14 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
   const bestPerformer  = summaries[0] ?? null
   const worstPerformer = summaries.length > 1 ? summaries[summaries.length - 1] : null
 
-  // Blended portfolio-level return — money-weighted by what's invested in
-  // each instrument, not a plain average across instruments (a tiny position
-  // with a huge % shouldn't move this as much as the bulk of the capital).
-  // Same annualizing formula as each instrument's own card, so the headline
-  // number is directly comparable to them.
-  const totalInvested = summaries.reduce((s, r) => s + r.lastInvestedUsd, 0)
-  const blendedMonthlyAvg = totalInvested > 0
-    ? summaries.reduce((s, r) => s + r.avg * r.lastInvestedUsd, 0) / totalInvested
-    : 0
-  const blendedAnn = (Math.pow(1 + blendedMonthlyAvg / 100, 12) - 1) * 100
+  // Blended portfolio-level return — same money-weighted formula, applied
+  // across all instruments combined rather than per-instrument.
+  const totalInvested = summaries.reduce((s, r) => s + r.avgInvestedUsd, 0)
   const blendedTotalUsd = summaries.reduce((s, r) => s + r.totalUsd, 0)
+  const blendedMonths = Math.max(...summaries.map(s => s.months), 0)
+  const blendedAnn = totalInvested > 0 && blendedMonths > 0
+    ? (blendedTotalUsd / totalInvested) * (12 / blendedMonths) * 100
+    : 0
 
   const fmtUsd = (v: number) => {
     const val = currency === 'CRC' ? v * liveRate : v
@@ -292,8 +301,8 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
               </p>
               <p className="text-[9px] text-zinc-500 mt-0.5">anualizado ({rangeLabel})</p>
               <div className="mt-2 pt-2 border-t border-white/[0.04] space-y-0.5">
-                <p className="text-[9px] text-zinc-600">{s.avg.toFixed(3)}%/mes · {s.months} meses</p>
-                <p className="text-[9px] text-zinc-600">{fmtUsd(s.totalUsd)} yield 12m</p>
+                <p className="text-[9px] text-zinc-600">{(s.ann / 12).toFixed(2)}%/mes · {s.months} meses</p>
+                <p className="text-[9px] text-zinc-600">{fmtUsd(s.totalUsd)} yield ({rangeLabel})</p>
                 {s.lastInvestedUsd > 0 && (
                   <p className="text-[9px] text-zinc-700">{fmtUsd(s.lastInvestedUsd)} invertido</p>
                 )}
