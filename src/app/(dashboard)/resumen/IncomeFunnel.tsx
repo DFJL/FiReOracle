@@ -258,7 +258,7 @@ function BucketGroupCard({
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
                   {i.trend && i.trend.length > 1 && (
-                    <Sparkline data={i.trend} color={i.color} title={i.trendTitle} width={36} height={14} />
+                    <Sparkline data={i.trend} label={i.label} title={i.trendTitle} width={40} height={18} />
                   )}
                   <span className="text-right tabular-nums">
                     <span className="block text-[12px] font-bold text-zinc-200">

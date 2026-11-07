@@ -614,6 +614,31 @@ export default async function ProgresoPage() {
   const FI_FS_HISTORY_MONTHS = 13
   const fiHistory: number[] = []
   const fsHistory: number[] = []
+  const runwayHistory: number[] = []
+  const runwaySurvivalHistory: number[] = []
+  const yieldHistory: number[] = []
+
+  const sortedSnapshots = [...(snapshotRows ?? [])].sort((a, b) =>
+    (a.snapshot_date ?? '').localeCompare(b.snapshot_date ?? '')
+  )
+  // Latest snapshot at or before `dateStr`, and the trailing-12 average of
+  // invested_crc ending there — same "avoid point-in-time outliers" idea
+  // realizedReturnRate already uses, just re-run per month in history.
+  const snapshotAsOf = (dateStr: string) => {
+    let latest: typeof sortedSnapshots[number] | null = null
+    const window: typeof sortedSnapshots = []
+    for (const s of sortedSnapshots) {
+      if (!s.snapshot_date || s.snapshot_date > dateStr) continue
+      latest = s
+      window.push(s)
+      if (window.length > 12) window.shift()
+    }
+    const avgInvested = window.length > 0
+      ? window.reduce((sum, s) => sum + Number(s.invested_crc ?? 0), 0) / window.length
+      : 0
+    return { liquidCrc: Number(latest?.liquid_crc ?? 0), avgInvested }
+  }
+
   for (let i = FI_FS_HISTORY_MONTHS - 1; i >= 0; i--) {
     const end   = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const start = new Date(end.getFullYear(), end.getMonth() - 12, 1)
@@ -631,12 +656,24 @@ export default async function ProgresoPage() {
       )
       .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
     const monthlyObligations = monthlyExpenses + monthlyLoanPayments
-    const monthlyPassive = passiveTxsAll
+    const monthlyPassiveSum = passiveTxsAll
       .filter(tx => tx.date && tx.date >= startStr && tx.date < endStr)
-      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0) / 12
+      .reduce((s, tx) => s + Number(tx.amount ?? 0), 0)
+    const monthlyPassive = monthlyPassiveSum / 12
 
     fiHistory.push(monthlyObligations > 0 ? monthlyPassive / monthlyObligations : 0)
     fsHistory.push(monthlySurvival > 0 ? monthlyPassive / monthlySurvival : 0)
+
+    const { liquidCrc, avgInvested } = snapshotAsOf(endStr)
+    const netBurn = Math.max(monthlyObligations - monthlyPassive, 0)
+    runwayHistory.push(
+      netBurn > 0 ? liquidCrc / netBurn : monthlyObligations > 0 ? liquidCrc / monthlyObligations : 0
+    )
+    const survivalNetBurn = Math.max(monthlySurvival - monthlyPassive, 0)
+    runwaySurvivalHistory.push(
+      survivalNetBurn > 0 ? liquidCrc / survivalNetBurn : monthlySurvival > 0 ? liquidCrc / monthlySurvival : 0
+    )
+    yieldHistory.push(avgInvested > 0 ? monthlyPassiveSum / avgInvested : 0)
   }
   // Share of TOTAL income (active + passive) that's passive — a diversification
   // gauge distinct from the FI/FS ratios below (which compare against expenses,
@@ -1011,6 +1048,11 @@ export default async function ProgresoPage() {
         passiveIncome12m={passiveIncome12m}
         fiHistory={fiHistory}
         fsHistory={fsHistory}
+        runwayHistory={runwayHistory}
+        runwaySurvivalHistory={runwaySurvivalHistory}
+        yieldHistory={yieldHistory}
+        savingsRateHistory={savingsRateTrend.map(m => m.rate)}
+        passiveIncomeHistory={passiveTrend.slice(-13).map(m => m.amount)}
         passiveToIncomeRatio={passiveToIncomeRatio}
         passiveIncomeData={{
           sources: passiveSources,

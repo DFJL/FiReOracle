@@ -100,6 +100,11 @@ type Props = {
   passiveIncomeData: PassiveIncomeData
   fiHistory: number[]
   fsHistory: number[]
+  runwayHistory: number[]
+  runwaySurvivalHistory: number[]
+  yieldHistory: number[]
+  savingsRateHistory: number[]
+  passiveIncomeHistory: number[]
   realizedReturnRate: number | null
   forecastYears: { year: number; balance: number }[]
   snapshots: { snapshot_date: string; net_worth_crc: number; invested_crc: number; liquid_crc: number }[]
@@ -131,6 +136,7 @@ export function ProgresoView({
   fireNumber: fireNumberProp, leanFireNumber, runway, runwaySurvival,
   avgMonthlyExpenses, avgMonthlyObligations, avgMonthlySurvivalExpenses, avgMonthlyIncome, avgMonthlyDeposits,
   passiveIncome12m, passiveToIncomeRatio, passiveIncomeData, realizedReturnRate, fiHistory, fsHistory,
+  runwayHistory, runwaySurvivalHistory, yieldHistory, savingsRateHistory, passiveIncomeHistory,
   forecastYears, snapshots, lockedInvestedByMonth, exchangeRate,
   fireConfig, runwayGreen, runwayYellow, savingsRateTrend, ahorroInversionData, lifestyle, milestones,
 }: Props) {
@@ -412,6 +418,8 @@ export function ProgresoView({
             : `${fmt(avgMonthlyExpenses)}/mes`}
           color={runwayColor}
           tooltip={`Saldo líquido ÷ quema neta, asumiendo que el gasto se mantiene igual. Obligaciones = gasto de vida + cuota regular de préstamos. Quema neta = obligaciones menos ingresos pasivos recurrentes (crypto, dividendos, alquileres, airdrops).`}
+          sparkline={runwayHistory}
+          sparklineTitle={monthsTrendTitle(runwayHistory, 'meses')}
         />
 
         <KpiCard
@@ -423,6 +431,8 @@ export function ProgresoView({
             : `${fmt(avgMonthlySurvivalExpenses)}/mes`}
           color={runwaySurvivalColor}
           tooltip={`Saldo líquido ÷ quema mínima, si tuvieras que cortar todo gasto de estilo de vida en una emergencia o pérdida de empleo. Usa solo tus gastos marcados como sobrevivencia (incluye la cuota regular de préstamos).`}
+          sparkline={runwaySurvivalHistory}
+          sparklineTitle={monthsTrendTitle(runwaySurvivalHistory, 'meses')}
         />
 
         <KpiCard
@@ -440,6 +450,8 @@ export function ProgresoView({
             realizedReturnRate >= fireConfig.inflation ? '#f59e0b' : '#f43f5e'
           }
           tooltip="Retorno anualizado efectivo de tu portafolio patrimonial. Verde = supera tu meta, amarillo = supera inflación, rojo = bajo inflación."
+          sparkline={yieldHistory}
+          sparklineTitle={pctTrendTitle(yieldHistory)}
         />
 
         <KpiCard
@@ -449,6 +461,8 @@ export function ProgresoView({
           sub={`${fmt(monthlySavings)}/mes aportado`}
           color="#60a5fa"
           tooltip="Porcentaje de tus ingresos activos que fue a ahorros e inversiones (categorías SAVINGS_*) en los últimos 12 meses. Incluye compras de bienes raíces, fondos, crypto y pensión. Fórmula: aportado ÷ ingresos activos. Meta FIRE: ≥30%."
+          sparkline={savingsRateHistory}
+          sparklineTitle={pctTrendTitle(savingsRateHistory)}
         />
 
         <KpiCard
@@ -456,6 +470,12 @@ export function ProgresoView({
           value={fmt(passiveMonthlyAvg)}
           unit="/mes promedio"
           sub={`${fmt(passiveIncome12m)}/año`}
+          sparkline={passiveIncomeHistory}
+          sparklineTitle={
+            passiveIncomeHistory.length > 1
+              ? `hace ${passiveIncomeHistory.length - 1} meses: ${fmt(passiveIncomeHistory[0])} → hoy: ${fmt(passiveIncomeHistory[passiveIncomeHistory.length - 1])}`
+              : undefined
+          }
           color="#84cc16"
           tooltip="Promedio mensual de ingresos que no requieren tu tiempo activo: alquiler, dividendos, rendimientos de inversión, etc."
         />
@@ -468,11 +488,7 @@ export function ProgresoView({
           color={fiRatio >= 1 ? '#a3e635' : fiRatio >= 0.5 ? '#f59e0b' : '#71717a'}
           tooltip="Financial Independence: % de tus gastos totales (incluyendo cuotas de préstamos) cubiertos por ingresos pasivos. Al llegar al 100% sos financieramente independiente — no necesitás trabajar."
           sparkline={fiHistory}
-          sparklineTitle={
-            fiHistory.length > 1
-              ? `hace ${fiHistory.length - 1} meses: ${(fiHistory[0] * 100).toFixed(0)}% → hoy: ${(fiHistory[fiHistory.length - 1] * 100).toFixed(0)}%`
-              : undefined
-          }
+          sparklineTitle={pctTrendTitle(fiHistory)}
         />
 
         <KpiCard
@@ -483,11 +499,7 @@ export function ProgresoView({
           color={fsRatio >= 1 ? '#a3e635' : fsRatio >= 0.75 ? '#f59e0b' : '#71717a'}
           tooltip="Financial Security: % de tus gastos básicos de sobrevivencia (vivienda, comida, salud) cubiertos por ingresos pasivos. Al 100% tenés seguridad financiera total."
           sparkline={fsHistory}
-          sparklineTitle={
-            fsHistory.length > 1
-              ? `hace ${fsHistory.length - 1} meses: ${(fsHistory[0] * 100).toFixed(0)}% → hoy: ${(fsHistory[fsHistory.length - 1] * 100).toFixed(0)}%`
-              : undefined
-          }
+          sparklineTitle={pctTrendTitle(fsHistory)}
         />
       </div>
 
@@ -559,6 +571,17 @@ export function ProgresoView({
   )
 }
 
+function monthsTrendTitle(history: number[], unit: string): string | undefined {
+  if (history.length < 2) return undefined
+  const fmtV = (v: number) => (v >= 999 ? '∞' : v.toFixed(1))
+  return `hace ${history.length - 1} meses: ${fmtV(history[0])} ${unit} → hoy: ${fmtV(history[history.length - 1])} ${unit}`
+}
+
+function pctTrendTitle(history: number[]): string | undefined {
+  if (history.length < 2) return undefined
+  return `hace ${history.length - 1} meses: ${(history[0] * 100).toFixed(0)}% → hoy: ${(history[history.length - 1] * 100).toFixed(0)}%`
+}
+
 function KpiCard({ label, value, unit, sub, color, tooltip, sparkline, sparklineTitle }: {
   label: string; value: string; unit: string; sub: string; color: string; tooltip?: string
   sparkline?: number[]; sparklineTitle?: string
@@ -595,8 +618,8 @@ function KpiCard({ label, value, unit, sub, color, tooltip, sparkline, sparkline
         </div>
         {sparkline && sparkline.length > 1 && (
           <div className="shrink-0 pb-0.5 flex flex-col items-end gap-0.5">
-            <Sparkline data={sparkline} color={color} title={sparklineTitle} width={72} height={26} />
-            <span className="text-[8px] text-zinc-600 whitespace-nowrap">12m</span>
+            <Sparkline data={sparkline} label={label} title={sparklineTitle} width={72} height={26} />
+            <span className="text-[8px] text-zinc-600 whitespace-nowrap">12m · tocar</span>
           </div>
         )}
       </div>
