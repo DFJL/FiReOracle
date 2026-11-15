@@ -423,6 +423,17 @@ export default async function PresupuestoPage({
     aguinaldoProjected = (aguinaldoGrossSum + missingAmount) / 12
   }
 
+  // Bitácora items (purchases/commitments already logged against a rubro,
+  // ahead of the aguinaldo itself landing) — fetched after allocations are
+  // known since it's scoped by their ids, not by year directly.
+  const aguinaldoAllocIds = (aguinaldoAllocRows ?? []).map(a => a.id)
+  const { data: aguinaldoItemRows } = aguinaldoAllocIds.length > 0
+    ? await admin.from('aguinaldo_allocation_items')
+        .select('id, allocation_id, item_date, description, amount')
+        .in('allocation_id', aguinaldoAllocIds)
+        .order('item_date', { ascending: false })
+    : { data: [] }
+
   // Year switcher options — every year with existing allocations, plus
   // today's real year and whatever year is currently being viewed, so
   // navigating always has somewhere to land even before any line exists.
@@ -476,6 +487,7 @@ export default async function PresupuestoPage({
         projectedAmount={aguinaldoProjected}
         receivedAmount={aguinaldoReceived}
         allocations={aguinaldoAllocRows ?? []}
+        allocationItems={aguinaldoItemRows ?? []}
         grossSalaryEntries={aguinaldoGrossRows ?? []}
         envelopes={(envelopeRows ?? []) as Envelope[]}
         txCategories={(catRows ?? []) as TxCategory[]}

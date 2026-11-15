@@ -23,6 +23,14 @@ export type AguinaldoGrossSalaryEntry = {
   notes: string | null
 }
 
+export type AguinaldoAllocationItem = {
+  id: string
+  allocation_id: string
+  item_date: string
+  description: string
+  amount: number
+}
+
 // ── Allocations (plan: where the aguinaldo goes) ───────────────────────────────
 
 export async function addAguinaldoAllocation(
@@ -128,6 +136,71 @@ export async function moveAguinaldoAllocation(
     .update({ sort_order: target.sort_order }).eq('id', other.id).eq('user_id', user.id)
   if (e2) return { error: e2.message }
 
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
+
+// ── Allocation items (bitácora: what's already been bought/committed
+// against a rubro, before the aguinaldo itself lands) ──────────────────────
+// `real_amount` on the parent allocation is kept as the sum of its items —
+// log a purchase here instead of retyping a running total by hand.
+
+async function syncAllocationRealAmount(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  allocationId: string,
+): Promise<void> {
+  const { data: items } = await admin
+    .from('aguinaldo_allocation_items')
+    .select('amount')
+    .eq('allocation_id', allocationId)
+    .eq('user_id', userId)
+  const total = (items ?? []).reduce((s, i) => s + Number(i.amount), 0)
+  await admin.from('aguinaldo_allocations')
+    .update({ real_amount: total, updated_at: new Date().toISOString() })
+    .eq('id', allocationId)
+    .eq('user_id', userId)
+}
+
+export async function addAguinaldoAllocationItem(
+  allocationId: string,
+  itemDate: string,
+  description: string,
+  amount: number,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('aguinaldo_allocation_items').insert({
+    user_id: user.id,
+    allocation_id: allocationId,
+    item_date: itemDate,
+    description,
+    amount,
+  })
+  if (error) return { error: error.message }
+  await syncAllocationRealAmount(admin, user.id, allocationId)
+  revalidatePath('/presupuesto')
+  return { error: null }
+}
+
+export async function deleteAguinaldoAllocationItem(
+  id: string,
+  allocationId: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'No autorizado' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('aguinaldo_allocation_items')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id)
+  if (error) return { error: error.message }
+  await syncAllocationRealAmount(admin, user.id, allocationId)
   revalidatePath('/presupuesto')
   return { error: null }
 }

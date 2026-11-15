@@ -197,6 +197,44 @@ export type Database = {
           },
         ]
       }
+      aguinaldo_allocation_items: {
+        Row: {
+          allocation_id: string
+          amount: number
+          created_at: string
+          description: string
+          id: string
+          item_date: string
+          user_id: string
+        }
+        Insert: {
+          allocation_id: string
+          amount: number
+          created_at?: string
+          description: string
+          id?: string
+          item_date?: string
+          user_id: string
+        }
+        Update: {
+          allocation_id?: string
+          amount?: number
+          created_at?: string
+          description?: string
+          id?: string
+          item_date?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aguinaldo_allocation_items_allocation_id_fkey"
+            columns: ["allocation_id"]
+            isOneToOne: false
+            referencedRelation: "aguinaldo_allocations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       aguinaldo_allocations: {
         Row: {
           amount: number
@@ -1067,6 +1105,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      historical_exchange_rates_monthly: {
+        Row: {
+          month: string
+          rate_crc_per_usd: number
+          source: string
+        }
+        Insert: {
+          month: string
+          rate_crc_per_usd: number
+          source?: string
+        }
+        Update: {
+          month?: string
+          rate_crc_per_usd?: number
+          source?: string
+        }
+        Relationships: []
       }
       investment_instruments: {
         Row: {

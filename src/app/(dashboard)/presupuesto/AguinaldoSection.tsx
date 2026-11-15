@@ -6,8 +6,9 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   addAguinaldoAllocation, updateAguinaldoAllocation, deleteAguinaldoAllocation, moveAguinaldoAllocation,
   addGrossSalaryEntry, updateGrossSalaryEntry, deleteGrossSalaryEntry,
+  addAguinaldoAllocationItem, deleteAguinaldoAllocationItem,
 } from '@/app/actions/aguinaldo'
-import type { AguinaldoAllocation, AguinaldoGrossSalaryEntry } from '@/app/actions/aguinaldo'
+import type { AguinaldoAllocation, AguinaldoGrossSalaryEntry, AguinaldoAllocationItem } from '@/app/actions/aguinaldo'
 import type { Envelope, TxCategory } from './PresupuestoClient'
 
 function fmtCRC(n: number) {
@@ -54,10 +55,86 @@ function pctColor(pct: number) {
   return 'text-zinc-700'
 }
 
+// ── Bitácora: items already bought/committed against a rubro, logged as
+// they happen — the allocation's "real" is kept as their sum (see
+// syncAllocationRealAmount server-side), so this is the thing to use
+// instead of retyping a running total by hand. ───────────────────────────────
+
+function BitacoraItemRow({ item, allocationId }: { item: AguinaldoAllocationItem; allocationId: string }) {
+  const [isPending, start] = useTransition()
+  function remove() {
+    start(async () => { await deleteAguinaldoAllocationItem(item.id, allocationId) })
+  }
+  return (
+    <div className="flex items-center gap-2 py-1 border-b border-white/[0.03] last:border-0">
+      <span className="text-[9px] text-zinc-600 w-16 shrink-0 tabular-nums">{fmtDate(item.item_date)}</span>
+      <p className="text-[10px] text-zinc-400 truncate flex-1 min-w-0">{item.description}</p>
+      <span className="text-[10px] tabular-nums text-zinc-300 shrink-0">{fmtCRC(item.amount)}</span>
+      <button onClick={remove} disabled={isPending}
+        className="text-[9px] font-black text-zinc-700 uppercase hover:text-rose-400 transition-colors disabled:opacity-40 shrink-0">
+        ✕
+      </button>
+    </div>
+  )
+}
+
+function Bitacora({ allocationId, items }: { allocationId: string; items: AguinaldoAllocationItem[] }) {
+  const [open, setOpen] = useState(false)
+  const [desc, setDesc] = useState('')
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [error, setError] = useState('')
+  const [isPending, start] = useTransition()
+
+  const total = items.reduce((s, i) => s + Number(i.amount), 0)
+
+  function submit() {
+    const amt = parseFloat(amount.replace(/,/g, ''))
+    if (!desc.trim())      { setError('Descripción requerida'); return }
+    if (!amt || amt <= 0)  { setError('Monto inválido'); return }
+    setError('')
+    start(async () => {
+      const res = await addAguinaldoAllocationItem(allocationId, date, desc.trim(), amt)
+      if (res?.error) { setError(res.error); return }
+      setDesc(''); setAmount('')
+    })
+  }
+
+  const inp = 'bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1 text-[10px] text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40'
+
+  return (
+    <div className="pl-1">
+      <button onClick={() => setOpen(v => !v)} className="text-[9px] text-zinc-600 hover:text-amber-400/70 transition-colors">
+        {open ? '▾' : '▸'} bitácora {items.length > 0 && <span className="tabular-nums">({items.length} · {fmtCRC(total)})</span>}
+      </button>
+      {open && (
+        <div className="mt-1 pl-2 border-l border-white/[0.06] space-y-1">
+          {items.length === 0 ? (
+            <p className="text-[9px] text-zinc-700 py-0.5">Sin ítems todavía — registrá cada compra/compromiso a medida que pasa.</p>
+          ) : (
+            items.map(i => <BitacoraItemRow key={i.id} item={i} allocationId={allocationId} />)
+          )}
+          <div className="flex gap-1 pt-1">
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={`w-24 ${inp}`} />
+            <input type="text" value={desc} onChange={e => setDesc(e.target.value)} placeholder="ej. Árbol de navidad"
+              className={`flex-1 ${inp}`} />
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className={`w-20 ${inp}`} />
+            <button onClick={submit} disabled={isPending}
+              className="px-2 py-1 rounded-md bg-amber-400/15 text-amber-400 text-[9px] font-black hover:bg-amber-400/25 transition-colors disabled:opacity-50 shrink-0">
+              {isPending ? '...' : '+'}
+            </button>
+          </div>
+          {error && <p className="text-[9px] text-rose-400">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Allocation row ──────────────────────────────────────────────────────────
 
 function AllocationRow({
-  alloc, year, envelopes, txCategories, envelopeBalanceMap, coverage, isFirst, isLast,
+  alloc, year, envelopes, txCategories, envelopeBalanceMap, coverage, items, isFirst, isLast,
 }: {
   alloc: AguinaldoAllocation
   year: number
@@ -65,6 +142,7 @@ function AllocationRow({
   txCategories: TxCategory[]
   envelopeBalanceMap: Record<string, number>
   coverage: number
+  items: AguinaldoAllocationItem[]
   isFirst: boolean
   isLast: boolean
 }) {
@@ -133,9 +211,15 @@ function AllocationRow({
           </div>
           <div>
             <p className="text-[8px] text-zinc-600 uppercase mb-0.5">Real</p>
-            <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp} />
+            <input type="number" value={realAmount} onChange={e => setRealAmount(e.target.value)} placeholder="0" className={inp}
+              disabled={items.length > 0} />
           </div>
         </div>
+        {items.length > 0 && (
+          <p className="text-[9px] text-zinc-600">
+            Real se calcula solo de la bitácora ({items.length} ítem{items.length === 1 ? '' : 's'}) — editala abajo en vez de escribir el total a mano.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-1.5">
           <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)} className={inp}>
             <option value="">— sin sobre —</option>
@@ -167,37 +251,40 @@ function AllocationRow({
   }
 
   return (
-    <div className="flex items-center gap-1.5 py-1.5 border-b border-white/[0.04] last:border-0">
-      <div className="flex flex-col shrink-0 -my-1">
-        <button onClick={() => move('up')} disabled={isFirst}
-          className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▲</button>
-        <button onClick={() => move('down')} disabled={isLast}
-          className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▼</button>
+    <div className="py-1.5 border-b border-white/[0.04] last:border-0 space-y-1">
+      <div className="flex items-center gap-1.5">
+        <div className="flex flex-col shrink-0 -my-1">
+          <button onClick={() => move('up')} disabled={isFirst}
+            className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▲</button>
+          <button onClick={() => move('down')} disabled={isLast}
+            className="text-zinc-700 hover:text-amber-400/70 disabled:opacity-20 disabled:hover:text-zinc-700 leading-none text-[9px] px-0.5">▼</button>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-zinc-200 truncate">{alloc.label}</p>
+          {envelopeName && (
+            <p className="text-[9px] text-zinc-600 truncate">
+              → {envelopeName} · disponible {fmtCRC(coverage)}
+              {faltante > 0.5 ? <span className="text-amber-400/70"> (faltan {fmtCRC(faltante)})</span> : ' ✓'}
+            </p>
+          )}
+        </div>
+        <div className="text-right shrink-0 w-20">
+          <p className="text-[10px] tabular-nums text-zinc-400">{fmtCRC(alloc.amount)}</p>
+          <p className="text-[10px] tabular-nums text-zinc-500">{fmtCRC(real)}</p>
+        </div>
+        <span className={`text-[10px] font-bold tabular-nums w-10 text-right shrink-0 ${pctColor(pct)}`}>
+          {pct.toFixed(0)}%
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setEditing(true)} className="text-[9px] font-black text-zinc-600 uppercase hover:text-amber-400/70 transition-colors">
+            Editar
+          </button>
+          <button onClick={remove} disabled={isPending} className="text-[9px] font-black text-zinc-700 uppercase hover:text-rose-400 transition-colors disabled:opacity-40">
+            Borrar
+          </button>
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-zinc-200 truncate">{alloc.label}</p>
-        {envelopeName && (
-          <p className="text-[9px] text-zinc-600 truncate">
-            → {envelopeName} · disponible {fmtCRC(coverage)}
-            {faltante > 0.5 ? <span className="text-amber-400/70"> (faltan {fmtCRC(faltante)})</span> : ' ✓'}
-          </p>
-        )}
-      </div>
-      <div className="text-right shrink-0 w-20">
-        <p className="text-[10px] tabular-nums text-zinc-400">{fmtCRC(alloc.amount)}</p>
-        <p className="text-[10px] tabular-nums text-zinc-500">{fmtCRC(real)}</p>
-      </div>
-      <span className={`text-[10px] font-bold tabular-nums w-10 text-right shrink-0 ${pctColor(pct)}`}>
-        {pct.toFixed(0)}%
-      </span>
-      <div className="flex items-center gap-2 shrink-0">
-        <button onClick={() => setEditing(true)} className="text-[9px] font-black text-zinc-600 uppercase hover:text-amber-400/70 transition-colors">
-          Editar
-        </button>
-        <button onClick={remove} disabled={isPending} className="text-[9px] font-black text-zinc-700 uppercase hover:text-rose-400 transition-colors disabled:opacity-40">
-          Borrar
-        </button>
-      </div>
+      <Bitacora allocationId={alloc.id} items={items} />
     </div>
   )
 }
@@ -375,7 +462,7 @@ function AddGrossEntryForm() {
 
 export function AguinaldoSection({
   year, periodStart, periodEnd, estimatedAmount, estimateSource, monthsCovered,
-  projectedAmount, receivedAmount, allocations, grossSalaryEntries, envelopes, txCategories,
+  projectedAmount, receivedAmount, allocations, allocationItems, grossSalaryEntries, envelopes, txCategories,
   envelopeBalanceMap, availableYears, hasExplicitYear,
 }: {
   year: number
@@ -387,6 +474,7 @@ export function AguinaldoSection({
   projectedAmount: number | null
   receivedAmount: number
   allocations: AguinaldoAllocation[]
+  allocationItems: AguinaldoAllocationItem[]
   grossSalaryEntries: AguinaldoGrossSalaryEntry[]
   envelopes: Envelope[]
   txCategories: TxCategory[]
@@ -423,6 +511,8 @@ export function AguinaldoSection({
   // (otherwise linking a sobre that already covers part of a línea would
   // never move "excede por" / "sin presupuestar" at all).
   const coverageMap = computeCoverage(allocations, envelopeBalanceMap)
+  const itemsByAllocation: Record<string, AguinaldoAllocationItem[]> = {}
+  for (const i of allocationItems) (itemsByAllocation[i.allocation_id] ??= []).push(i)
   const totalCovered = allocations.reduce((s, a) => s + (coverageMap[a.id] ?? 0), 0)
   const totalDisponible = totalAmount + totalCovered
 
@@ -599,6 +689,7 @@ export function AguinaldoSection({
                     <AllocationRow
                       key={a.id} alloc={a} year={year} envelopes={envelopes} txCategories={txCategories}
                       envelopeBalanceMap={envelopeBalanceMap} coverage={coverageMap[a.id] ?? 0}
+                      items={itemsByAllocation[a.id] ?? []}
                       isFirst={i === 0} isLast={i === items.length - 1}
                     />
                   ))}

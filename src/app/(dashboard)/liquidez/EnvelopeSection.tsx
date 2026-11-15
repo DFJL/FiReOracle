@@ -1008,6 +1008,7 @@ function AccountRow({ account }: { account: FinancialAccountDetail }) {
   const [name, setName]       = useState(account.name)
   const [type, setType]       = useState(account.account_type)
   const [last4, setLast4]     = useState(account.last4 ?? '')
+  const [currency, setCurrency] = useState(account.currency_code)
   const [error, setError]     = useState('')
   const [isPending, start]    = useTransition()
 
@@ -1017,7 +1018,7 @@ function AccountRow({ account }: { account: FinancialAccountDetail }) {
     setError('')
     start(async () => {
       const res = await updateFinancialAccount(account.id, {
-        name: name.trim(), account_type: type, last4: last4 || null,
+        name: name.trim(), account_type: type, last4: last4 || null, currency_code: currency,
       })
       if (res?.error) { setError(res.error); return }
       setEditing(false)
@@ -1039,9 +1040,15 @@ function AccountRow({ account }: { account: FinancialAccountDetail }) {
           <input value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
             placeholder="últ. 4" className={`w-16 ${inp}`} />
         </div>
-        <select value={type} onChange={e => setType(e.target.value)} className={`w-full ${inp}`}>
-          {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
+        <div className="flex gap-1.5">
+          <select value={type} onChange={e => setType(e.target.value)} className={`flex-1 ${inp}`}>
+            {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <select value={currency} onChange={e => setCurrency(e.target.value)} className={`w-20 ${inp}`}>
+            <option value="CRC">₡ CRC</option>
+            <option value="USD">$ USD</option>
+          </select>
+        </div>
         {error && <p className="text-[10px] text-rose-400">{error}</p>}
         <div className="flex gap-1.5">
           <button onClick={save} disabled={isPending} className="px-2 py-1 rounded-md bg-[#a3e635] text-black text-[10px] font-black disabled:opacity-50">
@@ -1062,6 +1069,7 @@ function AccountRow({ account }: { account: FinancialAccountDetail }) {
         <p className="text-[9px] text-zinc-600">
           {ACCOUNT_TYPES.find(t => t.value === account.account_type)?.label ?? account.account_type}
           {account.last4 && ` · ···${account.last4}`}
+          {' · '}<span className={account.currency_code === 'USD' ? 'text-[#a3e635]/70' : ''}>{account.currency_code}</span>
         </p>
       </div>
       <button onClick={() => setEditing(true)} className="text-[9px] font-black text-zinc-600 uppercase hover:text-[#a3e635]/70 transition-colors">
@@ -1080,6 +1088,7 @@ function AccountSettingsModal({
   const [name, setName]     = useState('')
   const [type, setType]     = useState('checking')
   const [last4, setLast4]   = useState('')
+  const [currency, setCurrency] = useState('CRC')
   const [error, setError]   = useState('')
   const [isPending, start]  = useTransition()
 
@@ -1090,10 +1099,10 @@ function AccountSettingsModal({
     start(async () => {
       const res = await addFinancialAccount({
         name: name.trim(), bank_name: custodio, account_type: type,
-        custodio, last4: last4 || null, currency_code: 'CRC',
+        custodio, last4: last4 || null, currency_code: currency,
       })
       if (res?.error) { setError(res.error); return }
-      setName(''); setLast4('')
+      setName(''); setLast4(''); setCurrency('CRC')
     })
   }
 
@@ -1130,9 +1139,15 @@ function AccountSettingsModal({
             <input value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
               placeholder="últ. 4" className={`w-20 ${inp}`} />
           </div>
-          <select value={type} onChange={e => setType(e.target.value)} className={`w-full ${inp}`}>
-            {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+          <div className="flex gap-1.5">
+            <select value={type} onChange={e => setType(e.target.value)} className={`flex-1 ${inp}`}>
+              {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <select value={currency} onChange={e => setCurrency(e.target.value)} className={`w-20 ${inp}`}>
+              <option value="CRC">₡ CRC</option>
+              <option value="USD">$ USD</option>
+            </select>
+          </div>
           {error && <p className="text-[10px] text-rose-400">{error}</p>}
           <button onClick={submit} disabled={isPending}
             className="w-full py-2 rounded-lg bg-[#a3e635]/15 text-[#a3e635] text-[11px] font-black hover:bg-[#a3e635]/25 transition-colors disabled:opacity-50">
