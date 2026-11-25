@@ -49,6 +49,47 @@ export function computeMonthlyDebtService(loan: RentalLoan, asOfDate: Date): num
   return (balance * i) / (1 - Math.pow(1 + i, -months))
 }
 
+// Approximates the loan's balance at an earlier date via the same
+// fixed-payment amortization model as computeMonthlyDebtService — there's
+// no historical balance data, only the current one, so this derives the
+// (constant) monthly payment from today's balance/rate/remaining term and
+// extrapolates backward: balance(remaining m months) = P(1-(1+i)^-m)/i.
+// Used only for the historical equity estimate on /inversiones' trend
+// chart — an approximation, not a real snapshot like the other series there.
+export function computeHistoricalLoanBalance(loan: RentalLoan, today: Date, targetDate: Date): number {
+  const balanceNow = Number(loan.current_balance ?? 0)
+  const annualRate = Number(loan.interest_rate ?? 0) / 100
+  if (!balanceNow || !annualRate || !loan.end_date) return balanceNow
+  if (targetDate >= today) return balanceNow
+  const end = new Date(loan.end_date + 'T12:00:00')
+  const msPerMonth = 30.4375 * 24 * 3600 * 1000
+  const monthsNow = Math.max(1, Math.round((end.getTime() - today.getTime()) / msPerMonth))
+  const monthsAgo = Math.max(0, Math.round((today.getTime() - targetDate.getTime()) / msPerMonth))
+  const monthsThen = monthsNow + monthsAgo
+  const i = annualRate / 12
+  const payment = (balanceNow * i) / (1 - Math.pow(1 + i, -monthsNow))
+  return (payment * (1 - Math.pow(1 + i, -monthsThen))) / i
+}
+
+// Linear interpolation of property value between purchase and the current
+// known value — the only two real data points available; months between
+// them are a smooth estimate, not a real appraisal history.
+export function interpolatePropertyValue(
+  purchaseValue: number,
+  purchaseDate: string,
+  currentValue: number,
+  asOfDate: string,
+  targetDate: Date,
+): number {
+  const p = new Date(purchaseDate + 'T12:00:00').getTime()
+  const a = new Date(asOfDate + 'T12:00:00').getTime()
+  const t = targetDate.getTime()
+  if (t <= p) return 0
+  if (a <= p) return currentValue
+  const frac = Math.min(1, (t - p) / (a - p))
+  return purchaseValue + (currentValue - purchaseValue) * frac
+}
+
 export function computeCapRate(annualNoiCrc: number, valueCrc: number): number | null {
   return valueCrc > 0 ? annualNoiCrc / valueCrc : null
 }

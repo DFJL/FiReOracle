@@ -14,7 +14,7 @@ import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
-import { computeRentalPerformance } from '@/lib/rentalPerformance'
+import { computeRentalPerformance, computeHistoricalLoanBalance, interpolatePropertyValue } from '@/lib/rentalPerformance'
 import type { PortfolioModelCategory } from '@/lib/portfolioModel'
 
 const LIQUID_KEY = '__liquidez__'
@@ -123,6 +123,39 @@ export default async function InversionesPage() {
     snapshotInvestedByMonth[m] = Number(s.invested_crc ?? 0)
     snapshotLiquidByMonth[m]   = Number(s.liquid_crc ?? 0)
     snapshotTotalByMonth[m]    = Number(s.invested_crc ?? 0) + Number(s.liquid_crc ?? 0)
+  }
+
+  const exchangeRate = await fetchExchangeRate()
+
+  // Real estate equity has no monthly history of its own (just a single
+  // current value/loan balance) — approximate each past month by
+  // interpolating value between purchase and today, and backing out the
+  // loan balance via the same fixed-payment amortization model used for
+  // DSCR/cash-on-cash elsewhere. An estimate, not a real snapshot like the
+  // other series on this chart — labeled as such in the legend.
+  const REAL_ESTATE_KEY = '__inmuebles__'
+  const REAL_ESTATE_COLOR = '#b45309'
+  const realEstateAssetRows = (assetRows ?? []).filter(a => a.is_rental)
+  const realEstateDetails = realEstateAssetRows.map(a => ({
+    purchaseValueCrc: Number(a.purchase_price_crc ?? 0),
+    purchaseDate: a.purchase_date,
+    currentValueCrc: Number(a.value_crc ?? 0),
+    asOfDate: a.as_of_date ?? new Date().toISOString().slice(0, 10),
+    loan: a.loan_id ? (loanRows ?? []).find(l => l.id === a.loan_id) ?? null : null,
+  }))
+  function realEstateEquityAt(targetDate: Date): number {
+    const today = new Date()
+    return realEstateDetails.reduce((sum, re) => {
+      if (!re.purchaseDate || !re.purchaseValueCrc) return sum
+      const value = interpolatePropertyValue(re.purchaseValueCrc, re.purchaseDate, re.currentValueCrc, re.asOfDate, targetDate)
+      if (value <= 0) return sum
+      let loanBalanceCrc = 0
+      if (re.loan) {
+        const native = computeHistoricalLoanBalance(re.loan, today, targetDate)
+        loanBalanceCrc = (re.loan.currency_code ?? 'CRC') === 'USD' ? native * exchangeRate.sell : native
+      }
+      return sum + (value - loanBalanceCrc)
+    }, 0)
   }
 
   // Real, manually-verified per-bucket monthly values (source: 'imported') —
@@ -452,6 +485,7 @@ export default async function InversionesPage() {
           // liquidez line flat at zero for 2018-2024. Snapshots know the real
           // position; fall back to the replay only where no snapshot exists.
           [LIQUID_KEY]: lastLiquid ?? runningLiquidez,
+          ...(realEstateAssetRows.length > 0 ? { [REAL_ESTATE_KEY]: realEstateEquityAt(new Date(month + '-15')) } : {}),
         },
         // Authoritative values; the chart falls back to the replayed sum only
         // for months with no snapshot at all.
@@ -466,9 +500,8 @@ export default async function InversionesPage() {
       .filter(b => b.key !== LIQUID_KEY)
       .map(b => ({ key: b.key, name: b.name, color: b.color })),
     { key: LIQUID_KEY, name: 'Liquidez', color: '#f59e0b' },
+    ...(realEstateAssetRows.length > 0 ? [{ key: REAL_ESTATE_KEY, name: 'Bienes inmuebles (estimado)', color: REAL_ESTATE_COLOR }] : []),
   ]
-
-  const exchangeRate = await fetchExchangeRate()
 
   // ── Portfolio analysis data ─────────────────────────────────────────────────
 
