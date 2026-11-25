@@ -625,6 +625,7 @@ export default async function InversionesPage() {
         liquidBreakdown={liquidBreakdown}
         bucketTransactions={bucketTransactions}
         targets={portfolioTargets}
+        realEstateItems={rentalAssets.map(a => ({ key: a.id, name: a.name, equity: a.equityCrc }))}
       />
       <PortfolioHistory
         points={historyPoints}
@@ -642,6 +643,7 @@ export default async function InversionesPage() {
           exchange_rate: Number(r.exchange_rate),
         }))}
         exchangeRate={exchangeRate}
+        rentalAssets={rentalAssets.map(a => ({ name: a.name, equityCrc: a.equityCrc, cashOnCash: a.cashOnCash }))}
       />
       <PortfolioAnalysis
         buckets={buckets.filter(b => b.key !== LIQUID_KEY)}

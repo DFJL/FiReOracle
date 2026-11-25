@@ -14,10 +14,19 @@ type YieldRow = {
   exchange_rate: number
 }
 
+type RentalAssetSummary = {
+  name: string
+  equityCrc: number
+  cashOnCash: number | null
+}
+
 type Props = {
   rows: YieldRow[]
   exchangeRate: ExchangeRate
+  rentalAssets: RentalAssetSummary[]
 }
+
+const REAL_ESTATE_COLOR = '#b45309'
 
 const INSTRUMENT_COLORS: [string, string][] = [
   ['transcomer', '#a3e635'],
@@ -36,9 +45,10 @@ function instrumentColor(name: string) {
   return '#818cf8'
 }
 
-export function PortfolioYield({ rows, exchangeRate }: Props) {
+export function PortfolioYield({ rows, exchangeRate, rentalAssets }: Props) {
   const { currency } = useCurrency()
   const [rangeMonths, setRangeMonths]   = useState<number>(24)
+  const [includeRealEstate, setIncludeRealEstate] = useState(true)
   const [hoverIdx, setHoverIdx]         = useState<number | null>(null)
   const [recalcMsg, setRecalcMsg]       = useState<string | null>(null)
   const [isPending, startTransition]    = useTransition()
@@ -89,12 +99,6 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
 
   const products = summaries.map(s => s.name)
 
-  // summaries is already sorted best→worst (line above), but that order
-  // alone doesn't answer "¿cuál es el mejor/peor?" at a glance in a grid —
-  // pull them out explicitly for their own strip.
-  const bestPerformer  = summaries[0] ?? null
-  const worstPerformer = summaries.length > 1 ? summaries[summaries.length - 1] : null
-
   // Blended portfolio-level return — same money-weighted formula, applied
   // across all instruments combined rather than per-instrument.
   const totalInvested = summaries.reduce((s, r) => s + r.avgInvestedUsd, 0)
@@ -103,6 +107,38 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
   const blendedAnn = totalInvested > 0 && blendedMonths > 0
     ? (blendedTotalUsd / totalInvested) * (12 / blendedMonths) * 100
     : 0
+
+  // Real estate has no monthly yield history (equity/cap-rate data is a
+  // single current snapshot, not a time series) — pro-rate its already-
+  // annual cash-on-cash to the same window as the bucket summaries above
+  // so it folds into the same money-weighted blend instead of a second,
+  // incompatible average. Appreciation is deliberately left out here —
+  // it's unrealized, not comparable to the cash yield the other
+  // instruments report (it has its own rating in "Rendimiento de alquiler" below).
+  const rentalEntries = includeRealEstate
+    ? rentalAssets.filter(r => r.cashOnCash != null && r.equityCrc > 0)
+    : []
+  const rentalSummaries = rentalEntries.map(r => {
+    const equityUsd = r.equityCrc / liveRate
+    const ann = (r.cashOnCash as number) * 100
+    const totalUsd = blendedMonths > 0 ? (r.cashOnCash as number) * equityUsd * (blendedMonths / 12) : 0
+    return { name: r.name, ann, totalUsd, avgInvestedUsd: equityUsd, lastInvestedUsd: equityUsd, months: blendedMonths }
+  })
+
+  const combinedInvested = totalInvested + rentalSummaries.reduce((s, r) => s + r.avgInvestedUsd, 0)
+  const combinedTotalUsd = blendedTotalUsd + rentalSummaries.reduce((s, r) => s + r.totalUsd, 0)
+  const combinedAnn = combinedInvested > 0 && blendedMonths > 0
+    ? (combinedTotalUsd / combinedInvested) * (12 / blendedMonths) * 100
+    : blendedAnn
+
+  // displayEntries folds the real-estate row (when toggled on) into the
+  // ranking/cards — already sorted best→worst, pulled out explicitly below
+  // since that order alone doesn't answer "¿cuál es el mejor/peor?" at a
+  // glance in a grid.
+  const displayEntries = [...summaries, ...rentalSummaries].sort((a, b) => b.ann - a.ann)
+  const bestPerformer  = displayEntries[0] ?? null
+  const worstPerformer = displayEntries.length > 1 ? displayEntries[displayEntries.length - 1] : null
+  const rentalNames = new Set(rentalSummaries.map(r => r.name))
 
   const fmtUsd = (v: number) => {
     const val = currency === 'CRC' ? v * liveRate : v
@@ -193,6 +229,18 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
             ))}
           </div>
 
+          {/* Real estate toggle */}
+          {rentalAssets.length > 0 && (
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+              {([{ l: 'Con inmuebles', v: true }, { l: 'Sin inmuebles', v: false }]).map(o => (
+                <button key={o.l} onClick={() => setIncludeRealEstate(o.v)}
+                  className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wide transition-all ${
+                    includeRealEstate === o.v ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>{o.l}</button>
+              ))}
+            </div>
+          )}
+
           {/* Recalculate button */}
           <button
             onClick={handleRecalculate}
@@ -217,17 +265,20 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
 
       {/* Portfolio-level blended return — the number that answers "¿está funcionando mi portafolio?",
           not just each instrument on its own */}
-      {totalInvested > 0 && (
+      {combinedInvested > 0 && (
         <div className="rounded-xl border border-[#a3e635]/20 bg-[#a3e635]/[0.06] p-4 flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-[9px] font-black text-[#a3e635]/80 uppercase tracking-[0.14em]">Rendimiento General del Portfolio</p>
-            <p className="text-3xl font-black text-[#a3e635] leading-tight mt-0.5">{blendedAnn.toFixed(2)}%</p>
-            <p className="text-[10px] text-zinc-500 mt-0.5">anualizado ({rangeLabel}) · ponderado por monto invertido</p>
+            <p className="text-3xl font-black text-[#a3e635] leading-tight mt-0.5">{combinedAnn.toFixed(2)}%</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">
+              anualizado ({rangeLabel}) · ponderado por monto invertido
+              {rentalSummaries.length > 0 ? ' · incl. equity inmueble' : ''}
+            </p>
           </div>
           <div className="text-right">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Total Invertido</p>
-            <p className="text-sm font-bold text-zinc-300 mt-0.5">{fmtUsd(totalInvested)}</p>
-            <p className="text-[10px] text-zinc-600 mt-0.5">{fmtUsd(blendedTotalUsd)} yield {rangeLabel}</p>
+            <p className="text-sm font-bold text-zinc-300 mt-0.5">{fmtUsd(combinedInvested)}</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">{fmtUsd(combinedTotalUsd)} yield {rangeLabel}</p>
           </div>
         </div>
       )}
@@ -257,14 +308,14 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
       {/* Ranking — mejor a peor, barras horizontales. Más legible para
           comparar instrumentos entre sí que el chart de líneas de abajo,
           que responde una pregunta distinta (tendencia en el tiempo). */}
-      {summaries.length > 1 && (() => {
-        const maxAbs = Math.max(...summaries.map(s => Math.abs(s.ann)), 1)
+      {displayEntries.length > 1 && (() => {
+        const maxAbs = Math.max(...displayEntries.map(s => Math.abs(s.ann)), 1)
         return (
           <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-2">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.14em]">Ranking · {rangeLabel}</p>
-            {summaries.map(s => {
+            {displayEntries.map(s => {
               const shortName = s.name.replace('Fondos de Inversión ', '').replace('Rendimientos ', '')
-              const color = s.ann < 0 ? '#fb7185' : instrumentColor(s.name)
+              const color = s.ann < 0 ? '#fb7185' : rentalNames.has(s.name) ? REAL_ESTATE_COLOR : instrumentColor(s.name)
               const widthPct = (Math.abs(s.ann) / maxAbs) * 100
               return (
                 <div key={s.name} className="flex items-center gap-2"
@@ -285,8 +336,8 @@ export function PortfolioYield({ rows, exchangeRate }: Props) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {summaries.map(s => {
-          const color = instrumentColor(s.name)
+        {displayEntries.map(s => {
+          const color = rentalNames.has(s.name) ? REAL_ESTATE_COLOR : instrumentColor(s.name)
           const shortName = s.name.replace('Fondos de Inversión ', '').replace('Rendimientos ', '')
           return (
             <div key={s.name} className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3">

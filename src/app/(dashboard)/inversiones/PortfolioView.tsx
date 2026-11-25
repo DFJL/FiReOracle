@@ -43,8 +43,9 @@ function fmtPct(n: number) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
 
-const LIQUID_KEY   = '__liquidez__'
-const LIQUID_COLOR = '#f59e0b'
+const LIQUID_KEY      = '__liquidez__'
+const LIQUID_COLOR    = '#f59e0b'
+const REAL_ESTATE_COLOR = '#b45309'
 
 // ── Donut ─────────────────────────────────────────────────────────────────────
 
@@ -209,7 +210,7 @@ const TX_META: Record<string, { label: string; color: string; sign: 1 | -1 }> = 
   otro:         { label: 'Otro',        color: '#a1a1aa', sign: -1 },
 }
 
-export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions, targets: initialTargets }: {
+export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatrimony, exchangeRate, liquidBreakdown, bucketTransactions, targets: initialTargets, realEstateItems }: {
   buckets: BucketData[]
   liquidBalance: number
   totalInvested: number
@@ -218,8 +219,10 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   liquidBreakdown: CustodioGroup[]
   bucketTransactions: Record<string, BucketTx[]>
   targets: PortfolioTarget[]
+  realEstateItems: { key: string; name: string; equity: number }[]
 }) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [includeRealEstate, setIncludeRealEstate] = useState(true)
   const { currency } = useCurrency()
   const [showAllTx, setShowAllTx] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
@@ -265,8 +268,29 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
     passiveValuation: 0, markToMarketLoss: 0, directSpend: 0, valorizationNet: 0,
   }
 
+  // Synthetic entries for real estate equity (valor − deuda) — off by
+  // default toggle, since mixing an illiquid, levered asset into the same
+  // totals as the liquid buckets changes what "Patrimonio"/"Invertido"
+  // mean; shown as clearly-labeled extra items, not silently blended in.
+  const realEstateTotal = realEstateItems.reduce((s, r) => s + r.equity, 0)
+  const realEstateBucketItems: BucketData[] = includeRealEstate
+    ? realEstateItems.map(r => ({
+        key: r.key,
+        name: r.name,
+        industry: 'Bienes inmuebles',
+        color: REAL_ESTATE_COLOR,
+        vendors: [],
+        balance: r.equity,
+        deposits: 0, liquidaciones: 0, rendimientos: 0,
+        passiveValuation: 0, markToMarketLoss: 0, directSpend: 0, valorizationNet: 0,
+      }))
+    : []
+
+  const effectiveInvested  = totalInvested  + (includeRealEstate ? realEstateTotal : 0)
+  const effectivePatrimony = totalPatrimony + (includeRealEstate ? realEstateTotal : 0)
+
   // Largest first — same order the donut segments follow.
-  const allItems = [...buckets, liquidItem].sort((a, b) => b.balance - a.balance)
+  const allItems = [...buckets, liquidItem, ...realEstateBucketItems].sort((a, b) => b.balance - a.balance)
 
   function toggle(key: string) {
     setSelected(prev => prev === key ? null : key)
@@ -277,7 +301,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
   }
 
   const donutSlices = allItems.map(b => ({
-    pct:   totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0,
+    pct:   effectivePatrimony > 0 ? (b.balance / effectivePatrimony) * 100 : 0,
     color: b.color,
     key:   b.key,
   }))
@@ -300,19 +324,29 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
           </p>
           <p className="text-3xl font-black text-white tracking-tight leading-none">Portafolio</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-end gap-1.5">
           <p className="text-[9px] text-zinc-600">
             TC venta ₡{rate.toLocaleString('es-CR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             {' · '}{exchangeRate.source} · {exchangeRate.date}
           </p>
+          {realEstateItems.length > 0 && (
+            <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
+              {([{ l: 'Con inmuebles', v: true }, { l: 'Sin inmuebles', v: false }]).map(o => (
+                <button key={o.l} onClick={() => setIncludeRealEstate(o.v)}
+                  className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wide transition-all ${
+                    includeRealEstate === o.v ? 'bg-white/[0.10] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}>{o.l}</button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-[#a3e635]/[0.06] rounded-2xl overflow-hidden border border-[#a3e635]/[0.08]">
         {[
-          { label: 'Patrimonio total', crc: totalPatrimony, color: 'text-[#a3e635]' },
-          { label: 'Invertido',        crc: totalInvested,  color: 'text-blue-400' },
+          { label: 'Patrimonio total', crc: effectivePatrimony, color: 'text-[#a3e635]' },
+          { label: 'Invertido',        crc: effectiveInvested,  color: 'text-blue-400' },
           { label: 'Liquidez',         crc: liquidBalance,  color: 'text-amber-400' },
         ].map(k => (
           <div key={k.label} className="bg-[#0d120d] px-4 py-4 flex flex-col gap-1.5">
@@ -338,7 +372,7 @@ export function PortfolioView({ buckets, liquidBalance, totalInvested, totalPatr
           <Donut slices={donutSlices} selected={selected} onSelect={toggle} />
           <div className="flex-1 min-w-0 space-y-1.5">
             {allItems.map(b => {
-              const pct    = totalPatrimony > 0 ? (b.balance / totalPatrimony) * 100 : 0
+              const pct    = effectivePatrimony > 0 ? (b.balance / effectivePatrimony) * 100 : 0
               const active = selected === b.key
               const target = targets.find(t => t.bucketKey === b.key)
               const targetPct = target?.targetPctPortfolio ?? null
