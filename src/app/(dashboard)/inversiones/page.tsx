@@ -14,7 +14,7 @@ import { fetchExchangeRate } from '@/lib/exchange-rate'
 import { countableEnvelopeIds, sumLiquid } from '@/lib/envelopeBalances'
 import { computeBucketTotals, classifyBucketTx, normalizeVendor, type ConceptMap } from '@/lib/bucketBalance'
 import { computeAutoMilestones, manualMilestones, mergeMilestones } from '@/lib/milestones'
-import { computeRentalPerformance, computeHistoricalLoanBalance, interpolatePropertyValue } from '@/lib/rentalPerformance'
+import { computeRentalPerformance, interpolatePropertyValue } from '@/lib/rentalPerformance'
 import type { PortfolioModelCategory } from '@/lib/portfolioModel'
 
 const LIQUID_KEY = '__liquidez__'
@@ -38,6 +38,7 @@ export default async function InversionesPage() {
     { data: assetRows },
     { data: loanRows },
     { data: modelTargetRows },
+    { data: loanPaymentRows },
   ] = await Promise.all([
     admin
       .from('user_investment_buckets')
@@ -93,6 +94,18 @@ export default async function InversionesPage() {
     admin.from('portfolio_model_targets')
       .select('category, target_pct')
       .eq('user_id', user.id),
+    // Real historical loan balances (vs. the loan's single current_balance)
+    // — used to build a real, not modeled, debt line for the real-estate
+    // equity history below.
+    admin.from('loan_payments')
+      .select('loan_id, payment_date, balance_before, balance_after')
+      .eq('user_id', user.id)
+      // Same-day rows (e.g. an "extra" paydown alongside the normal
+      // installment) chain balance_before→balance_after in entry order —
+      // created_at as the tiebreaker keeps that chain intact instead of an
+      // unstable default order scrambling which balance "wins" for the day.
+      .order('payment_date', { ascending: true })
+      .order('created_at', { ascending: true }),
   ])
 
   const milestones = mergeMilestones(
@@ -127,15 +140,37 @@ export default async function InversionesPage() {
 
   const exchangeRate = await fetchExchangeRate()
 
-  // Real estate equity has no monthly history of its own (just a single
-  // current value/loan balance) — approximate each past month by
-  // interpolating value between purchase and today, and backing out the
-  // loan balance via the same fixed-payment amortization model used for
-  // DSCR/cash-on-cash elsewhere. An estimate, not a real snapshot like the
-  // other series on this chart — labeled as such in the legend.
+  // Real estate equity: the loan side has real history (loan_payments,
+  // every payment's balance_after, back to 2018) — no modeling needed,
+  // same "last known real value carried forward" pattern as the bucket
+  // lines above. The value side still has only a single appraisal
+  // (assets.value_crc/as_of_date, no asset_value_history rows for this
+  // property), so that part stays an interpolation between purchase price
+  // and that one known value — labeled "(estimado)" in the legend because
+  // of that half, not the debt.
   const REAL_ESTATE_KEY = '__inmuebles__'
   const REAL_ESTATE_COLOR = '#b45309'
   const realEstateAssetRows = (assetRows ?? []).filter(a => a.is_rental)
+  const loanBalanceHistoryByLoan: Record<string, { date: string; balance: number }[]> = {}
+  const firstBalanceBeforeByLoan: Record<string, number> = {}
+  for (const p of loanPaymentRows ?? []) {
+    if (!p.loan_id || !p.payment_date) continue
+    if (!(p.loan_id in firstBalanceBeforeByLoan)) firstBalanceBeforeByLoan[p.loan_id] = Number(p.balance_before)
+    ;(loanBalanceHistoryByLoan[p.loan_id] ??= []).push({ date: p.payment_date, balance: Number(p.balance_after) })
+  }
+  function loanBalanceAt(loan: NonNullable<typeof loanRows>[number], targetDateStr: string): number {
+    const history = loanBalanceHistoryByLoan[loan.id]
+    if (!history?.length) return Number(loan.current_balance ?? 0)
+    // History is already sorted ascending (query order) — last payment on
+    // or before the target date wins; before the earliest recorded
+    // payment, carry its balance_before back rather than assume zero debt.
+    let result: number | null = null
+    for (const h of history) {
+      if (h.date > targetDateStr) break
+      result = h.balance
+    }
+    return result ?? firstBalanceBeforeByLoan[loan.id] ?? Number(loan.current_balance ?? 0)
+  }
   const realEstateDetails = realEstateAssetRows.map(a => ({
     purchaseValueCrc: Number(a.purchase_price_crc ?? 0),
     purchaseDate: a.purchase_date,
@@ -144,14 +179,14 @@ export default async function InversionesPage() {
     loan: a.loan_id ? (loanRows ?? []).find(l => l.id === a.loan_id) ?? null : null,
   }))
   function realEstateEquityAt(targetDate: Date): number {
-    const today = new Date()
+    const targetDateStr = targetDate.toISOString().slice(0, 10)
     return realEstateDetails.reduce((sum, re) => {
       if (!re.purchaseDate || !re.purchaseValueCrc) return sum
       const value = interpolatePropertyValue(re.purchaseValueCrc, re.purchaseDate, re.currentValueCrc, re.asOfDate, targetDate)
       if (value <= 0) return sum
       let loanBalanceCrc = 0
       if (re.loan) {
-        const native = computeHistoricalLoanBalance(re.loan, today, targetDate)
+        const native = loanBalanceAt(re.loan, targetDateStr)
         loanBalanceCrc = (re.loan.currency_code ?? 'CRC') === 'USD' ? native * exchangeRate.sell : native
       }
       return sum + (value - loanBalanceCrc)
@@ -500,7 +535,7 @@ export default async function InversionesPage() {
       .filter(b => b.key !== LIQUID_KEY)
       .map(b => ({ key: b.key, name: b.name, color: b.color })),
     { key: LIQUID_KEY, name: 'Liquidez', color: '#f59e0b' },
-    ...(realEstateAssetRows.length > 0 ? [{ key: REAL_ESTATE_KEY, name: 'Bienes inmuebles (estimado)', color: REAL_ESTATE_COLOR }] : []),
+    ...(realEstateAssetRows.length > 0 ? [{ key: REAL_ESTATE_KEY, name: 'Bienes inmuebles (valor estimado)', color: REAL_ESTATE_COLOR }] : []),
   ]
 
   // ── Portfolio analysis data ─────────────────────────────────────────────────
