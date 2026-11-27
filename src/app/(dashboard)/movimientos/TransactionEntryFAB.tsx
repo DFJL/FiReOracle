@@ -250,6 +250,7 @@ export function TransactionEntryFAB({
             type: 'ingreso', date: it.date, amount: it.amount, vendor: it.vendor, concept: it.concept,
             category_code: it.category_code || undefined,
             is_passive_income: it.is_passive_income, is_settlement: it.is_settlement,
+            credit_envelope_id: it.envelope_id || undefined,
             ...currencyFields,
           })
         } else {
@@ -259,6 +260,7 @@ export function TransactionEntryFAB({
             expense_group: (cat?.group_gasto && cat.group_gasto !== 'na') ? cat.group_gasto : 'personal',
             category_code: it.category_code || undefined,
             is_settlement: it.is_settlement, is_survival_expense: it.is_survival_expense,
+            debit_envelope_id: it.envelope_id || undefined,
             ...currencyFields,
           })
         }
@@ -1010,10 +1012,19 @@ export function TransactionEntryFAB({
                           ))}
                         </select>
                       ) : (
-                        <CategorySelect categories={categories} value={it.category_code}
-                          onChange={v => updateBatchItem(i, { category_code: v })}
-                          typeFilter={it.type === 'ingreso' ? 'income' : 'expense'}
-                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40" />
+                        <>
+                          <CategorySelect categories={categories} value={it.category_code}
+                            onChange={v => updateBatchItem(i, { category_code: v })}
+                            typeFilter={it.type === 'ingreso' ? 'income' : 'expense'}
+                            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40" />
+                          <select value={it.envelope_id} onChange={e => updateBatchItem(i, { envelope_id: e.target.value })}
+                            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none focus:border-[#a3e635]/40">
+                            <option value="">{it.type === 'ingreso' ? 'Crédito a sobre (opcional)' : 'Débito de sobre (opcional)'}</option>
+                            {leafEnvelopes.map(env => (
+                              <option key={env.id} value={env.id}>{envelopeLabel(env, leafEnvelopes)}</option>
+                            ))}
+                          </select>
+                        </>
                       )}
                     </div>
                   ))}

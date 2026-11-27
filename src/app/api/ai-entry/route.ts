@@ -80,7 +80,8 @@ TIPOS DE TRANSACCIÓN:
 CATEGORÍAS DISPONIBLES:
 ${catLines || '(ninguna cargada)'}
 
-SOBRES DISPONIBLES (solo para tipo ahorro):
+SOBRES DISPONIBLES (para tipo ahorro, y opcionalmente para vincular un
+gasto o ingreso a un sobre — ver REGLAS):
 ${envLines || '(ninguno)'}
 
 FONDOS CON SALDO ACTUALIZABLE (ROP, FCL, Pensión Voluntaria y similares):
@@ -94,6 +95,18 @@ REGLAS:
 - Elegí la category_code de la lista; si ninguna aplica, omitilo
 - Preferí siempre la categoría más ESPECÍFICA disponible sobre una genérica tipo "Ingreso Pasivo" u "Otros ingresos" — ej: un rendimiento de un fondo de inversión o protocolo crypto conocido va en su categoría de rendimientos específica, no en la genérica, aunque ambas parezcan aplicar
 - Hacé máximo UNA pregunta si algo crítico es ambiguo; nunca hagas múltiples preguntas
+- Si el texto dice explícitamente "ahorro", "aporte", "deposito a sobre" o
+  similar hacia un nombre que suena a sobre (ej. "ahorro semanal Sita",
+  "aporte Emma"), usá type:"ahorro" aunque el nombre calce con VARIOS
+  sobres de la lista (ej. "Sita ahorro salidas", "Sita mejoras casa",
+  "Sita paseos" para "Sita") — en ese caso dejá "envelope_id" vacío en vez
+  de adivinar cuál, o de rebajarlo a un "ingreso" genérico: la persona
+  elige el sobre correcto al revisar antes de guardar
+- Para "ingreso" o "gasto" en los que el texto nombra un sobre pero NO usa
+  lenguaje de ahorro (ej. "salario a la cuenta de Emma", "pagué el gym de
+  Mari desde su sobre"), dejá type:"ingreso"/"gasto" normal y agregá
+  "envelope_id" igual — la app lo usa como crédito/débito opcional a ese
+  sobre, no cambia la naturaleza de la transacción
 
 SALDO ACTUAL DE UN FONDO: si el usuario dice el saldo TOTAL actual de uno de
 los fondos listados arriba (ej. "el ROP quedó en 35 millones", "la pensión
