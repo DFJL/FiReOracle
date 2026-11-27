@@ -104,6 +104,21 @@ eso lo calcula la app). NO calculés vos la diferencia ni pongas "amount".
 Seguí completando type:"ingreso" y el resto de los campos normales
 (date, concept) igual que cualquier otro "complete".
 
+VARIAS TRANSACCIONES INDEPENDIENTES EN UN SOLO TEXTO: cuando el usuario
+pega o dicta varias transacciones DISTINTAS y no relacionadas entre sí —
+cada una con su propia fecha/monto/motivo, como una lista de movimientos
+de varios días (ej. "coca minisuper 1400 26 nov", "ahorro sita 90 mil
+semanal 27 nov", "salario quincena 1458154.37 27 nov" en líneas
+separadas) — respondé con "batch": un array con el mismo shape que
+"fields" del caso "complete", uno por transacción. Esto es DISTINTO de
+"multi", que es solo para un recibo/factura con varios ítems de UNA sola
+compra con un vendor y fecha compartidos. Para "ahorro" incluí
+"envelope_id" si alguno de los sobres listados calza por nombre; si no
+hay match claro dejalo vacío, la app lo pide en la revisión. Nunca uses
+"question" en modo batch — si algo de una línea es ambiguo, resolvelo con
+el mejor criterio posible (la app permite corregir cada línea antes de
+guardar).
+
 RECIBOS/FACTURAS CON VARIOS ÍTEMS: cuando la imagen/PDF es un recibo o
 factura con una lista de productos/servicios claramente distintos y con
 precio propio cada uno (ej: recibo de supermercado, farmacia, ferretería,
@@ -123,6 +138,9 @@ Cuando tenés datos suficientes para UN solo gasto/ingreso:
 
 Cuando es un recibo/factura con varios ítems distintos:
 {"status":"multi","vendor":"AutoMercado","date":"${today}","total":45230,"currency":"CRC","items":[{"concept":"Leche + lácteos","amount":8500,"category_code":"FOOD_SUPER"},{"concept":"Shampoo","amount":4200,"category_code":"PERSONAL_CARE"}]}
+
+Cuando son varias transacciones independientes en un mismo mensaje:
+{"status":"batch","transactions":[{"type":"gasto","date":"2026-11-26","amount":1400,"currency":"CRC","vendor":"Minisuper Bienvenidos","concept":"Coca","category_code":"FOOD_SUPER","is_passive_income":false,"is_settlement":false,"is_survival_expense":false},{"type":"ahorro","date":"2026-11-27","amount":90000,"currency":"CRC","envelope_id":"","concept":"Ahorro semanal Sita"},{"type":"ingreso","date":"2026-11-27","amount":1458154.37,"currency":"CRC","vendor":"Fortrea","concept":"Salario segunda quincena noviembre","category_code":"SALARY","is_passive_income":false,"is_settlement":false,"is_survival_expense":false}]}
 
 Cuando el usuario da el saldo actual de un fondo de la lista (no un monto de transacción):
 {"status":"complete","fields":{"type":"ingreso","date":"${today}","concept":"Ajuste de valor ROP & FCL","bucket_balance_id":"745756a9-372b-42f1-b084-4cd7b18f839f","bucket_balance_amount":35000000}}
@@ -212,6 +230,22 @@ Cuando necesitás UNA aclaración:
           if (typeof item?.concept !== 'string') continue
           const hit = lookupConcept(item.concept)
           if (hit && hit.type === 'expense') item.category_code = hit.categoryCode
+        }
+      }
+
+      // Same catalog override, applied per transaction for a batch of
+      // independent entries — skipped for "ahorro", which has no
+      // category_code/is_passive_income fields to override.
+      if (parsed?.status === 'batch' && Array.isArray(parsed.transactions)) {
+        for (const t of parsed.transactions) {
+          if (t?.type === 'ahorro' || typeof t?.concept !== 'string') continue
+          const txType = t.type === 'ingreso' ? 'income' : 'expense'
+          const hit = lookupConcept(t.concept)
+          if (hit && hit.type === txType) {
+            t.category_code = hit.categoryCode
+            const cat = (body.categories ?? []).find(c => c.code === hit.categoryCode)
+            if (cat) t.is_passive_income = cat.is_passive_income
+          }
         }
       }
 

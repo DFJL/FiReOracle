@@ -191,6 +191,88 @@ export function TransactionEntryFAB({
   }
   const receiptItemsTotal = receiptItems.reduce((s, it) => s + (it.amount || 0), 0)
 
+  // ── Batch mode (several independent transactions in one text) ──────────────
+  // Distinct from receipt mode: each line is its own gasto/ingreso/ahorro
+  // with its own date/vendor/category — not items of one shared purchase.
+  type BatchTxType = 'gasto' | 'ingreso' | 'ahorro'
+  type BatchItem = {
+    type: BatchTxType
+    date: string
+    amount: number
+    currency: 'CRC' | 'USD'
+    vendor: string
+    concept: string
+    category_code: string
+    envelope_id: string
+    is_passive_income: boolean
+    is_settlement: boolean
+    is_survival_expense: boolean
+  }
+  const [batchMode, setBatchMode]     = useState(false)
+  const [batchItems, setBatchItems]   = useState<BatchItem[]>([])
+  const [batchSaving, setBatchSaving] = useState(false)
+  const [batchError, setBatchError]   = useState<string | null>(null)
+
+  function updateBatchItem(i: number, patch: Partial<BatchItem>) {
+    setBatchItems(items => items.map((it, idx) => idx === i ? { ...it, ...patch } : it))
+  }
+  function removeBatchItem(i: number) {
+    setBatchItems(items => items.filter((_, idx) => idx !== i))
+  }
+  function addBatchItem() {
+    setBatchItems(items => [...items, {
+      type: 'gasto', date: today(), amount: 0, currency: 'CRC',
+      vendor: '', concept: '', category_code: '', envelope_id: '',
+      is_passive_income: false, is_settlement: false, is_survival_expense: false,
+    }])
+  }
+
+  function saveBatch() {
+    setBatchError(null)
+    if (batchItems.length === 0) { setBatchError('No hay transacciones para guardar'); return }
+    const missingEnvelope = batchItems.find(it => it.type === 'ahorro' && !it.envelope_id)
+    if (missingEnvelope) { setBatchError(`Falta el sobre para "${missingEnvelope.concept || missingEnvelope.vendor || 'ahorro'}"`); return }
+    setBatchSaving(true)
+    startTransition(async () => {
+      for (const it of batchItems) {
+        if (!it.amount || it.amount <= 0) continue
+        const currencyFields = it.currency === 'USD'
+          ? { currency_code: 'USD' as const, exchange_rate_used: parseFloat(fxRate) || undefined, amount_usd: it.amount }
+          : { currency_code: 'CRC' as const }
+        let result: { error: string | null } | undefined
+        if (it.type === 'ahorro') {
+          result = await createTransaction({
+            type: 'ahorro', date: it.date, amount: it.amount, envelope_id: it.envelope_id,
+            vendor: it.vendor || undefined, concept: it.concept || undefined,
+          })
+        } else if (it.type === 'ingreso') {
+          result = await createTransaction({
+            type: 'ingreso', date: it.date, amount: it.amount, vendor: it.vendor, concept: it.concept,
+            category_code: it.category_code || undefined,
+            is_passive_income: it.is_passive_income, is_settlement: it.is_settlement,
+            ...currencyFields,
+          })
+        } else {
+          const cat = categories.find(c => c.code === it.category_code)
+          result = await createTransaction({
+            type: 'gasto', date: it.date, amount: it.amount, vendor: it.vendor, concept: it.concept,
+            expense_group: (cat?.group_gasto && cat.group_gasto !== 'na') ? cat.group_gasto : 'personal',
+            category_code: it.category_code || undefined,
+            is_settlement: it.is_settlement, is_survival_expense: it.is_survival_expense,
+            ...currencyFields,
+          })
+        }
+        if (result?.error) {
+          setBatchError(`Error en "${it.concept || it.vendor || it.type}": ${result.error}`)
+          setBatchSaving(false)
+          return
+        }
+      }
+      setBatchSaving(false)
+      close()
+    })
+  }
+
   function saveReceipt() {
     setReceiptError(null)
     if (receiptItems.length === 0) { setReceiptError('Agregá al menos un ítem'); return }
@@ -285,6 +367,8 @@ export function TransactionEntryFAB({
     // reset receipt state
     setReceiptMode(false); setReceiptVendor(''); setReceiptDate(today())
     setReceiptItems([]); setReceiptParsedTotal(0); setReceiptError(null); setReceiptEnvelopeId('')
+    // reset batch state
+    setBatchMode(false); setBatchItems([]); setBatchError(null)
   }
 
   function close() { reset(); setOpen(false) }
@@ -337,7 +421,7 @@ export function TransactionEntryFAB({
       }
 
       const data = await res.json() as {
-        status: 'complete' | 'multi' | 'question' | 'error'
+        status: 'complete' | 'multi' | 'batch' | 'question' | 'error'
         fields?: Record<string, unknown>
         partial?: Record<string, unknown>
         question?: string
@@ -346,9 +430,35 @@ export function TransactionEntryFAB({
         date?: string
         total?: number
         items?: { concept?: string; amount?: number; category_code?: string }[]
+        transactions?: Record<string, unknown>[]
       }
 
-      if (data.status === 'multi' && Array.isArray(data.items)) {
+      if (data.status === 'batch' && Array.isArray(data.transactions)) {
+        const items: BatchItem[] = data.transactions.map((t): BatchItem => {
+          const txType: BatchTxType = t.type === 'ingreso' ? 'ingreso' : t.type === 'ahorro' ? 'ahorro' : 'gasto'
+          const concept = typeof t.concept === 'string' ? t.concept : ''
+          const aiCat = typeof t.category_code === 'string' ? t.category_code : ''
+          const resolveType = txType === 'ingreso' ? 'income' : 'expense'
+          return {
+            type: txType,
+            date: typeof t.date === 'string' ? t.date : today(),
+            amount: typeof t.amount === 'number' ? t.amount : 0,
+            currency: t.currency === 'USD' ? 'USD' : 'CRC',
+            vendor: typeof t.vendor === 'string' ? t.vendor : '',
+            concept,
+            category_code: txType === 'ahorro' ? '' : (aiCat || (concept ? resolveCategory(concept, resolveType) : '')),
+            envelope_id: typeof t.envelope_id === 'string' ? t.envelope_id : '',
+            is_passive_income: typeof t.is_passive_income === 'boolean' ? t.is_passive_income : false,
+            is_settlement: typeof t.is_settlement === 'boolean' ? t.is_settlement : false,
+            is_survival_expense: typeof t.is_survival_expense === 'boolean' ? t.is_survival_expense : false,
+          }
+        }).filter(it => it.amount > 0)
+        setBatchItems(items)
+        setBatchMode(true)
+        setAiMode(false)
+        setAiMessages([])
+        setAiQuestion(null)
+      } else if (data.status === 'multi' && Array.isArray(data.items)) {
         setReceiptVendor(typeof data.vendor === 'string' ? data.vendor : '')
         setReceiptDate(typeof data.date === 'string' ? data.date : today())
         setReceiptParsedTotal(typeof data.total === 'number' ? data.total : 0)
@@ -657,13 +767,13 @@ export function TransactionEntryFAB({
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.06]">
                   <button type="button"
-                    onClick={() => { setAiMode(false); setAiError(null); setReceiptMode(false) }}
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${!aiMode && !receiptMode ? 'bg-white/[0.10] text-white' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    onClick={() => { setAiMode(false); setAiError(null); setReceiptMode(false); setBatchMode(false) }}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${!aiMode && !receiptMode && !batchMode ? 'bg-white/[0.10] text-white' : 'text-zinc-600 hover:text-zinc-400'}`}>
                     Manual
                   </button>
                   <button type="button"
-                    onClick={() => { setAiMode(true); setAiError(null); setReceiptMode(false) }}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${aiMode && !receiptMode ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                    onClick={() => { setAiMode(true); setAiError(null); setReceiptMode(false); setBatchMode(false) }}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${aiMode && !receiptMode && !batchMode ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'}`}>
                     <Sparkles size={10} />
                     IA
                   </button>
@@ -673,7 +783,7 @@ export function TransactionEntryFAB({
             </div>
 
             {/* ── AI panel ── */}
-            {aiMode && !receiptMode && (
+            {aiMode && !receiptMode && !batchMode && (
               <div className="space-y-3">
                 {aiQuestion && (
                   <div className="flex gap-2 bg-[#a3e635]/[0.08] border border-[#a3e635]/20 rounded-xl p-3">
@@ -837,8 +947,100 @@ export function TransactionEntryFAB({
               </div>
             )}
 
+            {/* ── Batch review (several independent transactions) ── */}
+            {batchMode && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 bg-[#a3e635]/[0.08] border border-[#a3e635]/20 rounded-xl p-3">
+                  <Sparkles size={14} className="text-[#a3e635] flex-shrink-0" />
+                  <p className="text-xs text-[#a3e635]/90 leading-snug">
+                    {batchItems.length} transacciones independientes detectadas — revisá y corregí antes de guardar.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={lbl}>Transacciones ({batchItems.length})</label>
+                  <button type="button" onClick={addBatchItem}
+                    className="text-[10px] font-black text-[#a3e635]/70 hover:text-[#a3e635] transition-colors">
+                    + Transacción
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-0.5">
+                  {batchItems.map((it, i) => (
+                    <div key={i} className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5 border border-white/[0.08] shrink-0">
+                          {(['gasto', 'ingreso', 'ahorro'] as BatchTxType[]).map(t => (
+                            <button key={t} type="button"
+                              onClick={() => updateBatchItem(i, { type: t, category_code: t === 'ahorro' ? '' : it.category_code })}
+                              className={`px-1.5 py-1 rounded-md text-[9px] font-black uppercase transition-all ${
+                                it.type === t ? 'bg-[#a3e635]/20 text-[#a3e635]' : 'text-zinc-600 hover:text-zinc-400'
+                              }`}>
+                              {t === 'gasto' ? 'Gasto' : t === 'ingreso' ? 'Ingreso' : 'Ahorro'}
+                            </button>
+                          ))}
+                        </div>
+                        <input type="date" value={it.date} onChange={e => updateBatchItem(i, { date: e.target.value })}
+                          className="w-[118px] shrink-0 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-[#a3e635]/40" />
+                        <button type="button" onClick={() => removeBatchItem(i)}
+                          className="ml-auto shrink-0 px-1.5 text-zinc-600 hover:text-rose-400 transition-colors">
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input type="text" value={it.type === 'ahorro' ? it.concept : it.vendor}
+                          onChange={e => updateBatchItem(i, it.type === 'ahorro' ? { concept: e.target.value } : { vendor: e.target.value })}
+                          placeholder={it.type === 'ahorro' ? 'Concepto' : 'Comercio / fuente'}
+                          className="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                        <input type="number" min="0" step="any" value={it.amount || ''}
+                          onChange={e => updateBatchItem(i, { amount: parseFloat(e.target.value) || 0 })}
+                          placeholder={it.currency === 'USD' ? '$' : '₡'}
+                          className="w-24 shrink-0 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                      </div>
+                      {it.type !== 'ahorro' && (
+                        <input type="text" value={it.concept} onChange={e => updateBatchItem(i, { concept: e.target.value })}
+                          placeholder="Concepto"
+                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#a3e635]/40" />
+                      )}
+                      {it.type === 'ahorro' ? (
+                        <select value={it.envelope_id} onChange={e => updateBatchItem(i, { envelope_id: e.target.value })}
+                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40">
+                          <option value="">— elegí el sobre —</option>
+                          {leafEnvelopes.map(env => (
+                            <option key={env.id} value={env.id}>{envelopeLabel(env, leafEnvelopes)}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <CategorySelect categories={categories} value={it.category_code}
+                          onChange={v => updateBatchItem(i, { category_code: v })}
+                          typeFilter={it.type === 'ingreso' ? 'income' : 'expense'}
+                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40" />
+                      )}
+                    </div>
+                  ))}
+                  {batchItems.length === 0 && (
+                    <p className="text-xs text-zinc-600 text-center py-4">Sin transacciones — agregá una con &quot;+ Transacción&quot;.</p>
+                  )}
+                </div>
+
+                {batchError && (
+                  <p className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-3 py-2">{batchError}</p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { setBatchMode(false); setBatchItems([]) }}
+                    className="py-3 rounded-xl bg-white/[0.06] border border-white/[0.10] text-white text-sm font-black tracking-wide hover:bg-white/[0.10] transition-colors">
+                    Cancelar
+                  </button>
+                  <button type="button" onClick={saveBatch} disabled={batchSaving || batchItems.length === 0}
+                    className="py-3 rounded-xl bg-[#a3e635] text-black text-sm font-black tracking-wide hover:bg-[#b4f040] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    {batchSaving ? 'Guardando…' : `Guardar ${batchItems.length} transacciones`}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Type selector — hidden in AI mode */}
-            {!aiMode && !receiptMode && <div className="grid grid-cols-2 gap-1.5">
+            {!aiMode && !receiptMode && !batchMode && <div className="grid grid-cols-2 gap-1.5">
               {TYPE_OPTIONS.map(opt => (
                 <button key={opt.value} type="button" onClick={() => { setType(opt.value); setError(null); setInvestmentBucketId('') }}
                   className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
@@ -850,7 +1052,7 @@ export function TransactionEntryFAB({
               ))}
             </div>}
 
-            {!aiMode && !receiptMode && <form id="tx-form" onSubmit={submit} className="space-y-3">
+            {!aiMode && !receiptMode && !batchMode && <form id="tx-form" onSubmit={submit} className="space-y-3">
 
               {/* Revisión IA banner */}
               {aiPrefilled && (
@@ -1338,7 +1540,7 @@ export function TransactionEntryFAB({
           </div>{/* end scrollable */}
 
           {/* ── Sticky footer: error + submit buttons ── */}
-          {!aiMode && !receiptMode && (
+          {!aiMode && !receiptMode && !batchMode && (
             <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/[0.06] space-y-2">
               {showBucketWarning && !investmentBucketId && (
                 <div className="bg-blue-400/[0.08] border border-blue-400/25 rounded-xl px-3 py-2.5 space-y-2">
