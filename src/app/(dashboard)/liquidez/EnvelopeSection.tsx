@@ -297,17 +297,22 @@ function AddMovementPanel({
 
 function EditMovementRow({
   m,
+  currentEnvelopeId,
+  leafEnvelopes,
   onSave,
   onCancel,
 }: {
   m: EnvelopeMovement
-  onSave: (data: { date: string; amount: number; movement_type: MovType; notes: string | null }) => Promise<string | null>
+  currentEnvelopeId: string
+  leafEnvelopes: (Envelope | SubEnvelope)[]
+  onSave: (data: { date: string; amount: number; movement_type: MovType; notes: string | null; envelope_id: string }) => Promise<string | null>
   onCancel: () => void
 }) {
   const [type,   setType]   = useState<MovType>(m.movement_type)
   const [amount, setAmount] = useState(Math.abs(m.amount).toString())
   const [date,   setDate]   = useState(m.date)
   const [notes,  setNotes]  = useState(m.notes ?? '')
+  const [envelopeId, setEnvelopeId] = useState(currentEnvelopeId)
   const [saving, setSaving] = useState(false)
   const [err,    setErr]    = useState<string | null>(null)
 
@@ -315,7 +320,7 @@ function EditMovementRow({
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { setErr('Monto inválido'); return }
     setSaving(true)
-    const error = await onSave({ date, amount: amt, movement_type: type, notes: notes || null })
+    const error = await onSave({ date, amount: amt, movement_type: type, notes: notes || null, envelope_id: envelopeId })
     if (error) { setErr(error); setSaving(false) }
   }
 
@@ -346,6 +351,15 @@ function EditMovementRow({
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="—"
             className="w-full bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]/40" />
         </div>
+      </div>
+      <div>
+        <p className="text-[9px] text-zinc-600 mb-0.5">Sobre <span className="text-zinc-700 normal-case">(a dónde pertenece este movimiento)</span></p>
+        <select value={envelopeId} onChange={e => setEnvelopeId(e.target.value)}
+          className="w-full bg-white/[0.06] border border-white/[0.08] rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#a3e635]/40">
+          {leafEnvelopes.map(e => (
+            <option key={e.id} value={e.id}>{e.name} ({e.custodio})</option>
+          ))}
+        </select>
       </div>
       {err && <p className="text-[10px] text-rose-400">{err}</p>}
       <div className="flex gap-1.5">
@@ -402,7 +416,7 @@ function EnvelopeHistoryPanel({
 
   async function handleUpdate(
     id: string,
-    data: { date: string; amount: number; movement_type: MovType; notes: string | null },
+    data: { date: string; amount: number; movement_type: MovType; notes: string | null; envelope_id: string },
   ): Promise<string | null> {
     const res = await updateEnvelopeMovement(id, data)
     if (res.error) return res.error
@@ -488,6 +502,8 @@ function EnvelopeHistoryPanel({
                 {editingId === m.id ? (
                   <EditMovementRow
                     m={m}
+                    currentEnvelopeId={envelope.id}
+                    leafEnvelopes={leafEnvelopes}
                     onSave={(data) => handleUpdate(m.id, data)}
                     onCancel={() => setEditingId(null)}
                   />

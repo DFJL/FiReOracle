@@ -246,7 +246,7 @@ export async function deleteEnvelopeMovement(movementId: string): Promise<{ erro
 
 export async function updateEnvelopeMovement(
   movementId: string,
-  data: { date: string; amount: number; movement_type: MovType; notes: string | null },
+  data: { date: string; amount: number; movement_type: MovType; notes: string | null; envelope_id?: string },
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -257,7 +257,10 @@ export async function updateEnvelopeMovement(
 
   const { error } = await supabase
     .from('envelope_movements')
-    .update({ date: data.date, amount: signed, movement_type: data.movement_type, notes: data.notes })
+    .update({
+      date: data.date, amount: signed, movement_type: data.movement_type, notes: data.notes,
+      ...(data.envelope_id ? { envelope_id: data.envelope_id } : {}),
+    })
     .eq('id', movementId)
     .eq('user_id', user.id)
 
