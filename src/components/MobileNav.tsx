@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   LayoutDashboard, PiggyBank, TrendingUp, Users, Landmark,
   Sparkles, BarChart2, Settings, Wallet, Target, ShieldCheck,
-  Inbox, Flag, FileText, Grid3x3, X, LogOut,
+  Inbox, Flag, FileText, Grid3x3, X, LogOut, Gift,
 } from 'lucide-react'
 
 // ── Icon helpers ─────────────────────────────────────────────────────────────
@@ -27,6 +27,7 @@ function NavIcon({ name, size = 18 }: { name: string; size?: number }) {
     filetext:   <FileText size={size} />,
     shield:     <ShieldCheck size={size} />,
     settings:   <Settings size={size} />,
+    gift:       <Gift size={size} />,
   }
   return <>{icons[name] ?? null}</>
 }
@@ -72,6 +73,7 @@ const ALL_GROUPS = [
       { href: '/oracle',        label: 'Oracle',        iconName: 'sparkles' },
       { href: '/reporte',       label: 'Reporte',       iconName: 'filetext' },
       { href: '/auditoria',     label: 'Auditoría',     iconName: 'shield' },
+      { href: '/wrapped',       label: 'Wrapped',       iconName: 'gift' },
       { href: '/configuracion', label: 'Configuración', iconName: 'settings' },
     ],
   },
@@ -93,6 +95,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/oracle':        'Oracle',
   '/reporte':       'Reporte Mensual',
   '/auditoria':     'Auditoría',
+  '/wrapped':       'Wrapped',
   '/configuracion': 'Configuración',
 }
 

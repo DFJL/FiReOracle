@@ -22,6 +22,7 @@ import {
   Inbox,
   Flag,
   FileText,
+  Gift,
 } from 'lucide-react'
 import { getPendingCount } from '@/app/actions/inbox'
 import { AlertsServer } from './AlertsServer'
@@ -65,6 +66,7 @@ function buildNavGroups(pendingCount: number): NavGroup[] {
         { href: '/oracle',    label: 'Oracle',          icon: <Sparkles size={16} /> },
         { href: '/reporte',   label: 'Reporte Mensual', icon: <FileText size={16} /> },
         { href: '/auditoria', label: 'Auditoría',       icon: <ShieldCheck size={16} /> },
+        { href: '/wrapped',   label: 'Wrapped',         icon: <Gift size={16} /> },
       ],
     },
   ]
