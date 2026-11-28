@@ -48,7 +48,24 @@ export default async function WrappedPage({
   const yearStart = `${year}-01-01`
   const yearEnd = `${year}-12-31`
   const prevYearStart = `${prevYear}-01-01`
-  const prevYearEnd = `${prevYear}-12-31`
+
+  // Si el año en curso todavía no terminó, comparar contra un diciembre
+  // COMPLETO del año anterior exagera cualquier caída/alza (menos días de
+  // datos este año vs 12 meses el año pasado) — se alinea el corte del año
+  // anterior al mismo día del año en curso (hoy = 27-nov → el año anterior
+  // también corta el 27-nov), para que toda comparación interanual sea
+  // manzanas con manzanas.
+  const isYearComplete = year < now.getFullYear()
+  function alignedDate(y: number, month0: number, day: number): string {
+    const d = new Date(y, month0, day) // local; Date normaliza overflow (ej. día 31 de nov → 1 de dic)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const prevYearEnd = isYearComplete
+    ? `${prevYear}-12-31`
+    : alignedDate(prevYear, now.getMonth(), now.getDate())
+  const prevYearEndExclusive = isYearComplete
+    ? `${prevYear + 1}-01-01`
+    : alignedDate(prevYear, now.getMonth(), now.getDate() + 1)
 
   const [
     { data: txYear },
@@ -139,7 +156,6 @@ export default async function WrappedPage({
   const savingsEnvelopeIds = new Set((savingsEnvelopes ?? []).filter(e => e.counts_as_ahorro === true).map(e => e.id))
   const allTxs = [...(txYear ?? []), ...(txPrevYear ?? [])]
   const yearEndExclusive = `${year + 1}-01-01`
-  const prevYearEndExclusive = `${prevYear + 1}-01-01`
   const flowCurrent = computeFlowWindow(allTxs, envelopeMovements ?? [], savingsEnvelopeIds, new Map(), new Map(), yearStart, yearEndExclusive)
   const flowPrev    = computeFlowWindow(allTxs, envelopeMovements ?? [], savingsEnvelopeIds, new Map(), new Map(), prevYearStart, prevYearEndExclusive)
   const activeIncomeCurrent = flowCurrent.income
@@ -184,6 +200,32 @@ export default async function WrappedPage({
   }
   const totalPatrimonyStart = netWorthStart + realEstateEquityStart
   const totalPatrimonyEnd   = netWorthEnd + realEstateEquityNow
+
+  // ── Momentos clave: liquidaciones/eventos puntuales grandes del año (cash-
+  // outs de cripto, liquidación de fondo, FCL, etc.) — se agrupan por
+  // concepto+vendor para que una liquidación recurrente mes a mes (ej.
+  // "Liquidación Rendimientos Farming Crypto Monedas") se lea como un solo
+  // evento del año en vez de listarse 4 veces.
+  const MONTH_NAMES_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  const settlementTxs = (txYear ?? []).filter(t => t.movement_type === 'income' && t.is_settlement)
+  const settlementGroups = new Map<string, { label: string; total: number; lastDate: string }>()
+  for (const t of settlementTxs) {
+    const vendorPart = t.vendor && t.vendor.toUpperCase() !== 'NA' ? t.vendor : null
+    const label = vendorPart ? `${t.concept ?? 'Liquidación'} · ${vendorPart}` : (t.concept ?? 'Liquidación')
+    const cur = settlementGroups.get(label) ?? { label, total: 0, lastDate: t.date ?? '' }
+    cur.total += Number(t.amount)
+    if (t.date && t.date > cur.lastDate) cur.lastDate = t.date
+    settlementGroups.set(label, cur)
+  }
+  const milestones = [...settlementGroups.values()]
+    .filter(m => m.total >= 1_000_000)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 3)
+    .map(m => ({
+      label: m.label,
+      total: m.total,
+      month: m.lastDate ? MONTH_NAMES_ES[Number(m.lastDate.slice(5, 7)) - 1] : '',
+    }))
 
   // ── Vila NOI del año ─────────────────────────────────────────────────────────
   const rentalIncome  = (txYear ?? []).filter(t => t.category_code === 'RENTAL_INCOME').reduce((s, t) => s + Number(t.amount), 0)
@@ -326,11 +368,13 @@ export default async function WrappedPage({
     <WrappedView
       year={year}
       data={{
+        isYearComplete,
         passiveIncome: { current: passiveIncomeCurrent, previous: passiveIncomePrev },
         income: {
           activeCrc: { current: activeIncomeCurrent, previous: activeIncomePrev },
           savingsRate: { current: savingsRateCurrent, previous: savingsRatePrev },
         },
+        milestones,
         netWorth: { start: netWorthStart, end: netWorthEnd },
         patrimony: { start: totalPatrimonyStart, end: totalPatrimonyEnd, hasRealEstate },
         bestInvestment,
