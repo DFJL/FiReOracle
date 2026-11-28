@@ -109,10 +109,13 @@ export default async function WrappedPage({
   const netWorthStart = nwFirst ? Number(nwFirst.invested_crc) + Number(nwFirst.liquid_crc) : 0
   const netWorthEnd   = nwLast  ? Number(nwLast.invested_crc)  + Number(nwLast.liquid_crc)  : 0
 
-  // ── Real estate equity delta (Vila): valor interpolado + deuda real por
+  // ── Real estate equity (Vila): valor interpolado + deuda real por
   // loan_payments, ya que no hay snapshots de valor de la propiedad ──────────
-  let realEstateEquityDelta: number | null = null
+  let realEstateEquityStart = 0
+  let realEstateEquityNow = 0
+  let hasRealEstate = false
   if (vilaAsset?.loan_id && vilaAsset.purchase_date && vilaAsset.purchase_price_crc) {
+    hasRealEstate = true
     const { data: loanNow } = await admin.from('loans')
       .select('current_balance, currency_code').eq('id', vilaAsset.loan_id).maybeSingle()
     const { data: exchangeRateRow } = await admin.from('transactions')
@@ -131,10 +134,11 @@ export default async function WrappedPage({
     const isUsd = (loanNow?.currency_code ?? 'CRC') === 'USD'
     const loanBalStartCrc = isUsd ? loanBalStartNative * rate : loanBalStartNative
     const loanBalNowCrc   = isUsd ? loanBalNowNative * rate   : loanBalNowNative
-    const equityStart = valueStart - loanBalStartCrc
-    const equityNow    = valueNow - loanBalNowCrc
-    realEstateEquityDelta = equityNow - equityStart
+    realEstateEquityStart = valueStart - loanBalStartCrc
+    realEstateEquityNow   = valueNow - loanBalNowCrc
   }
+  const totalPatrimonyStart = netWorthStart + realEstateEquityStart
+  const totalPatrimonyEnd   = netWorthEnd + realEstateEquityNow
 
   // ── Vila NOI del año ─────────────────────────────────────────────────────────
   const rentalIncome  = (txYear ?? []).filter(t => t.category_code === 'RENTAL_INCOME').reduce((s, t) => s + Number(t.amount), 0)
@@ -157,21 +161,71 @@ export default async function WrappedPage({
   }).filter(s => s.totalUsd !== 0)
   const bestInvestment = summaries.sort((a, b) => b.annPct - a.annPct)[0] ?? null
 
-  // ── Gastos del año: categoría top, gasto más grande, vendor top ─────────────
-  const gastos = (txYear ?? []).filter(t => t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal')
-  const byCategory = new Map<string, number>()
-  const byVendor = new Map<string, number>()
-  let biggest: { concept: string; amount: number } | null = null
-  for (const t of gastos) {
-    const amt = Number(t.amount)
-    if (t.category_code) byCategory.set(t.category_code, (byCategory.get(t.category_code) ?? 0) + amt)
-    if (t.vendor) byVendor.set(t.vendor, (byVendor.get(t.vendor) ?? 0) + amt)
-    if (!biggest || amt > biggest.amount) biggest = { concept: t.concept ?? t.vendor ?? '—', amount: amt }
-  }
-  const topCategory = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0] ?? null
-  const topVendor   = [...byVendor.entries()].sort((a, b) => b[1] - a[1])[0] ?? null
+  // ── Patrones de consumo: categorías excluidas por ser estructuralmente
+  // sesgadas (siempre grandes o siempre presentes, no reflejan cambio de
+  // comportamiento) ────────────────────────────────────────────────────────
+  const STRUCTURAL_CATEGORIES = new Set(['LOAN_PAYMENT', 'CAR_EXPENSES', 'SAVINGS_INVESTMENT'])
+  const DELTA_FLOOR_CRC = 100_000
 
-  // ── Hábitos ───────────────────────────────────────────────────────────────
+  const gastos     = (txYear ?? []).filter(t => t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal')
+  const gastosPrev = (txPrevYear ?? []).filter(t => t.movement_type === 'expense' || t.movement_type === 'cash_withdrawal')
+
+  function sumByCategory(rows: { category_code: string | null; amount: number | null }[]): Map<string, number> {
+    const m = new Map<string, number>()
+    for (const t of rows) {
+      if (!t.category_code || STRUCTURAL_CATEGORIES.has(t.category_code)) continue
+      m.set(t.category_code, (m.get(t.category_code) ?? 0) + Number(t.amount))
+    }
+    return m
+  }
+  const catCurrent = sumByCategory(gastos)
+  const catPrev    = sumByCategory(gastosPrev)
+  const allCats = new Set([...catCurrent.keys(), ...catPrev.keys()])
+  const catDeltas = [...allCats].map(code => {
+    const current = catCurrent.get(code) ?? 0
+    const previous = catPrev.get(code) ?? 0
+    const delta = current - previous
+    const pct = previous > 0 ? (delta / previous) * 100 : null
+    return { code, current, previous, delta, pct }
+  }).filter(d => Math.abs(d.delta) >= DELTA_FLOOR_CRC)
+  const biggestIncrease = catDeltas.filter(d => d.delta > 0).sort((a, b) => b.delta - a.delta)[0] ?? null
+  const biggestDecrease = catDeltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta)[0] ?? null
+
+  // ── Tendencia H1 vs H2: promedio mensual de gasto (excluye estructurales) ──
+  const nonStructuralGastos = gastos.filter(t => t.category_code && !STRUCTURAL_CATEGORIES.has(t.category_code))
+  let h1Total = 0, h2Total = 0
+  for (const t of nonStructuralGastos) {
+    if (!t.date) continue
+    const month = Number(t.date.slice(5, 7))
+    if (month <= 6) h1Total += Number(t.amount)
+    else h2Total += Number(t.amount)
+  }
+  const h1Avg = h1Total / 6
+  const h2Avg = h2Total / 6
+  const trendPct = h1Avg > 0 ? ((h2Avg - h1Avg) / h1Avg) * 100 : null
+
+  // ── Hábito nuevo: categoría sin gasto en H1 que aparece y se repite en H2 ──
+  const monthsByCat = new Map<string, Set<number>>()
+  for (const t of gastos) {
+    if (!t.category_code || STRUCTURAL_CATEGORIES.has(t.category_code) || !t.date) continue
+    const month = Number(t.date.slice(5, 7))
+    const set = monthsByCat.get(t.category_code) ?? new Set<number>()
+    set.add(month)
+    monthsByCat.set(t.category_code, set)
+  }
+  let newHabit: { code: string; total: number; months: number } | null = null
+  for (const [code, months] of monthsByCat) {
+    const h1Months = [...months].filter(m => m <= 6).length
+    const h2Months = [...months].filter(m => m > 6).length
+    if (h1Months === 0 && h2Months >= 2) {
+      const total = gastos.filter(t => t.category_code === code).reduce((s, t) => s + Number(t.amount), 0)
+      if (total >= DELTA_FLOOR_CRC && (!newHabit || total > newHabit.total)) {
+        newHabit = { code, total, months: h2Months }
+      }
+    }
+  }
+
+  // ── Hábitos: distribución día de semana, diversidad de vendors ─────────────
   const totalTx = (txYear ?? []).length
   const selfLoansCount = selfLoans?.length ?? 0
   const selfLoansPaid  = (selfLoans ?? []).filter(l => l.status === 'paid').length
@@ -186,21 +240,36 @@ export default async function WrappedPage({
     .filter(i => thisYearAllocIds.has(i.allocation_id))
     .reduce((s, i) => s + Number(i.amount), 0)
 
+  const dayOfWeekTotals = [0, 0, 0, 0, 0, 0, 0] // dom..sab
+  for (const t of gastos) {
+    if (!t.date) continue
+    const d = new Date(t.date + 'T12:00:00')
+    dayOfWeekTotals[d.getDay()] += Number(t.amount)
+  }
+  const vendorSet = new Set((gastos ?? []).filter(t => t.vendor).map(t => t.vendor))
+  const vendorDiversity = vendorSet.size
+
   return (
     <WrappedView
       year={year}
       data={{
         passiveIncome: { current: passiveIncomeCurrent, previous: passiveIncomePrev },
         netWorth: { start: netWorthStart, end: netWorthEnd },
-        realEstateEquityDelta,
+        patrimony: { start: totalPatrimonyStart, end: totalPatrimonyEnd, hasRealEstate },
         bestInvestment,
         vila: vilaAsset ? { noiCrc: vilaNoiCrc } : null,
-        spending: {
-          topCategory: topCategory ? { code: topCategory[0], total: topCategory[1] } : null,
-          topVendor: topVendor ? { name: topVendor[0], total: topVendor[1] } : null,
-          biggest,
+        patterns: {
+          biggestIncrease,
+          biggestDecrease,
+          trendPct,
+          h1Avg,
+          h2Avg,
+          newHabit,
         },
-        habits: { totalTx, selfLoansCount, selfLoansPaid, cryptoProtocols, aguinaldoItemCount, aguinaldoItemTotal },
+        habits: {
+          totalTx, selfLoansCount, selfLoansPaid, cryptoProtocols, aguinaldoItemCount, aguinaldoItemTotal,
+          dayOfWeekTotals, vendorDiversity,
+        },
       }}
     />
   )
