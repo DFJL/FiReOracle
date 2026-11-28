@@ -5,17 +5,23 @@ import { useRouter } from 'next/navigation'
 
 export type WrappedData = {
   passiveIncome: { current: number; previous: number }
+  income: {
+    activeCrc: { current: number; previous: number }
+    savingsRate: { current: number | null; previous: number | null }
+  }
   netWorth: { start: number; end: number }
   patrimony: { start: number; end: number; hasRealEstate: boolean }
   bestInvestment: { name: string; annPct: number; totalUsd: number } | null
   vila: { noiCrc: number } | null
   patterns: {
-    biggestIncrease: { code: string; current: number; previous: number; delta: number; pct: number | null } | null
-    biggestDecrease: { code: string; current: number; previous: number; delta: number; pct: number | null } | null
+    // label is already a human Spanish category name (getGroupLabel) — no
+    // further translation needed before display.
+    biggestIncrease: { label: string; current: number; previous: number; delta: number; pct: number | null } | null
+    biggestDecrease: { label: string; current: number; previous: number; delta: number; pct: number | null } | null
     trendPct: number | null
     h1Avg: number
     h2Avg: number
-    newHabit: { code: string; total: number; months: number } | null
+    newHabit: { label: string; monthlyAvg: number; months: number } | null
   }
   habits: {
     totalTx: number
@@ -44,14 +50,6 @@ function fmtUSD(n: number) {
 function pct(a: number, b: number) {
   if (!b) return null
   return ((a - b) / Math.abs(b)) * 100
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  LOAN_PAYMENT: 'Pagos de préstamo', CAR_EXPENSES: 'Gastos de carro', FOOD_SUPER: 'Supermercado',
-  FOOD_OUT: 'Comer afuera', HEALTH_MEDS: 'Salud', SERVICES: 'Servicios', PERSONAL_CARE: 'Cuidado personal',
-}
-function categoryLabel(code: string) {
-  return CATEGORY_LABELS[code] ?? code.replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase())
 }
 
 const DOW_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
@@ -165,6 +163,40 @@ function buildSlides(year: number, d: WrappedData): Slide[] {
     ),
   })
 
+  const activeIncomeGrowth = pct(d.income.activeCrc.current, d.income.activeCrc.previous)
+  const savingsRateNow = d.income.savingsRate.current
+  const savingsRatePrevVal = d.income.savingsRate.previous
+  const savingsRatePtDelta = savingsRateNow !== null && savingsRatePrevVal !== null ? (savingsRateNow - savingsRatePrevVal) * 100 : null
+  slides.push({
+    key: 'income', bg: 'from-teal-950 to-[#0d120d]', accent: '#2dd4bf', eyebrow: 'Ingreso activo',
+    render: () => (
+      <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-6">
+        <p className="text-[11px] font-black tracking-[0.3em] uppercase text-teal-400/70">Ingreso activo este {year}</p>
+        <p className="text-5xl font-black text-white tabular-nums">
+          <CountUp value={d.income.activeCrc.current} format={fmtCRC} />
+        </p>
+        {activeIncomeGrowth !== null && (
+          <p className={`text-lg font-bold ${activeIncomeGrowth >= 0 ? 'text-teal-400' : 'text-amber-400'}`}>
+            {activeIncomeGrowth >= 0 ? '+' : ''}{activeIncomeGrowth.toFixed(0)}% vs {year - 1}
+          </p>
+        )}
+        {savingsRateNow !== null && (
+          <div className="pt-2">
+            <p className="text-3xl font-black text-white tabular-nums">
+              <CountUp value={savingsRateNow * 100} format={n => `${n.toFixed(0)}%`} />
+            </p>
+            <p className="text-[10px] text-zinc-600 uppercase tracking-wider">tasa de ahorro</p>
+            {savingsRatePtDelta !== null && (
+              <p className={`text-xs font-bold mt-0.5 ${savingsRatePtDelta >= 0 ? 'text-teal-400' : 'text-amber-400'}`}>
+                {savingsRatePtDelta >= 0 ? '+' : ''}{savingsRatePtDelta.toFixed(0)} pp vs {year - 1}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    ),
+  })
+
   const patrimonyChange = d.patrimony.end - d.patrimony.start
   const patrimonyPct = pct(d.patrimony.end, d.patrimony.start)
   slides.push({
@@ -235,18 +267,21 @@ function buildSlides(year: number, d: WrappedData): Slide[] {
       key: 'patterns', bg: 'from-rose-950 to-[#0d120d]', accent: '#fb7185', eyebrow: 'Patrones',
       render: () => (
         <div className="flex flex-col items-center justify-center h-full text-center gap-5 px-6">
-          <p className="text-[11px] font-black tracking-[0.3em] uppercase text-rose-400/70">Dónde cambió tu consumo</p>
+          <div>
+            <p className="text-[11px] font-black tracking-[0.3em] uppercase text-rose-400/70">Dónde cambió tu consumo</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">promedio mensual · {year - 1} vs {year}</p>
+          </div>
 
           {biggestIncrease && (
             <div className="w-full max-w-[260px]">
               <p className="text-xs font-bold text-rose-400 uppercase tracking-wide">⚠ Subió más</p>
-              <p className="text-lg font-black text-white">{categoryLabel(biggestIncrease.code)}</p>
+              <p className="text-lg font-black text-white">{biggestIncrease.label}</p>
               <div className="flex flex-col gap-1.5 mt-2">
                 <AnimatedBar label={`${year - 1}`} value={biggestIncrease.previous} max={maxVal} color="#52525b" />
                 <AnimatedBar label={`${year}`} value={biggestIncrease.current} max={maxVal} color="#fb7185" />
               </div>
               <p className="text-sm text-rose-300 font-bold mt-1.5">
-                +{fmtCRC(biggestIncrease.delta)}{biggestIncrease.pct !== null ? ` (+${biggestIncrease.pct.toFixed(0)}%)` : ''}
+                +{fmtCRC(biggestIncrease.delta)}/mes{biggestIncrease.pct !== null ? ` (+${biggestIncrease.pct.toFixed(0)}%)` : ''}
               </p>
             </div>
           )}
@@ -254,20 +289,20 @@ function buildSlides(year: number, d: WrappedData): Slide[] {
           {biggestDecrease && (
             <div className="w-full max-w-[260px]">
               <p className="text-xs font-bold text-emerald-400 uppercase tracking-wide">✓ Bajó más</p>
-              <p className="text-lg font-black text-white">{categoryLabel(biggestDecrease.code)}</p>
+              <p className="text-lg font-black text-white">{biggestDecrease.label}</p>
               <div className="flex flex-col gap-1.5 mt-2">
                 <AnimatedBar label={`${year - 1}`} value={biggestDecrease.previous} max={maxVal} color="#52525b" />
                 <AnimatedBar label={`${year}`} value={biggestDecrease.current} max={maxVal} color="#34d399" />
               </div>
               <p className="text-sm text-emerald-300 font-bold mt-1.5">
-                {fmtCRC(biggestDecrease.delta)}{biggestDecrease.pct !== null ? ` (${biggestDecrease.pct.toFixed(0)}%)` : ''}
+                {fmtCRC(biggestDecrease.delta)}/mes{biggestDecrease.pct !== null ? ` (${biggestDecrease.pct.toFixed(0)}%)` : ''}
               </p>
             </div>
           )}
 
           {newHabit && (
             <p className="text-xs text-amber-300 max-w-[240px]">
-              👀 {categoryLabel(newHabit.code)} no aparecía en la primera mitad del año y ya se repitió {newHabit.months} meses — vale la pena vigilarlo.
+              👀 {newHabit.label} no aparecía en la primera mitad del año y ya se repitió {newHabit.months} meses (~{fmtCRC(newHabit.monthlyAvg)}/mes desde que apareció) — vale la pena vigilarlo.
             </p>
           )}
 
